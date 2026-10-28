@@ -1,0 +1,106 @@
+# youtube-premium stack: skeleton (issue #1, C0).
+#
+# Proxmox -> Debian 12 VM -> Docker Compose. Docker runs in a full VM, never in
+# an unprivileged LXC, because the killswitch depends on qbittorrent sharing
+# gluetun's network namespace (network_mode: service:gluetun) and on gluetun
+# getting NET_ADMIN plus /dev/net/tun.
+#
+# Every value comes from .env (template: .env.example). Required values use
+# ${VAR:?message}, so a missing secret stops `docker compose` instead of
+# starting a half-configured VPN.
+#
+# Services marked `profiles: [planned]` are placeholders for later issues and
+# do not start with a plain `docker compose up -d`.
+
+name: youtube-premium
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-media-env: &media-env
+  TZ: ${TZ:?TZ must be set in .env}
+  PUID: ${PUID:?PUID must be set in .env}
+  PGID: ${PGID:?PGID must be set in .env}
+  UMASK: ${UMASK:?UMASK must be set in .env}
+
+services:
+  # VPN tunnel and firewall killswitch. Refined in #2.
+  gluetun:
+    <<: *service-defaults
+    image: qmcgaw/gluetun:${GLUETUN_TAG:?GLUETUN_TAG must be set in .env}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: ${TZ:?TZ must be set in .env}
+      VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:?VPN_SERVICE_PROVIDER must be set in .env}
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:?WIREGUARD_PRIVATE_KEY must be set in .env}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:?WIREGUARD_ADDRESSES must be set in .env}
+      SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-}
+      FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:?LAN_SUBNET must be set in .env}
+    ports:
+      # qBittorrent's Web UI lives in gluetun's network namespace, so its
+      # port is published here. Bound to localhost until the reverse proxy
+      # (#9) exists; never 0.0.0.0 without a login in front.
+      - "${QBIT_WEBUI_BIND:?QBIT_WEBUI_BIND must be set in .env}:${QBIT_WEBUI_PORT:?QBIT_WEBUI_PORT must be set in .env}:8080"
+
+  # Torrent client with no network of its own. Refined in #3.
+  qbittorrent:
+    <<: *service-defaults
+    image: lscr.io/linuxserver/qbittorrent:${QBITTORRENT_TAG:?QBITTORRENT_TAG must be set in .env}
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    environment:
+      <<: *media-env
+      WEBUI_PORT: "8080"
+    volumes:
+      - ./config/qbittorrent:/config
+      - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
+
+  # FastAPI app. Placeholder until #8 adds the Dockerfile.
+  app:
+    <<: *service-defaults
+    profiles: [planned]
+    image: youtube-premium/app:dev
+    environment:
+      <<: *media-env
+    volumes:
+      - ./config/app:/config
+      - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
+
+  # Second safety layer: pauses all torrents when the VPN drops. Placeholder until #18.
+  watchdog:
+    <<: *service-defaults
+    profiles: [planned]
+    image: youtube-premium/watchdog:dev
+    environment:
+      TZ: ${TZ:?TZ must be set in .env}
+
+  # Reverse proxy with login, LAN only. Placeholder until #9.
+  proxy:
+    <<: *service-defaults
+    profiles: [planned]
+    image: caddy:${CADDY_TAG:?CADDY_TAG must be set in .env}
+    volumes:
+      - ./config/caddy:/data
+
+  # Jellyfin already runs elsewhere. This entry only matters if it is ever
+  # moved into this stack, so it sits behind its own profile.
+  jellyfin:
+    <<: *service-defaults
+    profiles: [jellyfin]
+    image: jellyfin/jellyfin:${JELLYFIN_TAG:?JELLYFIN_TAG must be set in .env}
+    user: "${PUID:?PUID must be set in .env}:${PGID:?PGID must be set in .env}"
+    volumes:
+      - ./config/jellyfin:/config
+      - ${DATA_ROOT:?DATA_ROOT must be set in .env}/media:/data/media:ro

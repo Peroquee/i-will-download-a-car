@@ -1,0 +1,4 @@
+# What the test jobs need. Lint tools are in requirements-lint.txt.
+pytest==8.4.2
+pytest-timeout==2.4.0
+PyYAML==6.0.3
