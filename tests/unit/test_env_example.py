@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.compose import compose_variables, load_compose, parse_env_file
+from tests.helpers.compose import all_compose_variables, parse_env_file
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_EXAMPLE = parse_env_file(REPO_ROOT / ".env.example")
-REFERENCED = compose_variables(load_compose(REPO_ROOT / "docker-compose.yml"))
+REFERENCED = all_compose_variables(REPO_ROOT / "docker-compose.yml")
 
 
 def test_env_example_parses_cleanly():
@@ -39,9 +39,19 @@ def test_required_variables_have_example_values(name):
 
 
 @pytest.mark.security
-@pytest.mark.parametrize("name", ["WIREGUARD_PRIVATE_KEY", "VPN_SERVICE_PROVIDER"])
+@pytest.mark.parametrize("name", ["OPENVPN_USER", "OPENVPN_PASSWORD", "WIREGUARD_PRIVATE_KEY"])
 def test_secrets_are_placeholders(name):
     assert ENV_EXAMPLE[name] == "changeme"
+
+
+def test_vpn_defaults_match_expressvpn():
+    # ExpressVPN: OpenVPN only. WireGuard would not work with this provider.
+    assert ENV_EXAMPLE["VPN_SERVICE_PROVIDER"] == "expressvpn"
+    assert ENV_EXAMPLE["VPN_TYPE"] == "openvpn"
+
+
+def test_gluetun_tag_is_pinned_to_an_explicit_version():
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", ENV_EXAMPLE["GLUETUN_TAG"])
 
 
 @pytest.mark.security
@@ -54,6 +64,10 @@ def test_no_value_looks_like_a_real_wireguard_key():
 @pytest.mark.security
 def test_qbittorrent_ui_defaults_to_localhost():
     assert ENV_EXAMPLE["QBIT_WEBUI_BIND"] == "127.0.0.1"
+
+
+def test_lan_subnet_is_the_owners_lan():
+    assert ENV_EXAMPLE["LAN_SUBNET"] == "192.168.178.0/24"
 
 
 def test_lan_subnet_is_a_private_network():

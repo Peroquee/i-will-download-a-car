@@ -79,3 +79,44 @@ def rendered_config(env_file: Path = ENV_EXAMPLE, profiles: tuple[str, ...] = ()
     if result.returncode != 0:
         raise RuntimeError(f"docker compose config failed:\n{result.stderr}")
     return json.loads(result.stdout)
+
+
+def normalized_config(config: dict[str, Any]) -> dict[str, Any]:
+    """The fields of a rendered config that we own, in a form stable across Compose versions.
+
+    Used by the regression snapshot and by the integration test that writes the
+    actual config to reports/ for review.
+    """
+
+    def path(value: str) -> str:
+        return value.replace(str(REPO_ROOT), "<repo>")
+
+    def device(d: Any) -> str:
+        return d if isinstance(d, str) else f"{d['source']}:{d['target']}"
+
+    out: dict[str, Any] = {}
+    for name, svc in sorted(config["services"].items()):
+        out[name] = {
+            "image": svc.get("image"),
+            "restart": svc.get("restart"),
+            "profiles": svc.get("profiles", []),
+            "network_mode": svc.get("network_mode"),
+            "user": svc.get("user"),
+            "cap_add": sorted(svc.get("cap_add", [])),
+            "devices": sorted(device(d) for d in svc.get("devices", [])),
+            "ports": sorted(
+                f"{p.get('host_ip', '')}:{p.get('published')}:{p['target']}/{p.get('protocol')}"
+                for p in svc.get("ports", [])
+            ),
+            "environment": dict(sorted((svc.get("environment") or {}).items())),
+            "volumes": sorted(
+                f"{path(v['source'])}:{v['target']}{':ro' if v.get('read_only') else ''}"
+                for v in svc.get("volumes", [])
+            ),
+            "depends_on": {
+                dep: spec.get("condition") for dep, spec in (svc.get("depends_on") or {}).items()
+            },
+            "healthcheck": svc.get("healthcheck"),
+            "logging": svc.get("logging"),
+        }
+    return out

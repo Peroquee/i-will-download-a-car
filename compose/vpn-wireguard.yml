@@ -1,0 +1,8 @@
+# gluetun settings for VPN_TYPE=wireguard (providers with WireGuard; not ExpressVPN).
+# Merged into the gluetun service by `extends` in docker-compose.yml.
+services:
+  gluetun:
+    environment:
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:?WIREGUARD_PRIVATE_KEY must be set in .env}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:?WIREGUARD_ADDRESSES must be set in .env}
