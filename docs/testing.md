@@ -18,6 +18,16 @@ Cross-cutting markers, combinable with any level:
 - `compose`, `docker`, `tun`, `network`: required capabilities. Missing ones **skip with a reason** locally and **fail** in CI (`REQUIRE_CAPABILITIES=1`), so a broken runner can't produce a green pipeline.
 - `slow`: more than ~10 s.
 
+### Tests that need real credentials (C1)
+
+`tests/system/test_c1_qbittorrent_login.py` starts a real qBittorrent with a seeded login
+(needs Docker and the image, no VPN). `tests/system/test_c1_tunnel.py` starts the real
+stack and checks that gluetun is healthy and qBittorrent leaves through the tunnel; it
+needs ExpressVPN credentials and runs only with `YTP_VPN_ENV_FILE=/path/to/.env`, e.g.
+on the media VM: `YTP_VPN_ENV_FILE=.env make test-system`. Without that variable it
+skips, even under `REQUIRE_CAPABILITIES`. It uses a throwaway project name and data
+folder; it does not touch the running stack or the media volume.
+
 ## Rules
 
 1. **Per feature, per issue.** An issue is done when its acceptance criteria are covered by tests: unit for logic and config shape, integration for every boundary it touches, system for its observable behaviour, smoke if it adds something that must be alive, and a regression test for every bug found while building it.

@@ -73,15 +73,88 @@ Jellyfin can all work on them. Use the same PUID/PGID Jellyfin reads as.
 
 ## 5. docker-compose.yml skeleton and .env with VPN credentials
 
+Create `.env` on the VM (never on your PC, never in chat, never on a command line):
+
 ```bash
-cp .env.example .env && chmod 600 .env
-$EDITOR .env      # VPN provider, WireGuard key and address, LAN subnet, PUID/PGID
-docker compose config --quiet   # fails with a clear message if anything required is missing
+cd /opt/youtube-premium
+cp .env.example .env     # copy the template
+chmod 600 .env           # only your user may read it, it will hold VPN credentials
+nano .env                # edit: Ctrl+O saves, Ctrl+X quits
+docker compose config --quiet   # silent = fine; otherwise it names the missing value
 ```
+
+What to fill in (the template explains each line):
+
+- `PUID`, `PGID`, `UMASK`, `DATA_ROOT`: from step 4.
+- `LAN_SUBNET`: your LAN, already `192.168.178.0/24`. Gluetun lets this network
+  through its firewall so the Web UI answers; everything else must use the tunnel.
+- `VPN_SERVICE_PROVIDER=expressvpn` and `VPN_TYPE=openvpn`: leave as they are.
+  ExpressVPN works with OpenVPN only (not WireGuard, not Lightway).
+- `OPENVPN_USER` / `OPENVPN_PASSWORD`: **not** your ExpressVPN e-mail and password.
+  Log in to the ExpressVPN website, open *Set up on more devices* > *Manual
+  configuration* > *OpenVPN*, and copy the user name and password shown there.
+- `VPN_SERVER_COUNTRIES` (optional): e.g. `Germany`. Names must match gluetun's
+  server list; leave empty for any server.
+- The `WIREGUARD_*` lines are only read with `VPN_TYPE=wireguard`; with OpenVPN they
+  stay as `changeme` and nothing complains. The reverse holds too: with `wireguard`
+  the `OPENVPN_*` lines are ignored. The values of the **chosen** type are required, so
+  `docker compose` refuses to start with a clear message if one is missing.
 
 `.env` is gitignored; CI scans history for leaked secrets (`lint:secrets`).
 Services for later issues (`app`, `watchdog`, `proxy`) are behind the
 `planned` profile, so `docker compose up -d` only starts what exists.
+
+**ExpressVPN has no port forwarding.** Torrents still download, but nobody can
+connect *to* you through the VPN, so you get fewer peers and slower speeds on
+poorly seeded torrents. There is nothing to configure for it; do not add
+`VPN_PORT_FORWARDING`.
+
+### How the VPN container works (issue #2)
+
+`gluetun` gets `NET_ADMIN` and `/dev/net/tun`, builds the tunnel, and acts as a
+firewall: traffic that is not inside the tunnel is dropped, except to
+`LAN_SUBNET`. It has a Docker health check of its own that is healthy only while
+the tunnel works. `restart: unless-stopped` plus Docker starting on boot brings
+the tunnel up after a host reboot. The image is pinned (`GLUETUN_TAG`, currently
+`v3.41.3`); updates are deliberate (#30).
+
+```bash
+docker compose up -d gluetun
+docker compose ps                    # STATUS shows "healthy" after about a minute
+docker compose logs gluetun | tail   # "Public IP address is ..." is the VPN address
+```
+
+## 5b. qBittorrent inside the tunnel, with a real login (issue #3)
+
+`qbittorrent` uses `network_mode: service:gluetun`: it has no network of its own,
+so it can only reach the internet through the tunnel, and **all** ports are
+published on `gluetun` (the Web UI on `QBIT_WEBUI_BIND:QBIT_WEBUI_PORT`, localhost
+by default until the reverse proxy exists). It starts only when gluetun is healthy.
+
+The linuxserver image would start with a temporary random password. Replace that
+with your own **before the first start**; the script stores only a hash:
+
+```bash
+docker compose stop qbittorrent 2>/dev/null || true   # qBittorrent rewrites its config on exit
+scripts/qbittorrent/seed_config.py --user admin       # asks for the password twice (10+ characters)
+docker compose up -d
+```
+
+It writes `config/qbittorrent/qBittorrent/qBittorrent.conf` (mode 600, gitignored) with
+the user, the PBKDF2 hash, `tun0` as the network interface (an extra guard: with
+no tunnel there is no `tun0`, so nothing connects), and the login required from
+every client. Re-run it any time to change the password. `--dry-run` shows what it
+would set.
+
+**Verify:**
+
+- `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/v2/app/version` prints `403`
+  (the API refuses anyone who is not logged in).
+- From your PC, open an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 <user>@<vm>`), browse to
+  `http://127.0.0.1:8080` and log in with the user and password you just chose.
+- `docker compose logs qbittorrent | grep -i "temporary password"` finds nothing.
+
+(Never put the password on a command line: it ends up in the shell history.)
 
 ## 6. restart: unless-stopped on all services
 

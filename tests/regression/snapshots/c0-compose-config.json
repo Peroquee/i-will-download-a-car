@@ -9,6 +9,7 @@
       "TZ": "Europe/Berlin",
       "UMASK": "002"
     },
+    "healthcheck": null,
     "image": "youtube-premium/app:dev",
     "logging": {
       "driver": "json-file",
@@ -38,15 +39,27 @@
       "/dev/net/tun:/dev/net/tun"
     ],
     "environment": {
-      "FIREWALL_OUTBOUND_SUBNETS": "192.168.1.0/24",
+      "FIREWALL_OUTBOUND_SUBNETS": "192.168.178.0/24",
+      "OPENVPN_PASSWORD": "changeme",
+      "OPENVPN_USER": "changeme",
+      "SERVER_CITIES": "",
       "SERVER_COUNTRIES": "",
       "TZ": "Europe/Berlin",
-      "VPN_SERVICE_PROVIDER": "changeme",
-      "VPN_TYPE": "wireguard",
-      "WIREGUARD_ADDRESSES": "10.0.0.2/32",
-      "WIREGUARD_PRIVATE_KEY": "changeme"
+      "VPN_SERVICE_PROVIDER": "expressvpn",
+      "VPN_TYPE": "openvpn"
     },
-    "image": "qmcgaw/gluetun:v3",
+    "healthcheck": {
+      "interval": "10s",
+      "retries": 3,
+      "start_period": "1m0s",
+      "test": [
+        "CMD",
+        "/gluetun-entrypoint",
+        "healthcheck"
+      ],
+      "timeout": "5s"
+    },
+    "image": "qmcgaw/gluetun:v3.41.3",
     "logging": {
       "driver": "json-file",
       "options": {
@@ -68,6 +81,7 @@
     "depends_on": {},
     "devices": [],
     "environment": {},
+    "healthcheck": null,
     "image": "jellyfin/jellyfin:latest",
     "logging": {
       "driver": "json-file",
@@ -93,6 +107,7 @@
     "depends_on": {},
     "devices": [],
     "environment": {},
+    "healthcheck": null,
     "image": "caddy:2",
     "logging": {
       "driver": "json-file",
@@ -125,6 +140,7 @@
       "UMASK": "002",
       "WEBUI_PORT": "8080"
     },
+    "healthcheck": null,
     "image": "lscr.io/linuxserver/qbittorrent:latest",
     "logging": {
       "driver": "json-file",
@@ -150,6 +166,7 @@
     "environment": {
       "TZ": "Europe/Berlin"
     },
+    "healthcheck": null,
     "image": "youtube-premium/watchdog:dev",
     "logging": {
       "driver": "json-file",
