@@ -9,12 +9,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from tests.helpers.compose import environment_as_dict, load_compose, services
-from tests.helpers.compose_cli import REPO_ROOT, rendered_config
+from tests.helpers.compose import load_compose, services
+from tests.helpers.compose_cli import REPO_ROOT, normalized_config, rendered_config
 from tests.helpers.shell import StubBin, isolated_bin, run_script
 
 CHECK_HOST = REPO_ROOT / "scripts" / "host" / "check-host.sh"
@@ -60,7 +59,6 @@ def test_c0_gluetun_keeps_tunnel_capabilities():
     gluetun = services(load_compose(REPO_ROOT / "docker-compose.yml"))["gluetun"]
     assert "NET_ADMIN" in gluetun["cap_add"]
     assert "/dev/net/tun:/dev/net/tun" in gluetun["devices"]
-    assert environment_as_dict(gluetun)["VPN_TYPE"] == "wireguard"
 
 
 # --- decision: safe host scripts ---
@@ -101,42 +99,6 @@ def test_c0_bootstrap_never_formats_a_disk_that_has_a_filesystem(tmp_path):
 # --- golden config ---
 
 
-def _normalize(config: dict[str, Any]) -> dict[str, Any]:
-    """Keep the fields we own, in a form stable across Compose versions."""
-
-    def path(value: str) -> str:
-        return value.replace(str(REPO_ROOT), "<repo>")
-
-    def device(d: Any) -> str:
-        return d if isinstance(d, str) else f"{d['source']}:{d['target']}"
-
-    out: dict[str, Any] = {}
-    for name, svc in sorted(config["services"].items()):
-        out[name] = {
-            "image": svc.get("image"),
-            "restart": svc.get("restart"),
-            "profiles": svc.get("profiles", []),
-            "network_mode": svc.get("network_mode"),
-            "user": svc.get("user"),
-            "cap_add": sorted(svc.get("cap_add", [])),
-            "devices": sorted(device(d) for d in svc.get("devices", [])),
-            "ports": sorted(
-                f"{p.get('host_ip', '')}:{p.get('published')}:{p['target']}/{p.get('protocol')}"
-                for p in svc.get("ports", [])
-            ),
-            "environment": dict(sorted((svc.get("environment") or {}).items())),
-            "volumes": sorted(
-                f"{path(v['source'])}:{v['target']}{':ro' if v.get('read_only') else ''}"
-                for v in svc.get("volumes", [])
-            ),
-            "depends_on": {
-                dep: spec.get("condition") for dep, spec in (svc.get("depends_on") or {}).items()
-            },
-            "logging": svc.get("logging"),
-        }
-    return out
-
-
 @pytest.mark.compose
 def test_c0_rendered_compose_config_matches_snapshot():
     """Any change to what Compose would run must be deliberate.
@@ -145,7 +107,7 @@ def test_c0_rendered_compose_config_matches_snapshot():
         UPDATE_SNAPSHOTS=1 pytest tests/regression -k snapshot
     and review the snapshot diff in the merge request.
     """
-    actual = _normalize(rendered_config(profiles=("*",)))
+    actual = normalized_config(rendered_config(profiles=("*",)))
     if os.environ.get("UPDATE_SNAPSHOTS") == "1":
         SNAPSHOT.parent.mkdir(exist_ok=True)
         SNAPSHOT.write_text(json.dumps(actual, indent=2, sort_keys=True) + "\n")

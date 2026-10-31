@@ -21,6 +21,22 @@ def load_compose(path: Path) -> dict[str, Any]:
     return data
 
 
+def vpn_variant_files(compose_path: Path) -> dict[str, Path]:
+    """The per-VPN-type files gluetun `extends`: {"openvpn": .../compose/vpn-openvpn.yml, ...}."""
+    folder = compose_path.parent / "compose"
+    return {f.stem.removeprefix("vpn-"): f for f in sorted(folder.glob("vpn-*.yml"))}
+
+
+def gluetun_environment(compose_path: Path, vpn_type: str) -> dict[str, Any]:
+    """gluetun's environment as Compose merges it: the variant file under the base file."""
+    variant = load_compose(vpn_variant_files(compose_path)[vpn_type])
+    base = load_compose(compose_path)
+    return {
+        **environment_as_dict(services(variant)["gluetun"]),
+        **environment_as_dict(services(base)["gluetun"]),
+    }
+
+
 def services(compose: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return compose["services"]
 
@@ -57,6 +73,16 @@ def iter_strings(node: Any):
 def compose_variables(compose: dict[str, Any]) -> dict[str, str | None]:
     """Variables Compose will interpolate, read from values only (not comments)."""
     return referenced_variables("\n".join(iter_strings(compose)))
+
+
+def all_compose_variables(compose_path: Path) -> dict[str, str | None]:
+    """compose_variables of the main file plus every file it extends (compose/vpn-*.yml)."""
+    found = compose_variables(load_compose(compose_path))
+    for variant in vpn_variant_files(compose_path).values():
+        for name, op in compose_variables(load_compose(variant)).items():
+            if name not in found or (op and "?" in op):
+                found[name] = op
+    return found
 
 
 def blank_interpolations(value: str, replacement: str = "X") -> str:

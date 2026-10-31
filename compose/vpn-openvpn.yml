@@ -1,0 +1,10 @@
+# gluetun settings for VPN_TYPE=openvpn (the default; the only type ExpressVPN supports).
+# Merged into the gluetun service by `extends` in docker-compose.yml.
+services:
+  gluetun:
+    environment:
+      VPN_TYPE: openvpn
+      # ExpressVPN: the "manual configuration" credentials from the account page,
+      # not the account e-mail and password.
+      OPENVPN_USER: ${OPENVPN_USER:?OPENVPN_USER must be set in .env}
+      OPENVPN_PASSWORD: ${OPENVPN_PASSWORD:?OPENVPN_PASSWORD must be set in .env}
