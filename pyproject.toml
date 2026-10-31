@@ -1,0 +1,33 @@
+[project]
+name = "youtube-premium"
+version = "0.0.0"
+description = "Self-hosted downloader that files media into Jellyfin"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
+markers = [
+  # Test level. Assigned automatically from the folder (tests/<level>/), see tests/conftest.py.
+  "unit: fast, isolated, no Docker, no network, no root",
+  "integration: two real components together (e.g. our files + the docker compose CLI)",
+  "smoke: minimal is-it-alive checks, run first on any real host",
+  "system: whole behaviour on a real Docker host, black-box",
+  "regression: pins a fixed bug or a hard-won decision; never deleted",
+  # Capabilities. Tests needing these are skipped, with a reason, when unavailable.
+  "compose: needs the docker compose CLI (no daemon)",
+  "docker: needs a reachable Docker daemon",
+  "tun: needs /dev/net/tun on the Docker host",
+  "network: needs outbound internet",
+  "slow: takes more than ~10 s",
+  # Cross-cutting concerns.
+  "security: guards a ground rule (VPN-only traffic, LAN-only, no secrets in git)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "PT", "SIM", "RUF"]

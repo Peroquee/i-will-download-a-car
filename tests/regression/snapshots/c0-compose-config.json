@@ -1,0 +1,170 @@
+{
+  "app": {
+    "cap_add": [],
+    "depends_on": {},
+    "devices": [],
+    "environment": {
+      "PGID": "1000",
+      "PUID": "1000",
+      "TZ": "Europe/Berlin",
+      "UMASK": "002"
+    },
+    "image": "youtube-premium/app:dev",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "network_mode": null,
+    "ports": [],
+    "profiles": [
+      "planned"
+    ],
+    "restart": "unless-stopped",
+    "user": null,
+    "volumes": [
+      "/data:/data",
+      "<repo>/config/app:/config"
+    ]
+  },
+  "gluetun": {
+    "cap_add": [
+      "NET_ADMIN"
+    ],
+    "depends_on": {},
+    "devices": [
+      "/dev/net/tun:/dev/net/tun"
+    ],
+    "environment": {
+      "FIREWALL_OUTBOUND_SUBNETS": "192.168.1.0/24",
+      "SERVER_COUNTRIES": "",
+      "TZ": "Europe/Berlin",
+      "VPN_SERVICE_PROVIDER": "changeme",
+      "VPN_TYPE": "wireguard",
+      "WIREGUARD_ADDRESSES": "10.0.0.2/32",
+      "WIREGUARD_PRIVATE_KEY": "changeme"
+    },
+    "image": "qmcgaw/gluetun:v3",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "network_mode": null,
+    "ports": [
+      "127.0.0.1:8080:8080/tcp"
+    ],
+    "profiles": [],
+    "restart": "unless-stopped",
+    "user": null,
+    "volumes": []
+  },
+  "jellyfin": {
+    "cap_add": [],
+    "depends_on": {},
+    "devices": [],
+    "environment": {},
+    "image": "jellyfin/jellyfin:latest",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "network_mode": null,
+    "ports": [],
+    "profiles": [
+      "jellyfin"
+    ],
+    "restart": "unless-stopped",
+    "user": "1000:1000",
+    "volumes": [
+      "/data/media:/data/media:ro",
+      "<repo>/config/jellyfin:/config"
+    ]
+  },
+  "proxy": {
+    "cap_add": [],
+    "depends_on": {},
+    "devices": [],
+    "environment": {},
+    "image": "caddy:2",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "network_mode": null,
+    "ports": [],
+    "profiles": [
+      "planned"
+    ],
+    "restart": "unless-stopped",
+    "user": null,
+    "volumes": [
+      "<repo>/config/caddy:/data"
+    ]
+  },
+  "qbittorrent": {
+    "cap_add": [],
+    "depends_on": {
+      "gluetun": "service_healthy"
+    },
+    "devices": [],
+    "environment": {
+      "PGID": "1000",
+      "PUID": "1000",
+      "TZ": "Europe/Berlin",
+      "UMASK": "002",
+      "WEBUI_PORT": "8080"
+    },
+    "image": "lscr.io/linuxserver/qbittorrent:latest",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "network_mode": "service:gluetun",
+    "ports": [],
+    "profiles": [],
+    "restart": "unless-stopped",
+    "user": null,
+    "volumes": [
+      "/data:/data",
+      "<repo>/config/qbittorrent:/config"
+    ]
+  },
+  "watchdog": {
+    "cap_add": [],
+    "depends_on": {},
+    "devices": [],
+    "environment": {
+      "TZ": "Europe/Berlin"
+    },
+    "image": "youtube-premium/watchdog:dev",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "3",
+        "max-size": "10m"
+      }
+    },
+    "network_mode": null,
+    "ports": [],
+    "profiles": [
+      "planned"
+    ],
+    "restart": "unless-stopped",
+    "user": null,
+    "volumes": []
+  }
+}

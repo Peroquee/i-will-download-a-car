@@ -1,0 +1,15 @@
+extends: default
+
+ignore: |
+  .venv/
+  .cache/
+  config/
+
+rules:
+  document-start: disable
+  line-length:
+    max: 130
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1

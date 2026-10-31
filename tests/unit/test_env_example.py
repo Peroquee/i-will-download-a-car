@@ -1,0 +1,100 @@
+""".env.example must stay in sync with docker-compose.yml and contain no real secrets."""
+
+from __future__ import annotations
+
+import ipaddress
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from tests.helpers.compose import compose_variables, load_compose, parse_env_file
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_EXAMPLE = parse_env_file(REPO_ROOT / ".env.example")
+REFERENCED = compose_variables(load_compose(REPO_ROOT / "docker-compose.yml"))
+
+
+def test_env_example_parses_cleanly():
+    assert ENV_EXAMPLE, ".env.example is empty"
+
+
+@pytest.mark.parametrize("name", sorted(REFERENCED))
+def test_every_compose_variable_is_documented(name):
+    assert name in ENV_EXAMPLE, (
+        f"{name} is used in docker-compose.yml but missing from .env.example"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(ENV_EXAMPLE))
+def test_no_stale_variables_in_env_example(name):
+    assert name in REFERENCED, f"{name} is in .env.example but docker-compose.yml never uses it"
+
+
+@pytest.mark.parametrize("name", sorted(n for n, op in REFERENCED.items() if op and "?" in op))
+def test_required_variables_have_example_values(name):
+    assert ENV_EXAMPLE.get(name), f"{name} is required (:?) so the example needs a value"
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("name", ["WIREGUARD_PRIVATE_KEY", "VPN_SERVICE_PROVIDER"])
+def test_secrets_are_placeholders(name):
+    assert ENV_EXAMPLE[name] == "changeme"
+
+
+@pytest.mark.security
+def test_no_value_looks_like_a_real_wireguard_key():
+    # WireGuard keys are 32 bytes base64 = 44 chars ending in '='.
+    for name, value in ENV_EXAMPLE.items():
+        assert not re.fullmatch(r"[A-Za-z0-9+/]{43}=", value), f"{name} looks like a real key"
+
+
+@pytest.mark.security
+def test_qbittorrent_ui_defaults_to_localhost():
+    assert ENV_EXAMPLE["QBIT_WEBUI_BIND"] == "127.0.0.1"
+
+
+def test_lan_subnet_is_a_private_network():
+    network = ipaddress.ip_network(ENV_EXAMPLE["LAN_SUBNET"], strict=True)
+    assert network.is_private
+
+
+@pytest.mark.parametrize("name", ["PUID", "PGID"])
+def test_owner_ids_are_numeric_and_not_root(name):
+    assert ENV_EXAMPLE[name].isdigit()
+    assert int(ENV_EXAMPLE[name]) > 0
+
+
+def test_umask_is_group_writable_octal():
+    umask = ENV_EXAMPLE["UMASK"]
+    assert re.fullmatch(r"0?[0-7]{3}", umask)
+    assert int(umask, 8) & 0o020 == 0, "UMASK must keep group write so services can share files"
+
+
+def test_data_root_is_absolute():
+    assert ENV_EXAMPLE["DATA_ROOT"].startswith("/")
+
+
+@pytest.mark.security
+def test_env_file_is_gitignored():
+    lines = {
+        line.strip()
+        for line in (REPO_ROOT / ".gitignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    assert ".env" in lines
+
+
+@pytest.mark.security
+def test_git_really_ignores_env_but_tracks_example():
+    if not shutil.which("git") or not (REPO_ROOT / ".git").exists():
+        pytest.skip("not inside a git checkout")
+
+    def ignored(path: str) -> bool:
+        result = subprocess.run(["git", "check-ignore", "-q", path], cwd=REPO_ROOT, check=False)
+        return result.returncode == 0
+
+    assert ignored(".env")
+    assert not ignored(".env.example")

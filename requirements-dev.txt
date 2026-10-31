@@ -1,0 +1,3 @@
+# Everything for local work: make venv
+-r requirements-test.txt
+-r requirements-lint.txt
