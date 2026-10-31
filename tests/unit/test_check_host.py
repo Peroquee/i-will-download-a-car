@@ -178,6 +178,22 @@ def test_bad_usage_exits_2(host, args):
     assert result.returncode == 2
 
 
+def test_a_check_without_a_dispatch_arm_fails_loudly(host):
+    """A check added to ALL_CHECKS but not to main()'s case must not be skipped silently."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    patched = source.replace(
+        'readonly ALL_CHECKS="virt docker compose tun media"',
+        'readonly ALL_CHECKS="virt docker compose tun media orphan"',
+    )
+    assert patched != source, "ALL_CHECKS line changed; update this test"
+    script = host.tmp / "check-host-orphan.sh"
+    script.write_text(patched, encoding="utf-8")
+    result = run_script(script, ["--only", "orphan"], isolate_path=host.base)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "no dispatch for check: orphan" in result.stderr
+    assert "OK" not in result.stdout
+
+
 def test_help_exits_0_and_documents_the_checks(host):
     result = run_script(SCRIPT, ["--help"], isolate_path=host.base)
     assert result.returncode == 0

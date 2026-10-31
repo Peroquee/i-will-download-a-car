@@ -212,6 +212,7 @@ main() {
       compose) check_compose ;;
       tun) check_tun ;;
       media) check_media ;;
+      *) echo "no dispatch for check: $check" >&2; exit 2 ;;
     esac
   done
 
