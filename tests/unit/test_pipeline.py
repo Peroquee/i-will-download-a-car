@@ -72,13 +72,41 @@ def test_needs_reference_real_jobs(name):
         assert target in JOBS, f"{name} needs unknown job {target}"
 
 
-def test_only_daemon_jobs_are_tagged_linux():
-    tagged = {n for n, j in JOBS.items() if "linux" in resolved(j).get("tags", [])}
-    assert tagged == {"test:smoke", "test:system", "test:regression"}
+DAEMON_JOBS = {"test:smoke", "test:system", "test:regression"}
+
+
+def test_only_daemon_jobs_use_the_dedicated_host_runner():
+    tagged = {n for n, j in JOBS.items() if "ytp-host" in resolved(j).get("tags", [])}
+    assert tagged == DAEMON_JOBS
+
+
+@pytest.mark.security
+def test_no_job_runs_on_the_shared_linux_runner():
+    """Decision: the shared runner has no host daemon and must not get one (root on its host)."""
+    for name, job in JOBS.items():
+        assert "linux" not in resolved(job).get("tags", []), name
+
+
+def test_daemon_jobs_are_gated_on_the_host_runner_variable():
+    """Until the ytp-host runner exists they must be absent, not failing, not allowed to fail."""
+    for name in sorted(DAEMON_JOBS):
+        job = resolved(JOBS[name])
+        assert job["rules"] == [{"if": '$YTP_HOST_RUNNER == "1"'}], name
+        assert "allow_failure" not in job, name
+
+
+def test_gated_jobs_never_need_a_job_outside_the_gate():
+    """A needs on a job that is absent from the pipeline makes GitLab reject the whole pipeline."""
+    gated = DAEMON_JOBS
+    for name, job in JOBS.items():
+        for need in resolved(job).get("needs", []):
+            target = need if isinstance(need, str) else need["job"]
+            if target in gated:
+                assert name in gated, f"{name} needs gated job {target}"
 
 
 def test_daemon_jobs_fail_instead_of_skipping_missing_capabilities():
-    for name in ("test:smoke", "test:system", "test:regression"):
+    for name in sorted(DAEMON_JOBS):
         assert resolved(JOBS[name])["variables"]["REQUIRE_CAPABILITIES"] == "1"
 
 

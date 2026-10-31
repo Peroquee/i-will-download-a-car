@@ -1,8 +1,9 @@
 """Is this Docker host alive and fit to run the stack? Fast; runs first on any real host.
 
-In CI these run on the linux runner against its Docker daemon. On the media VM
-run `make smoke-host`, which sets SMOKE_FULL_HOST=1 and SMOKE_ENV_FILE=.env so
-the full host checks (VM, tun, media volume) run against the real configuration.
+In CI these run on the ytp-host runner (once YTP_HOST_RUNNER=1) against its Docker
+daemon. On the media VM run `make smoke-host`, which sets SMOKE_FULL_HOST=1 and
+SMOKE_ENV_FILE=.env so the full host checks (VM, tun, media volume) run against the
+real configuration.
 """
 
 from __future__ import annotations

@@ -8,9 +8,9 @@ placed anywhere else.
 |---|---|---|---|---|
 | unit | `tests/unit/` | Does this piece of logic or config do what it says, in isolation? | nothing (stubs, fake dirs) | any runner, every push |
 | integration | `tests/integration/` | Do two real components agree (our files + Compose CLI; later app + SQLite, app + qBittorrent API)? | the component under test | any runner (`docker compose` CLI only so far) |
-| smoke | `tests/smoke/` | Is this host or stack alive at all? Fast gate before slower tests. | Docker daemon | `linux` runner; `make smoke-host` on the media VM |
-| system | `tests/system/` | Does the real thing behave correctly end to end, black-box? | Docker daemon, `/dev/net/tun` | `linux` runner |
-| regression | `tests/regression/` | Has a fixed bug or a deliberate decision come back? | varies | `linux` runner |
+| smoke | `tests/smoke/` | Is this host or stack alive at all? Fast gate before slower tests. | Docker daemon | `ytp-host` runner (gated, see below); `make smoke-host` on the media VM |
+| system | `tests/system/` | Does the real thing behave correctly end to end, black-box? | Docker daemon, `/dev/net/tun` | `ytp-host` runner (gated) |
+| regression | `tests/regression/` | Has a fixed bug or a deliberate decision come back? | varies | `ytp-host` runner (gated) |
 
 Cross-cutting markers, combinable with any level:
 
@@ -27,6 +27,13 @@ Cross-cutting markers, combinable with any level:
 5. **System tests clean up after themselves.** Every container/volume is named `ytp-test-*` (`tests/helpers/docker.unique_name`) and removed in a fixture; CI's `after_script` sweeps leftovers.
 6. **No test depends on the shell environment.** Compose tests run with variables the stack uses stripped from the environment (`tests/helpers/compose_cli.clean_env`).
 7. **Snapshots change deliberately.** `make snapshot` regenerates `tests/regression/snapshots/`; the diff is reviewed in the MR.
+
+## Where the tests run
+
+- **Lint, unit and integration** need no Docker daemon and run on the shared docker-executor runner.
+- **Smoke, system and regression** need the real youtube-premium host (Docker daemon, `/dev/net/tun`). They carry the tag `ytp-host` and run only on a dedicated runner on that VM. They are deliberately **not** run on the shared runner: it would need `/var/run/docker.sock` mounted or privileged dind, which gives any job root on a host that also builds other projects.
+- **The `ytp-host` runner does not exist yet** (the VM is not provisioned). Until it does, these three jobs are gated by the CI/CD variable `YTP_HOST_RUNNER`: unless it is `"1"` they are absent from the pipeline. They do not block merge requests and they do not report a pass they did not earn. Run them by hand on the VM with `make smoke-host` / `make test`.
+- **To enable them:** register a runner on the VM with the tag `ytp-host` (docker executor with the host socket mounted, or shell executor; see the header of `.gitlab-ci.yml`), then set `YTP_HOST_RUNNER=1` under Settings > CI/CD > Variables. From then on a missing daemon or tun device fails the job (`REQUIRE_CAPABILITIES=1`).
 
 ## Running
 

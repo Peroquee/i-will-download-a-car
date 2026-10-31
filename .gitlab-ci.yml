@@ -1,14 +1,24 @@
 # youtube-premium pipeline.
 #
-# Runner model (one Debian VM runner today, more later):
+# Runner model:
 #   untagged jobs   need nothing from the host: lint, unit, and integration
-#                   (docker compose CLI only, no daemon).
-#   tags: [linux]   need a real Docker daemon on a Linux host with /dev/net/tun:
-#                   smoke, system, regression.
+#                   (docker compose CLI only, no daemon). They run on the shared
+#                   docker-executor runner.
+#   tags: [ytp-host]  need a real Docker daemon on the youtube-premium VM with
+#                   /dev/net/tun: smoke, system, regression. They run ONLY on a
+#                   dedicated runner on that VM, never on the shared runner (mounting
+#                   its docker.sock or running privileged dind there would give any job
+#                   root on a host that builds other projects).
 #
-# Executor assumptions:
-#   - docker executor: the linux runner must mount the host daemon, i.e. in
-#     config.toml  [runners.docker] volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]
+# The ytp-host runner does not exist yet (the VM is not provisioned). Until it does,
+# smoke, system and regression are gated by the CI/CD variable YTP_HOST_RUNNER: they
+# are absent from the pipeline unless it is "1", so they neither block an MR nor
+# pretend to pass. Register the runner with the tag ytp-host, then set
+# YTP_HOST_RUNNER=1 in Settings > CI/CD > Variables (see docs/testing.md).
+#
+# Executor assumptions for the ytp-host runner:
+#   - docker executor: mount the host daemon, i.e. in config.toml
+#     [runners.docker] volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]
 #   - shell executor: `image:` is ignored; the VM needs python3, python3-venv,
 #     docker and the compose plugin. The before_scripts work unchanged.
 #
@@ -92,11 +102,14 @@ default:
     - *venv-test
     - docker compose version
 
-# Needs the Docker daemon of a Linux host with /dev/net/tun.
+# Needs the Docker daemon of the youtube-premium VM with /dev/net/tun. Runs only on
+# the dedicated ytp-host runner, and only once YTP_HOST_RUNNER=1 is set (see header).
 .docker-host:
   extends: [.pip-cache, .reports]
   image: $DOCKER_CLI_IMAGE
-  tags: [linux]
+  tags: [ytp-host]
+  rules:
+    - if: $YTP_HOST_RUNNER == "1"
   variables:
     # A missing daemon or tun device fails the job instead of skipping tests.
     REQUIRE_CAPABILITIES: "1"
@@ -167,7 +180,7 @@ test:unit:
   before_script: *venv-test
   script:
     - pytest tests/unit $PYTEST_COMMON
-  # Add --cov=app and a coverage report here once app/ exists (#8).
+    # Add --cov=app and a coverage report here once app/ exists (#8).
 
 test:integration:
   stage: integration

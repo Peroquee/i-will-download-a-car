@@ -203,8 +203,16 @@ main() {
     esac
   done
 
+  # Explicit dispatch (not "check_$check"): shellcheck cannot see calls through
+  # a computed name and would flag every check_* helper as unused (SC2329).
   for check in $SELECTED; do
-    "check_$check"
+    case "$check" in
+      virt) check_virt ;;
+      docker) check_docker ;;
+      compose) check_compose ;;
+      tun) check_tun ;;
+      media) check_media ;;
+    esac
   done
 
   if [ "$FAILURES" -eq 0 ]; then

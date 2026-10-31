@@ -4,7 +4,7 @@ Every test lives in tests/<level>/ and gets that level as a marker automatically
 so `pytest -m unit` and friends select by folder without anyone remembering to
 decorate tests. Capability markers (docker, tun, network) skip cleanly with a
 reason when the capability is missing, unless REQUIRE_CAPABILITIES=1 is set
-(CI does that on the linux runner), in which case a missing capability fails
+(CI does that on the ytp-host runner), in which case a missing capability fails
 the run instead of silently skipping it.
 """
 
