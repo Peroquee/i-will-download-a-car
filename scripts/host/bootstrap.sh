@@ -16,12 +16,14 @@
 #   --puid/--pgid   owner of the media volume (default 1000/1000)
 #   --dry-run       print every command instead of running it (no root needed)
 #
-# Test hooks: OS_RELEASE (default /etc/os-release), FSTAB_FILE (default /etc/fstab).
+# Test hooks: OS_RELEASE (default /etc/os-release), FSTAB_FILE (default /etc/fstab),
+# QGA_DEVICE (default /dev/virtio-ports/org.qemu.guest_agent.0).
 
 set -euo pipefail
 
 OS_RELEASE="${OS_RELEASE:-/etc/os-release}"
 FSTAB_FILE="${FSTAB_FILE:-/etc/fstab}"
+QGA_DEVICE="${QGA_DEVICE:-/dev/virtio-ports/org.qemu.guest_agent.0}"
 DRY_RUN=0
 LOGIN_USER=""
 MEDIA_DEVICE=""
@@ -105,6 +107,19 @@ check_preconditions() {
     || die "expected Debian 12 (bookworm), found ${id:-unknown} ${codename:-unknown}"
 }
 
+# The guest agent needs the Proxmox option "QEMU Guest Agent" (VM > Options). Without
+# it the virtio device does not exist, and a blocking `systemctl start` would wait
+# about 90 s for it and then fail, aborting the whole bootstrap (set -e). So it is
+# only enabled, and started (without waiting) when the device is there.
+start_guest_agent() {
+  if [ -e "$QGA_DEVICE" ]; then
+    run systemctl start --no-block qemu-guest-agent
+  else
+    log "No QEMU guest agent device ($QGA_DEVICE): not starting qemu-guest-agent."
+    log "Hint: in Proxmox set VM > Options > QEMU Guest Agent = Enabled, then reboot the VM."
+  fi
+}
+
 install_docker() {
   log "Installing Docker Engine and the Compose plugin from download.docker.com"
   run apt-get update
@@ -124,7 +139,9 @@ install_docker() {
   # Word splitting of the package list is intended.
   # shellcheck disable=SC2086
   run apt-get install -y $DOCKER_PACKAGES
-  run systemctl enable --now docker qemu-guest-agent
+  run systemctl enable --now docker
+  run systemctl enable qemu-guest-agent
+  start_guest_agent
   run usermod -aG docker "$LOGIN_USER"
 }
 

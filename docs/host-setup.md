@@ -39,6 +39,11 @@ sudo scripts/host/bootstrap.sh --user "$USER" [media options from step 4]
 Installs from Docker's own apt repository (`docker-ce`, `docker-compose-plugin`),
 not Debian's older `docker.io`. Idempotent: safe to rerun.
 
+The QEMU guest agent is installed and enabled, but only started if the VM has the
+Proxmox option *Options > QEMU Guest Agent = Enabled* (a restart of the VM is needed
+after switching it on). Without it bootstrap logs a hint and carries on instead of
+waiting for a device that does not exist.
+
 **Verify:** `scripts/host/check-host.sh --only docker,compose`
 
 ## 3. Confirm /dev/net/tun exists and is available to the VM
