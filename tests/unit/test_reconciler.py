@@ -351,7 +351,7 @@ def test_without_an_organizer_finished_torrents_wait_and_nothing_is_lost(fake, d
 def test_qbittorrent_being_away_changes_no_job_and_is_logged_once(fake, database, caplog):
     job = add_job(database, H1, "downloading")
     fake.torrents = [torrent(H1, **DONE)]
-    reconciler, organizer = make(fake, database)
+    reconciler, _ = make(fake, database)
     port = fake.port
     fake.stop()
     with caplog.at_level(logging.INFO, logger="ytp.reconciler"):
