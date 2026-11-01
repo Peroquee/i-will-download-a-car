@@ -106,4 +106,32 @@ def test_the_watchdog_module_imports_only_what_it_needs():
             r"^from (\.[\w.]*) import", (REPO_ROOT / "app/ytp/watchdog.py").read_text(), re.M
         )
     }
-    assert local == {".clients.gluetun", ".clients.qbittorrent", ".logging_setup"}
+    assert local == {".alerts", ".clients.gluetun", ".clients.qbittorrent", ".logging_setup"}
+
+
+@pytest.mark.security
+def test_alerts_are_off_by_default_and_no_public_service_is_preset():
+    """Sending anything out of the LAN is the owner's decision (#22)."""
+    assert ENV_EXAMPLE["ALERT_URL"] == ""
+    assert ENV_EXAMPLE["ALERT_TOKEN"] == ""
+    assert ENV_EXAMPLE["ALERT_FORMAT"] == "ntfy"
+    for value in ENV_EXAMPLE.values():
+        assert "ntfy.sh" not in value
+    env = environment_as_dict(WATCHDOG)
+    assert env["ALERT_URL"] == "${ALERT_URL:-}"
+    assert env["ALERT_TOKEN"] == "${ALERT_TOKEN:-}"
+    assert "ntfy.sh" not in (REPO_ROOT / "docker-compose.yml").read_text()
+
+
+def test_the_status_page_is_for_the_bridge_only():
+    assert environment_as_dict(WATCHDOG)["WATCHDOG_STATUS_PORT"] == "8090"
+    assert not WATCHDOG.get("ports")
+    app_env = environment_as_dict(services(COMPOSE)["app"])
+    assert app_env["WATCHDOG_STATUS_URL"] == "http://watchdog:8090"
+
+
+@pytest.mark.security
+def test_only_the_watchdog_gets_the_alert_target():
+    for name, svc in services(COMPOSE).items():
+        if name != "watchdog":
+            assert not [k for k in environment_as_dict(svc) if k.startswith("ALERT_")], name

@@ -59,6 +59,8 @@ class Settings:
     # File mode mask for the folders the organizer creates (UMASK in .env; 002 keeps the group
     # able to write, which the other media users need). Applied once at startup, see __main__.
     umask: int = 0o022
+    # The watchdog's status page (it lives in its own container; the UI badge reads it, #22).
+    watchdog_status_url: str = "http://watchdog:8090"
 
     @property
     def qbit_configured(self) -> bool:
@@ -154,6 +156,15 @@ class Settings:
         else:
             problems.append(f"UMASK must be an octal mask like 002, got {raw_umask!r}")
 
+        watchdog_url = text("WATCHDOG_STATUS_URL", "http://watchdog:8090").rstrip("/")
+        parsed_watchdog = urlparse(watchdog_url)
+        if parsed_watchdog.scheme != "http" or not parsed_watchdog.hostname:
+            problems.append(f"WATCHDOG_STATUS_URL must be an http address, got {watchdog_url!r}")
+        elif parsed_watchdog.path.strip("/"):
+            problems.append(
+                f"WATCHDOG_STATUS_URL must be host[:port] without a path, got {watchdog_url!r}"
+            )
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -169,6 +180,7 @@ class Settings:
             qbit_user=text("QBIT_USER", "admin"),
             qbit_password=text("QBIT_PASSWORD"),
             umask=umask,
+            watchdog_status_url=watchdog_url,
         )
 
 

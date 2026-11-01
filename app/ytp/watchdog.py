@@ -31,6 +31,8 @@ QBIT_URL / QBIT_USER / QBIT_PASSWORD, WATCHDOG_INTERVAL (s, default 1), WATCHDOG
 from __future__ import annotations
 
 import contextlib
+import http.server
+import json
 import logging
 import os
 import signal
@@ -39,8 +41,11 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from .alerts import FORMATS, Alert, Alerter
 from .clients.gluetun import GluetunAuthError, GluetunControl, GluetunUnreachable
 from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError
 from .logging_setup import configure_logging
@@ -66,6 +71,10 @@ class WatchdogConfig:
     interval: float = 1.0
     threshold: int = 3
     resume_after: float = 0.0
+    alert_url: str = ""
+    alert_token: str = ""
+    alert_format: str = "ntfy"
+    status_port: int = 8090  # 0 = no status server
 
     def __repr__(self) -> str:  # never show the secrets
         return f"WatchdogConfig(control_url={self.control_url!r}, interval={self.interval})"
@@ -89,6 +98,14 @@ class WatchdogConfig:
                 problems.append(f"{name} must be between {low} and {high}, got {raw}")
             return value
 
+        alert_url = text("ALERT_URL")
+        alert_format = text("ALERT_FORMAT", "ntfy").lower()
+        if alert_format not in FORMATS:
+            problems.append(
+                f"ALERT_FORMAT must be one of {', '.join(FORMATS)}, got {alert_format!r}"
+            )
+        if alert_url and urlsplit(alert_url).scheme not in {"http", "https"}:
+            problems.append("ALERT_URL must be an http(s) address (its value is not shown)")
         api_key = text("GLUETUN_CONTROL_APIKEY")
         password = text("QBIT_PASSWORD")
         if not api_key:
@@ -106,6 +123,10 @@ class WatchdogConfig:
             interval=number("WATCHDOG_INTERVAL", 1.0, 0.2, 60.0),
             threshold=int(number("WATCHDOG_THRESHOLD", 3, 1, 60)),
             resume_after=number("WATCHDOG_RESUME_AFTER", 0.0, 0.0, 86400.0),
+            alert_url=alert_url,
+            alert_token=text("ALERT_TOKEN"),
+            alert_format=alert_format,
+            status_port=int(number("WATCHDOG_STATUS_PORT", 8090, 0, 65535)),
         )
         if problems:
             raise ConfigError("invalid configuration:\n  " + "\n  ".join(problems))
@@ -120,7 +141,17 @@ class Watchdog:
         config: WatchdogConfig,
         *,
         clock: Callable[[], float] = time.monotonic,
+        alerter: Alerter | None = None,
+        wall: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
+        self.alerter = alerter
+        self._wall = wall
+        self._lock = threading.Lock()
+        self._since = wall()
+        self._reason = ""
+        self._last_poll: datetime | None = None
+        self._outage_started: datetime | None = None
+        self._announce_down = False
         self.control = control
         self.qbit = qbit
         self.config = config
@@ -138,11 +169,48 @@ class Watchdog:
         self.pauses = 0
         self.resumes = 0
 
+    # ------------------------------------------------------------------ status and alerts
+
+    def snapshot(self) -> dict[str, object]:
+        """What the app shows as a badge: no secrets, no addresses."""
+        with self._lock:
+            if self._last_poll is None:
+                state = "starting"
+            elif self.misconfigured:
+                state = "blind"
+            else:
+                state = "down" if self.state == "unhealthy" else "ok"
+            return {
+                "state": state,  # ok | down | blind (cannot read the VPN status) | starting
+                "since": self._since.isoformat(timespec="seconds"),
+                "reason": self._reason,
+                "paused": self.paused_by_us,
+                "last_poll": self._last_poll.isoformat(timespec="seconds")
+                if self._last_poll
+                else None,
+                "auto_resume": self.config.resume_after > 0,
+            }
+
+    def _mark(self, reason: str = "") -> None:
+        with self._lock:
+            self._since = self._wall()
+            self._reason = reason
+
+    def _alert(self, kind: str, title: str, lines: list[str], *, urgent: bool) -> None:
+        if self.alerter is None:
+            return
+        now = self._wall().isoformat(timespec="seconds")
+        self.alerter.notify(
+            Alert(kind, title, "\n".join([f"Time: {now}", *lines]), now, urgent=urgent)
+        )
+
     # ------------------------------------------------------------------ one poll
 
     def step(self) -> None:
         """One poll of gluetun, and whatever follows from it."""
         now = self._clock()
+        with self._lock:
+            self._last_poll = self._wall()
         try:
             ok = self.control.vpn_status() == "running"
             reason = "" if ok else "the VPN is not running"
@@ -154,6 +222,13 @@ class Watchdog:
         if self.misconfigured:
             logger.info("watchdog: the gluetun control server accepts the key now")
             self.misconfigured = None
+            self._mark()
+            self._alert(
+                "sighted",
+                "Watchdog can see the VPN again",
+                ["The watchdog can read the VPN status again."],
+                urgent=False,
+            )
 
         if ok:
             self._on_ok(now)
@@ -166,6 +241,18 @@ class Watchdog:
                 "watchdog cannot read the VPN status and is NOT protecting anything",
                 extra={"error": message},
             )
+            first = self.misconfigured is None
+            self._mark(message)
+            if first:
+                self._alert(
+                    "blind",
+                    "Watchdog cannot read the VPN status",
+                    [
+                        "The VPN watchdog is NOT protecting anything: gluetun's control server "
+                        "refuses its key. Run: make watchdog-key",
+                    ],
+                    urgent=True,
+                )
         self.misconfigured = message
         self.failures = 0
 
@@ -181,8 +268,25 @@ class Watchdog:
             self.paused_by_us = False
             self._pause_failure_logged = False
             self._next_pause_attempt = 0.0
+            self._announce_down = True
+            self._outage_started = self._wall()
+            self._mark(reason)
         if self.state == "unhealthy" and not self.paused_by_us and now >= self._next_pause_attempt:
             self._pause(now)
+        if self._announce_down:
+            self._announce_down = False
+            self._alert(
+                "down",
+                "VPN is down",
+                [
+                    f"Reason: {self._reason}",
+                    "All torrents were paused."
+                    if self.paused_by_us
+                    else "Pausing the torrents is still being tried (qBittorrent is "
+                    "unreachable while the VPN is down, so it cannot send anything either).",
+                ],
+                urgent=True,
+            )
 
     def _pause(self, now: float) -> None:
         try:
@@ -216,10 +320,13 @@ class Watchdog:
             logger.info("VPN is running again", extra={"paused": self.paused_by_us})
         if not self.paused_by_us:
             # The pause never got delivered, but the VPN is fine again: nothing to undo.
-            self._back_to_healthy()
+            self._back_to_healthy(outcome="nothing had been paused")
             return
         if self.config.resume_after <= 0:
-            self._back_to_healthy(note="auto-resume is off: the torrents stay paused")
+            self._back_to_healthy(
+                note="auto-resume is off: the torrents stay paused",
+                outcome="the torrents stay paused: resume them in qBittorrent",
+            )
             return
         if (
             now - self._healthy_since >= self.config.resume_after
@@ -241,15 +348,25 @@ class Watchdog:
             "VPN stable: torrents resumed",
             extra={"count": len(hashes), "stable_for": self.config.resume_after},
         )
-        self._back_to_healthy()
+        self._back_to_healthy(outcome=f"{len(hashes)} torrent(s) were resumed")
 
-    def _back_to_healthy(self, note: str = "") -> None:
+    def _back_to_healthy(self, note: str = "", outcome: str = "") -> None:
+        started = self._outage_started
         self.state = "healthy"
         self.paused_by_us = False
         self._healthy_since = None
         self._remembered_at = None  # take a fresh look at what is running
+        self._outage_started = None
+        self._mark()
         if note:
             logger.info("watchdog healthy again: %s", note)
+        lasted = f" after {int((self._wall() - started).total_seconds())} s" if started else ""
+        self._alert(
+            "recovered",
+            "VPN is back",
+            [f"The VPN is running again{lasted}.", f"Torrents: {outcome}."],
+            urgent=False,
+        )
 
     def _remember_running(self, now: float) -> None:
         """While all is well, note which torrents are running (cheap, every 30 s)."""
@@ -272,6 +389,54 @@ class Watchdog:
             if heartbeat is not None:
                 write_heartbeat(heartbeat, self.misconfigured)
             stop.wait(max(0.0, self.config.interval - (self._clock() - started)))
+
+
+class StatusServer:
+    """A tiny read-only status page for the app's badge: `GET /status` returns `snapshot()`.
+
+    It listens inside the container only (no published port); the app reaches it as
+    `http://watchdog:8090/status` over the stack's bridge network. The answer holds no secrets
+    and no addresses, so it needs no login. Anything but GET /status is refused.
+    """
+
+    def __init__(self, watchdog: Watchdog, port: int):
+        handler_watchdog = watchdog
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args: object) -> None:  # quiet: the app polls it often
+                pass
+
+            def _reply(self, status: int, body: bytes = b"") -> None:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self) -> None:
+                if self.path != "/status":
+                    return self._reply(404, b'{"detail":"not found"}')
+                payload = json.dumps(handler_watchdog.snapshot()).encode()
+                self._reply(200, payload)
+
+            def _refuse(self) -> None:
+                self._reply(405, b'{"detail":"read-only"}')
+
+            do_POST = do_PUT = do_DELETE = do_PATCH = _refuse
+
+        self._server = http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler)
+        self.port = self._server.server_address[1]
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
 
 
 def write_heartbeat(path: Path, misconfigured: str | None) -> None:
@@ -307,11 +472,20 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         logger.error("invalid configuration", extra={"problems": str(exc).splitlines()[1:]})
         return 2
+    alerter = (
+        Alerter(config.alert_url, config.alert_token, config.alert_format)
+        if config.alert_url
+        else None
+    )
     watchdog = Watchdog(
         GluetunControl(config.control_url, config.api_key),
         QbitClient(config.qbit_url, config.qbit_user, config.qbit_password, timeout=5.0),
         config,
+        alerter=alerter,
     )
+    status_server = StatusServer(watchdog, config.status_port) if config.status_port else None
+    if status_server:
+        status_server.start()
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
@@ -322,9 +496,15 @@ def main(argv: list[str] | None = None) -> int:
             "interval": config.interval,
             "threshold": config.threshold,
             "resume_after": config.resume_after,
+            "alerts": alerter.host if alerter else "off",
+            "status_port": config.status_port or "off",
         },
     )
     watchdog.run(stop)
+    if status_server:
+        status_server.stop()
+    if alerter:
+        alerter.close()
     logger.info("watchdog stopped")
     return 0
 

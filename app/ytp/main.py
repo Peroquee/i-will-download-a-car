@@ -17,6 +17,7 @@ from fastapi import FastAPI, Response, status
 from . import __version__, api
 from .clients.jellyfin import JellyfinClient, LibraryRefresher
 from .clients.qbittorrent import QbitClient
+from .clients.watchdog import WatchdogStatusClient
 from .config import Settings
 from .db import Database, DatabaseError
 from .logging_setup import configure_logging
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.qbit = QbitClient.from_settings(settings) if settings.qbit_configured else None
     if app.state.qbit is None:
         logger.warning("qbittorrent is not configured (QBIT_PASSWORD is empty): downloads disabled")
+    app.state.watchdog_status = WatchdogStatusClient(settings.watchdog_status_url)
     # Jellyfin: with no URL or key the refresher does nothing (the warning above says so).
     app.state.jellyfin = LibraryRefresher(
         JellyfinClient.from_settings(settings) if settings.jellyfin_configured else None
@@ -104,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.scheduler = None
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None
+    app.state.watchdog_status = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     api.register(app)
 

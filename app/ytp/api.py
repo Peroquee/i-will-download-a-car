@@ -32,6 +32,7 @@ from pydantic_core import PydanticCustomError
 
 from . import jobs
 from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError, QbitUnavailable
+from .clients.watchdog import WatchdogStatusClient
 from .db import Database
 from .magnet import InvalidMagnet, infohash_from_magnet
 from .metadata import Metadata, metadata_to_json
@@ -98,6 +99,19 @@ async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     return JSONResponse({**summary, "duplicate": False}, status_code=201)
 
 
+async def vpn_status(request: Request) -> JSONResponse:
+    """GET /api/vpn: the watchdog's view of the VPN, for the UI badge (issue #22).
+
+    `state` is ok, down, blind (the watchdog cannot read the VPN status), starting, or unknown
+    (the watchdog does not answer). Always 200: "unknown" is an answer, not an error.
+    """
+    client: WatchdogStatusClient | None = request.app.state.watchdog_status
+    if client is None:
+        return JSONResponse({"state": "unknown", "reason": "not configured"})
+    return JSONResponse(await asyncio.to_thread(client.fetch_status))
+
+
 def register(app: FastAPI) -> None:
     """Add the API routes to the app (plain routes, so `app.routes` lists every path)."""
     app.add_api_route("/api/magnet", add_magnet, methods=["POST"])
+    app.add_api_route("/api/vpn", vpn_status, methods=["GET"])

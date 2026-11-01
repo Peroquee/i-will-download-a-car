@@ -72,7 +72,7 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
     """Every route is a deliberate decision: add new ones here, with their issue."""
     app = create_app(Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path)}))
     paths = {getattr(route, "path", None) for route in app.routes}
-    assert paths == {"/health", "/api/magnet"}  # /api/magnet: #13
+    assert paths == {"/health", "/api/magnet", "/api/vpn"}  # /api/magnet: #13, /api/vpn: #22
 
 
 def test_startup_logs_the_configuration_without_the_api_key(tmp_path, capsys):

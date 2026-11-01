@@ -134,6 +134,8 @@ services:
       QBIT_URL: http://gluetun:8080
       QBIT_USER: ${QBIT_USER:-admin}
       QBIT_PASSWORD: ${QBIT_PASSWORD:-}
+      # The VPN watchdog's status page, for the UI badge (#22).
+      WATCHDOG_STATUS_URL: http://watchdog:8090
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.
@@ -177,6 +179,13 @@ services:
       WATCHDOG_INTERVAL: ${WATCHDOG_INTERVAL:-1}
       WATCHDOG_THRESHOLD: ${WATCHDOG_THRESHOLD:-3}
       WATCHDOG_RESUME_AFTER: ${WATCHDOG_RESUME_AFTER:-0}
+      # Alerts (#22): off while ALERT_URL is empty. The URL and token are secrets.
+      ALERT_URL: ${ALERT_URL:-}
+      ALERT_TOKEN: ${ALERT_TOKEN:-}
+      ALERT_FORMAT: ${ALERT_FORMAT:-ntfy}
+      # A tiny read-only status page for the app's badge, inside the bridge network only (no
+      # published port): http://watchdog:8090/status
+      WATCHDOG_STATUS_PORT: "8090"
     # Unhealthy when the poll loop stopped, or when it cannot read the VPN status (the key or
     # gluetun's auth file is wrong): then it protects nothing, and docker compose ps says so.
     healthcheck:

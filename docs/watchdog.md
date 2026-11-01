@@ -46,6 +46,60 @@ Settings in `.env`: `WATCHDOG_INTERVAL` (seconds between polls, default 1),
 Only changes are logged, not every poll: `docker compose logs watchdog` shows `VPN unhealthy:
 pausing all torrents`, `all torrents paused`, `VPN is running again`, `torrents resumed`.
 
+## Alerts (issue #22)
+
+Off by default. Set `ALERT_URL` in `.env` to get a message when the VPN goes down **and** when
+it is back (and when the watchdog itself cannot read the VPN status):
+
+```
+# ntfy, self-hosted on the LAN or on a server you choose
+ALERT_URL=http://ntfy.lan/vpn-alerts
+# or any webhook that takes JSON
+ALERT_URL=http://homeassistant.lan:8123/api/webhook/vpn
+ALERT_FORMAT=webhook
+# optional: sent as "Authorization: Bearer ..."
+ALERT_TOKEN=
+```
+
+- `ntfy` (default format): a plain-text POST with `Title`, `Priority` (`urgent` for "down") and
+  `Tags` headers. `webhook`: `{"event": "down|recovered|blind|sighted", "title", "message",
+  "timestamp", "urgent"}`.
+- **A message holds** the state, the time (UTC) and the reason, e.g. `VPN is down / Reason: the
+  VPN is not running / All torrents were paused`, and `VPN is back / The VPN is running again
+  after 42 s / Torrents: ...`. **Never** a password, key or IP address.
+- **One alert per outage**, not one per second: a blip below the threshold sends nothing, a flap
+  while still down does not repeat "down". With auto-resume the "back" message comes when the
+  torrents were resumed (after the stable period), so it is accurate.
+- Sending never delays a VPN poll: messages go through a queue and a worker thread, retried
+  after 2, 10 and 30 s, then dropped with an error in the log. The URL is treated as a secret:
+  the log names only its host.
+- The alert goes out over the **home connection, not the VPN** (the watchdog is on the plain
+  bridge network, like the rest of the stack except qBittorrent). With a target on the LAN
+  nothing leaves the house.
+
+**Open question for the owner:** where should alerts go? Self-hosting ntfy on the LAN keeps
+everything at home but you only see alerts while on the home network (or via your own VPN to it).
+A hosted service (ntfy.sh or another) reaches the phone anywhere, but the messages then pass
+through a third party; they contain no secrets or addresses, but they do tell that your VPN was
+down at a given time. Nothing is preset; set `ALERT_URL` when decided.
+
+## Status for the app (the UI badge)
+
+The watchdog serves a tiny read-only page, `GET http://watchdog:8090/status`, on the stack's
+bridge network (no published port; `WATCHDOG_STATUS_PORT=0` turns it off). It returns
+`{"state": "ok|down|blind|starting", "since", "reason", "paused", "last_poll", "auto_resume"}`:
+no secrets, no addresses, so it needs no login. The app does not share a volume with the watchdog
+and the watchdog does not use the app's database: the app only LOOKS, through
+`GET /api/vpn` (behind the proxy login), which answers `state: unknown` when the watchdog does
+not answer. `/health` does not depend on it.
+
+| `state` | badge |
+|---|---|
+| `ok` | green: the VPN runs |
+| `down` | red: the VPN is down, torrents paused (`paused`) |
+| `blind` | red: the watchdog cannot read the VPN status, nothing is protecting |
+| `starting` / `unknown` | grey |
+
 ## The container
 
 Same image as the app, started with `python -m ytp.watchdog` (standard library plus our two
