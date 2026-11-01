@@ -457,7 +457,6 @@ def test_the_video_can_be_queued_again_for_another_target(client, tagged):
     ("extra", "loc"),
     [
         ({"audio_only": True}, "body"),  # audio only needs the podcast target
-        ({"target": "music"}, "target"),  # music comes with #36
         ({"target": "radio"}, "target"),
         ({"target": "podcast", "audio_only": "yes"}, "audio_only"),
         ({"target": "podcast", "audio_only": 1}, "audio_only"),

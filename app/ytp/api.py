@@ -112,15 +112,20 @@ class DownloadRequest(BaseModel):
     # For target "podcast" `channel` is the podcast and `title` the episode (issue #35).
     channel: Name
     title: Name
-    target: Literal["video", "podcast"] = "video"
+    target: Literal["video", "podcast", "music"] = "video"
     audio_only: StrictBool = False
+    # Music only (issue #36): `channel` is then the artist, `title` the track. Left out, the track
+    # is a single: the album is named like the track.
+    album: Name | None = None
 
     @model_validator(mode="after")
-    def _audio_needs_a_target(self) -> DownloadRequest:
+    def _target_rules(self) -> DownloadRequest:
         if self.audio_only and self.target == "video":
             raise PydanticCustomError(
-                "audio_only_invalid", "Audio only is for podcast episodes, not for videos"
+                "audio_only_invalid", "Audio only is for podcast episodes and music, not for videos"
             )
+        if self.album is not None and self.target != "music":
+            raise PydanticCustomError("album_invalid", "An album is only for music")
         return self
 
     @field_validator("url")
@@ -168,11 +173,17 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
     retries it. Files end up in `<MEDIA_DIR_YOUTUBE>/<channel>/<title> [<id>].mp4` with a
     thumbnail and a small `.info.json`.
 
-    Optional `target` ("video", the default, or "podcast") and `audio_only` (true only with
-    "podcast"): the video becomes an episode in `<MEDIA_DIR_PODCASTS>/<podcast>/` (`channel` is the
-    podcast, `title` the episode), named like an RSS episode; with `audio_only` the audio stream
-    is kept (m4a/opus, no re-encode) with tags and cover. The same video can be queued once per
-    target. 422 `audio_only_invalid` for audio only with the video target.
+    Optional `target` ("video", the default, "podcast" or "music") and `audio_only` (true only
+    with "podcast" or "music"). With "podcast" the video becomes an episode in
+    `<MEDIA_DIR_PODCASTS>/<podcast>/` (`channel` is the podcast, `title` the episode), named like
+    an RSS episode; with `audio_only` the audio stream is kept (m4a/opus, no re-encode) with tags
+    and cover. The same video can be queued once per target. 422 `audio_only_invalid` for audio
+    only with the video target.
+
+    "music" (issue #36): `channel` is the artist, `title` the track, `album` the album (default:
+    the track's title, a single); the file goes to
+    `<MEDIA_DIR_MUSIC>/<artist>/<album>/<title>.<ext>` like a torrent album, with
+    artist/album/title tags and the cover when audio only.
     """
     db: Database | None = request.app.state.db
     worker: YoutubeWorker | None = request.app.state.youtube_worker
@@ -185,6 +196,7 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
         title=body.title,
         target=body.target,
         audio_only=body.audio_only,
+        album=(body.album or body.title) if body.target == "music" else None,
     )
     job, outcome = await asyncio.to_thread(
         jobs.submit_job,
