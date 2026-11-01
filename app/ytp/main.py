@@ -21,6 +21,7 @@ from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
 from .config import Settings
 from .db import Database, DatabaseError
+from .jobs_api import TorrentProgress
 from .logging_setup import configure_logging
 from .organizer import FileOrganizer
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The qBittorrent client does not touch the network until it is used (no login at startup:
     # the VPN may be down, and a failed login counts towards qBittorrent's ban).
     app.state.qbit = QbitClient.from_settings(settings) if settings.qbit_configured else None
+    app.state.torrent_progress = TorrentProgress(app.state.qbit)
     if app.state.qbit is None:
         logger.warning("qbittorrent is not configured (QBIT_PASSWORD is empty): downloads disabled")
     app.state.watchdog_status = WatchdogStatusClient(settings.watchdog_status_url)
@@ -125,6 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = None
     app.state.db_error = None
     app.state.qbit = None
+    app.state.torrent_progress = TorrentProgress(None)
     app.state.scheduler = None
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None

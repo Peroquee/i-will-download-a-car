@@ -33,6 +33,7 @@
     $("lang").textContent = lang === "de" ? "EN" : "DE";
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
     refreshVpnText();
+    renderJobs();
   }
 
   /* ---------------------------------------------------------------- state */
@@ -184,6 +185,7 @@
         var vars = { id: reply.data.id, status: statusText(reply.data.status) };
         showResult(t(reply.data.duplicate ? "result.duplicate" : "result.created", vars), true);
         if (!reply.data.duplicate) resetFields();
+        pollJobs();
         return;
       }
       if (reply.status === 422) {
@@ -225,6 +227,148 @@
       .then(refreshVpnText);
   }
 
+  /* ---------------------------------------------------------------- job list (#26) */
+
+  var JOBS_POLL_MS = 5000;
+  var jobsData = null;        // the last good answer: {jobs, counts}
+  var jobsOnlyFailed = false;
+  var jobsLoading = false;
+  var jobsLoadFailed = false;
+  var retrying = {};          // job id -> true while its retry request runs
+  var retryErrors = {};       // job id -> text of the last failed retry
+
+  function jobsUrl() {
+    return "/api/jobs?limit=50" + (jobsOnlyFailed ? "&status=failed" : "");
+  }
+
+  function pollJobs() {
+    if (jobsLoading) return;
+    jobsLoading = true;
+    fetch(jobsUrl(), { credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("status " + response.status);
+        return response.json();
+      })
+      .then(function (data) { jobsData = data; jobsLoadFailed = false; })
+      .catch(function () { jobsLoadFailed = true; })
+      .then(function () { jobsLoading = false; renderJobs(); });
+  }
+
+  function timeText(iso) {
+    var age = L.age(iso, Date.now());
+    if (!age) return "";
+    return age.unit === "now" ? t("time.now") : t("time." + age.unit, { n: age.n });
+  }
+
+  function jobRow(job) {
+    var li = document.createElement("li");
+    li.className = "job job-" + job.status;
+
+    var top = document.createElement("div");
+    top.className = "job-top";
+    var name = document.createElement("span");
+    name.className = "job-name";
+    name.textContent = job.label;
+    var badge = document.createElement("span");
+    badge.className = "job-status";
+    badge.textContent = statusText(job.status);
+    top.appendChild(name);
+    top.appendChild(badge);
+    li.appendChild(top);
+
+    var meta = document.createElement("div");
+    meta.className = "job-meta";
+    var key = L.kindKey(job.kind);
+    var parts = [t("jobs.id", { id: job.id })];
+    if (key) parts.push(t(key));
+    var when = timeText(job.updated_at);
+    if (when) parts.push(when);
+    meta.textContent = parts.join(" · ");
+    li.appendChild(meta);
+
+    if (job.progress != null && job.status !== "failed") {
+      var bar = document.createElement("progress");
+      bar.max = 100;
+      bar.value = job.progress;
+      bar.setAttribute("aria-label", t("jobs.progress", { n: job.progress }));
+      li.appendChild(bar);
+      var percent = document.createElement("span");
+      percent.className = "job-percent";
+      percent.textContent = t("jobs.progress", { n: job.progress });
+      li.appendChild(percent);
+    }
+
+    if (job.status === "failed") {
+      var reason = document.createElement("p");
+      reason.className = "job-error";
+      reason.textContent = job.error || t("jobs.no_reason");
+      li.appendChild(reason);
+    }
+    if (retryErrors[job.id]) {
+      var again = document.createElement("p");
+      again.className = "job-error";
+      again.textContent = retryErrors[job.id];
+      li.appendChild(again);
+    }
+    if (job.can_retry) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost small";
+      button.disabled = !!retrying[job.id];
+      button.textContent = t(retrying[job.id] ? "jobs.retrying" : "jobs.retry");
+      button.addEventListener("click", function () { retryJob(job.id); });
+      li.appendChild(button);
+    }
+    return li;
+  }
+
+  function renderJobs() {
+    var list = $("jobs-list");
+    list.textContent = "";
+    $("jobs-error").textContent = jobsLoadFailed ? t("jobs.load_error") : "";
+    if (!jobsData) { $("jobs-empty").hidden = true; return; }
+    jobsData.jobs.forEach(function (job) { list.appendChild(jobRow(job)); });
+    $("jobs-empty").hidden = jobsData.jobs.length > 0 || jobsOnlyFailed;
+    var failed = jobsData.counts.failed || 0;
+    var banner = $("jobs-banner");
+    banner.hidden = failed === 0;
+    banner.textContent = failed ? t("jobs.banner", { n: failed }) : "";
+    var filter = $("jobs-filter");
+    filter.hidden = failed === 0 && !jobsOnlyFailed;
+    filter.textContent = jobsOnlyFailed ? t("jobs.filter_all") : t("jobs.filter_failed", { n: failed });
+    filter.setAttribute("aria-pressed", jobsOnlyFailed ? "true" : "false");
+  }
+
+  function retryJob(id) {
+    retrying[id] = true;
+    delete retryErrors[id];
+    renderJobs();
+    post("/api/jobs/" + id + "/retry", {}).then(function (reply) {
+      delete retrying[id];
+      if (reply.status !== 200) {
+        var detail = reply.data && typeof reply.data.detail === "string" ? reply.data.detail : "";
+        retryErrors[id] = t("jobs.retry_failed") + (detail ? " " + detail : "");
+      }
+    }).catch(function () {
+      delete retrying[id];
+      retryErrors[id] = t("jobs.retry_failed") + " " + t("result.network");
+    }).then(function () { renderJobs(); pollJobs(); });
+  }
+
+  function startJobPolling() {
+    pollJobs();
+    window.setInterval(function () {
+      if (document.visibilityState !== "hidden") pollJobs();
+    }, JOBS_POLL_MS);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") pollJobs();
+    });
+    $("jobs-filter").addEventListener("click", function () {
+      jobsOnlyFailed = !jobsOnlyFailed;
+      pollJobs();
+    });
+  }
+
   /* ---------------------------------------------------------------- wiring */
 
   function onLinkChanged() {
@@ -256,6 +400,7 @@
     });
     pollVpn();
     window.setInterval(pollVpn, 15000);
+    startJobPolling();
   }
 
   init();
