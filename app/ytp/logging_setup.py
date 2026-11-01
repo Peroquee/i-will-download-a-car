@@ -90,6 +90,9 @@ def configure_logging(level: str = "INFO") -> None:
         logger = logging.getLogger(name)
         logger.handlers.clear()
         logger.propagate = True
+    # APScheduler logs two INFO lines for every run of every job (a heartbeat every 30 s is
+    # 5,760 lines a day); the app logs what matters itself (failures, skipped runs).
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
     access = logging.getLogger("uvicorn.access")
     access.filters.clear()
     access.addFilter(DropHealthChecks())

@@ -42,7 +42,7 @@ def test_health_is_ok_when_the_data_root_is_there(tmp_path):
     assert response.json() == {
         "status": "ok",
         "version": __version__,
-        "checks": {"data_root": "ok", "database": "ok"},
+        "checks": {"data_root": "ok", "database": "ok", "scheduler": "ok"},
     }
 
 

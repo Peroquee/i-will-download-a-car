@@ -1,9 +1,11 @@
 # Runtime dependencies of the app image, fully pinned (output of `pip freeze` in a clean venv
-# after installing the two direct ones). Direct: fastapi (the web framework) and uvicorn (the
-# server, without the [standard] extras: no compiled uvloop/httptools, fewer moving parts).
-# Everything else is pulled in by them. Bumped deliberately; #30 covers the update cadence.
+# after installing the three direct ones). Direct: fastapi (the web framework), uvicorn (the
+# server, without the [standard] extras: no compiled uvloop/httptools, fewer moving parts) and
+# apscheduler (background jobs, #12; its only dependency is tzlocal). Everything else is pulled
+# in by them. Bumped deliberately; #30 covers the update cadence.
 fastapi==0.162.0
 uvicorn==0.54.0
+apscheduler==3.11.3
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -17,3 +19,4 @@ pydantic_core==2.50.2
 starlette==1.10.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
+tzlocal==5.4.5

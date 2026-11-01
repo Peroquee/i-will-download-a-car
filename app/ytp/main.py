@@ -19,6 +19,7 @@ from .clients.qbittorrent import QbitClient
 from .config import Settings
 from .db import Database, DatabaseError
 from .logging_setup import configure_logging
+from .scheduler import AppScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except DatabaseError as exc:
         app.state.db_error = str(exc)
         logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
+    # The scheduler needs the database (its jobs keep their state there).
+    app.state.scheduler = None
+    if app.state.db is not None:
+        app.state.scheduler = AppScheduler(app.state.db)
+        app.state.scheduler.start()
     try:
         yield
     finally:
+        if app.state.scheduler is not None:
+            app.state.scheduler.shutdown()
         if app.state.db is not None:
             app.state.db.close()
         logger.info("stopped")
@@ -69,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = None
     app.state.db_error = None
     app.state.qbit = None
+    app.state.scheduler = None
     api.register(app)
 
     @app.get("/health")
@@ -86,13 +95,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             problem = db.check()
             db_state = "ok" if problem is None else f"unavailable: {problem}"
-        healthy = data_root_ok and db_state == "ok"
+        scheduler: AppScheduler | None = app.state.scheduler
+        if scheduler is None:
+            scheduler_state = "disabled: no database"
+        else:
+            scheduler_problem = scheduler.check()
+            scheduler_state = "ok" if scheduler_problem is None else f"stalled: {scheduler_problem}"
+        # "disabled" is already reported through the database; only a scheduler that should work
+        # and does not turns the app unhealthy on its own.
+        healthy = data_root_ok and db_state == "ok" and scheduler_state in {"ok"}
         if not healthy:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
             "status": "ok" if healthy else "degraded",
             "version": __version__,
-            "checks": {"data_root": "ok" if data_root_ok else "missing", "database": db_state},
+            "checks": {
+                "data_root": "ok" if data_root_ok else "missing",
+                "database": db_state,
+                "scheduler": scheduler_state,
+            },
         }
 
     return app

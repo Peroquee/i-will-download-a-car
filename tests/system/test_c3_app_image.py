@@ -131,3 +131,33 @@ def test_a_config_folder_the_user_cannot_write_makes_the_app_unhealthy_with_a_hi
         assert "make layout" in logs
     finally:
         docker.run(["rm", "-f", name])
+
+
+def wait_healthy(name: str, timeout: float = 120) -> str:
+    deadline = time.monotonic() + timeout
+    status = ""
+    while time.monotonic() < deadline and status != "healthy":
+        time.sleep(2)
+        status = docker.run(["inspect", "-f", "{{.State.Health.Status}}", name]).stdout.strip()
+    return status
+
+
+def test_the_scheduler_survives_a_container_restart(image, tmp_path):
+    """The heartbeat of the first run is found by the second (issue #12)."""
+    data, config = folders(tmp_path)
+    name = start(image, ENV, data, config)
+    try:
+        assert wait_healthy(name) == "healthy", docker.run(["logs", name]).stdout
+        assert docker.run(["restart", name], timeout=120).returncode == 0
+        assert wait_healthy(name) == "healthy", docker.run(["logs", name]).stdout
+        starts = [
+            json.loads(line)
+            for line in docker.run(["logs", name]).stdout.splitlines()
+            if line.startswith("{") and '"scheduler started"' in line
+        ]
+        assert len(starts) == 2
+        assert starts[0]["previous_heartbeat"] is None
+        assert starts[1]["previous_heartbeat"], "the second start found the first run's heartbeat"
+        assert starts[1]["jobs"] == ["heartbeat"]
+    finally:
+        docker.run(["rm", "-f", name])
