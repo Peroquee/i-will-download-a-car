@@ -121,6 +121,11 @@ class Torrent:
     def finished(self) -> bool:
         return self.progress >= 1.0
 
+    @property
+    def paused(self) -> bool:
+        """Paused by hand or pause_all(): `paused*` (qBittorrent 4.x) or `stopped*` (5.x) states."""
+        return self.state.startswith(("paused", "stopped"))
+
     @classmethod
     def from_api(cls, item: Mapping[str, Any]) -> Torrent:
         try:
@@ -339,7 +344,13 @@ class QbitClient:
     def list_torrents(
         self, state: str | None = None, category: str | None = None, hashes: list[str] | None = None
     ) -> list[Torrent]:
-        """Torrents, optionally filtered by state ("downloading", ...), category or hashes."""
+        """Torrents, optionally filtered by state ("downloading", ...), category or hashes.
+
+        The state filters are qBittorrent's, and broader than their names: `downloading` also
+        matches paused/stopped (`stoppedDL`), queued (`queuedDL`) and stalled (`stalledDL`)
+        torrents that still have data to fetch. Where it matters whether a torrent is moving,
+        look at `Torrent.state` (or `Torrent.paused`) instead of relying on the filter.
+        """
         if state is not None and state not in STATE_FILTERS:
             raise ValueError(f"unknown state filter {state!r}")
         query: dict[str, str] = {}
