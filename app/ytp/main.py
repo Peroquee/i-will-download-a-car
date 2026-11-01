@@ -22,11 +22,13 @@ from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
 from .config import Settings
 from .db import Database, DatabaseError
+from .feeds import FeedClient
 from .jobs_api import TorrentProgress
 from .logging_setup import configure_logging
 from .organizer import FileOrganizer
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .scheduler import AppScheduler
+from .subscription_poller import POLL_JOB_ID, POLL_JOB_SECONDS, SubscriptionPoller
 from .web import SecurityMiddleware, register_ui
 from .youtube import YoutubeProbe
 from .youtube_download import YoutubeDownloader
@@ -85,6 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The scheduler needs the database (its jobs keep their state there).
     app.state.scheduler = None
     app.state.reconciler = None
+    app.state.poller = None
     if app.state.db is not None:
         app.state.scheduler = AppScheduler(app.state.db)
         app.state.scheduler.start()
@@ -97,6 +100,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 seconds=RECONCILE_SECONDS,
                 run_immediately=True,
             )
+        if settings.subscription_poll_minutes > 0:
+            # New videos of subscribed channels go into the YouTube queue (#20). The feeds are
+            # fetched through the same proxy as yt-dlp.
+            app.state.poller = SubscriptionPoller(
+                app.state.db,
+                FeedClient(settings.ytdlp_proxy),
+                app.state.youtube_worker,
+                poll_minutes=settings.subscription_poll_minutes,
+            )
+            app.state.scheduler.add_interval_job(
+                app.state.poller.run_once, job_id=POLL_JOB_ID, seconds=POLL_JOB_SECONDS
+            )
+        else:
+            logger.info("channel polling is off (SUBSCRIPTION_POLL_MINUTES=0)")
         if app.state.jellyfin.enabled:
             # Sends the debounced library refresh once things have been quiet for a while.
             app.state.scheduler.add_interval_job(
@@ -106,6 +123,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         worker_stop.set()
+        if app.state.poller is not None:
+            app.state.poller.stop.set()  # a run in progress ends after its current channel
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown()
         if app.state.db is not None:
@@ -133,6 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.scheduler = None
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None
+    app.state.poller = None
     app.state.watchdog_status = None
     app.state.youtube = None
     app.state.channels = None

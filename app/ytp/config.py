@@ -67,6 +67,8 @@ class Settings:
     youtube_probe_timeout: float = 25.0
     # Tallest YouTube video to download, in pixels (0 = no limit): a disk-space knob.
     youtube_max_height: int = 1080
+    # How often a subscribed channel's feed is looked at, in minutes (0 = never; see #20).
+    subscription_poll_minutes: int = 60
 
     @property
     def qbit_configured(self) -> bool:
@@ -194,6 +196,13 @@ class Settings:
         else:
             problems.append("YOUTUBE_MAX_HEIGHT must be 0 (no limit) or between 144 and 4320")
 
+        raw_poll = text("SUBSCRIPTION_POLL_MINUTES", "60")
+        poll_minutes = 60
+        if raw_poll.isdigit() and (int(raw_poll) == 0 or 15 <= int(raw_poll) <= 1440):
+            poll_minutes = int(raw_poll)
+        else:
+            problems.append("SUBSCRIPTION_POLL_MINUTES must be 0 (off) or between 15 and 1440")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -213,6 +222,7 @@ class Settings:
             ytdlp_proxy=proxy,
             youtube_probe_timeout=probe_timeout,
             youtube_max_height=max_height,
+            subscription_poll_minutes=poll_minutes,
         )
 
 

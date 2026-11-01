@@ -83,6 +83,24 @@ def safe_path_component(value: str) -> str:
     return name
 
 
+def sanitize_name(text: str, fallback: str) -> str:
+    """Make a name that YouTube (or any other outside source) gave us usable as ONE folder or file
+    name: `/` and `\\` become `-`, control and invisible characters become spaces, runs of spaces
+    collapse, the length is cut. If `safe_path_component` still refuses it (empty, only dots),
+    `fallback` is returned. The user's own input is NOT passed through here: it is checked and
+    refused instead, never silently changed."""
+    cleaned = "".join(
+        " "
+        if unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in {"Zl", "Zp"}
+        else ch
+        for ch in str(text).replace("/", "-").replace("\\", "-")
+    )
+    try:
+        return safe_path_component(" ".join(cleaned.split())[:MAX_NAME_LENGTH])
+    except PydanticCustomError:
+        return fallback
+
+
 def _no_bool(value: Any) -> Any:
     """True/False would pass as 1/0 for an int field; a flag is never a year or a season."""
     if isinstance(value, bool):

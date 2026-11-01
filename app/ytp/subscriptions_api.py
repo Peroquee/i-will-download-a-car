@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import unicodedata
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -36,7 +35,7 @@ from pydantic_core import PydanticCustomError
 from . import subscriptions
 from .apiutil import PROBE_STATUS, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
-from .metadata import MAX_NAME_LENGTH, Name, safe_path_component
+from .metadata import Name, sanitize_name
 from .youtube import ProbeError
 
 logger = logging.getLogger(__name__)
@@ -59,21 +58,6 @@ class SubscribeRequest(BaseModel):
         return value.strip()
 
 
-def folder_name(youtube_name: str, channel_id: str) -> str:
-    """The library folder for a channel name from YouTube: path separators and control characters
-    are replaced or dropped; if nothing usable is left, the channel id is used."""
-    cleaned = "".join(
-        " "
-        if unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in {"Zl", "Zp"}
-        else ch
-        for ch in youtube_name.replace("/", "-").replace("\\", "-")
-    )
-    try:
-        return safe_path_component(" ".join(cleaned.split())[:MAX_NAME_LENGTH])
-    except PydanticCustomError:
-        return channel_id
-
-
 async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
     db = request.app.state.db
     resolver: ChannelResolver | None = request.app.state.channels
@@ -87,7 +71,7 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
         return JSONResponse(
             {"detail": error.message, "kind": error.kind}, status_code=PROBE_STATUS[error.kind]
         )
-    name = body.name or folder_name(channel.name, channel.channel_id)
+    name = body.name or sanitize_name(channel.name, channel.channel_id)
     try:
         subscription, created = await asyncio.to_thread(
             subscriptions.add, db, channel.channel_id, name, body.backfill

@@ -1,4 +1,4 @@
-# YouTube (issues #17, #18, #19)
+# YouTube (issues #17, #18, #19, #20)
 
 The app reads a YouTube video's metadata (and, with #18, downloads it) with **yt-dlp used as a
 library**: pinned in `app/requirements.txt`, never started through a shell.
@@ -118,6 +118,47 @@ the id is looked up **once**, when subscribing, and stored.
   until the poller of #20 has run; it records them with `subscriptions.record_poll`).
 - `DELETE /api/subscriptions/{id}` unsubscribes (204; 404 if unknown). Videos already downloaded
   stay where they are.
+
+## Channel polling (issue #20)
+
+A scheduler job (`subscription-poll`, every minute) looks at the subscribed channels that are due
+and queues their new videos in the same queue as `POST /api/youtube/download` (#18). Everything
+after that is the normal download path: job list, retry, filing, Jellyfin refresh.
+
+- **The feed:** `https://www.youtube.com/feeds/videos.xml?channel_id=UC...`, the 15 newest videos,
+  no API key. It is fetched through the same proxy as yt-dlp (`YTDLP_PROXY`, the VPN by default;
+  empty = directly), without following redirects, with a 15-second timeout and a 1 MB limit.
+- **The XML is untrusted.** Any `<!DOCTYPE` or `<!ENTITY` makes the feed be refused before it is
+  parsed (a real feed has neither; they are what entity-expansion attacks need), so the standard
+  library parser is enough and no dependency was added. Only the video id (11 characters), the
+  title and the publication time are taken; the feed must name the channel that was asked for.
+  Titles are made safe as folder/file names (`/` and `\` become `-`, control characters go; the
+  video id if nothing is left).
+- **How often:** `SUBSCRIPTION_POLL_MINUTES` (default **60**, 15 to 1440, `0` = never poll). Each
+  channel gets its own interval between 0.8 and 1.2 times that (fixed per channel, derived from
+  its id), so they drift apart, and the run pauses 3 to 8 seconds between two channels and takes at
+  most 20 per minute. After an error a channel is tried again after 10 minutes instead.
+- **First subscribe:** only videos published **after** subscribing are downloaded; the back
+  catalogue never is. `backfill` (see Subscriptions above) is the exception, for the first poll
+  only. A video published before the subscription never counts, however late it shows up.
+- **Which videos are "seen":** the ones the queue already has a job for, in any state. The unique
+  index of `jobs` decides, so a video you downloaded by hand, or that two channels both list, is
+  fetched once; and a video that **failed is not queued again** by every poll: it sits in the job
+  list with its reason and a **Try again** button. This replaces yt-dlp's `--download-archive`
+  from the issue text: the queue already is the record, an archive file would be a second one that
+  can disagree with it (a failed download is not in the archive, so it would be re-attempted each
+  hour; a manual download is not in it either), and there is nothing extra to back up or clean up
+  when a channel is removed.
+- **One channel failing does not stop the others.** The reason goes to the subscription's
+  `last_error` (the list shows it) and `last_checked` is set either way. If the feed cannot be
+  reached at all (VPN down) the run stops after that first failure instead of trying every
+  channel, and the others stay due.
+- **One Jellyfin refresh per batch:** the poller wakes the download worker once at the end; the
+  library refresh is debounced by `LibraryRefresher` (a batch of videos finishing together causes
+  one refresh per library after things have been quiet for a while).
+- **Live streams and premieres** are listed in the feed like videos. Until they have ended
+  yt-dlp refuses them, so such a job fails with "This is a live stream or premiere that has not
+  ended yet"; the same video can be retried from the job list later.
 
 ## Through the VPN or not (recommendation; the owner decides)
 
