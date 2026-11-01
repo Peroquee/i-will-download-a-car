@@ -12,7 +12,8 @@
 # Exit:   0 all selected checks passed (SKIP counts as pass), 1 any FAIL, 2 bad usage.
 #
 # Test hooks (used by tests/unit, never needed in normal use):
-#   CHECK_ROOT  prefix for filesystem paths, so tests can point at a fake tree.
+#   CHECK_ROOT       prefix for filesystem paths, so tests can point at a fake tree.
+#   APP_CONFIG_DIR   the app's state folder (default: config/app in this repository).
 
 set -uo pipefail
 
@@ -21,12 +22,14 @@ readonly MIN_COMPOSE="2.17"   # depends_on.restart needs 2.17+
 readonly TUN_DEVNUM="a:c8"    # /dev/net/tun is char device 10:200 (hex a:c8)
 
 CHECK_ROOT="${CHECK_ROOT:-}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+APP_CONFIG_DIR="${APP_CONFIG_DIR:-$REPO_ROOT/config/app}"
 ENV_FILE=".env"
 SELECTED="$ALL_CHECKS"
 FAILURES=0
 
 usage() {
-  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 pass() { printf 'PASS %-8s %s\n' "$1" "$2"; }
@@ -202,6 +205,26 @@ check_layout() {
   done
   if [ -n "$missing" ]; then
     fail layout "missing in $ENV_FILE:$missing (see .env.example)"
+    return
+  fi
+
+  # The app (runs as PUID:PGID) keeps its database in config/app; Docker would create a missing
+  # folder as root:root, which the app cannot write to.
+  local app_puid app_pgid app_owner app_mode
+  app_puid="$(env_value PUID || true)"
+  app_pgid="$(env_value PGID || true)"
+  if [ ! -d "$APP_CONFIG_DIR" ]; then
+    fail layout "the app's state folder $APP_CONFIG_DIR is missing (run: sudo scripts/host/create-layout.sh)"
+    return
+  fi
+  app_owner="$(stat -c '%u:%g' "$APP_CONFIG_DIR")"
+  app_mode="$(stat -c '%a' "$APP_CONFIG_DIR")"
+  if [ "$app_owner" != "$app_puid:$app_pgid" ]; then
+    fail layout "$APP_CONFIG_DIR is owned by $app_owner, but the app runs as $app_puid:$app_pgid and cannot write its database there (run: sudo scripts/host/create-layout.sh)"
+    return
+  fi
+  if (( (8#$app_mode & 8#700) != 8#700 )); then
+    fail layout "$APP_CONFIG_DIR has mode $app_mode: its owner $app_puid:$app_pgid needs rwx (run: sudo scripts/host/create-layout.sh)"
     return
   fi
 

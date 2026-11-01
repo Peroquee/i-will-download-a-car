@@ -62,8 +62,55 @@ docker compose exec app python -c "import urllib.request as u; print(u.urlopen('
 ```
 
 It runs as `PUID:PGID` (`user:` in compose); the image has no user of its own and writes
-nothing at runtime. `./config/app` (mounted at `/config`) must be writable by that user once
-the database arrives (#9); the scaffold does not write there.
+nothing at runtime except its database in `/config` (next section).
+
+## Database (issue #9)
+
+The app keeps its jobs and YouTube subscriptions in one SQLite file, `/config/app.db`
+(`./config/app/app.db` on the host), opened at startup with:
+
+- **WAL mode**, so the polling scheduler and a request do not block each other. (WAL needs a
+  local disk; `/config` is on the VM's own disk, not on the media share.) The files
+  `app.db-wal` and `app.db-shm` next to it belong to the database: copy all three, or none,
+  and never delete them while the app runs.
+- `synchronous=NORMAL`, `foreign_keys=ON`, and a 5 s wait for the write lock instead of an
+  instant "database is locked".
+- **Migrations**: `app/ytp/migrations/NNNN_name.sql`, applied in order at every start. Each
+  file and its bookkeeping row (`schema_migrations`: version, name, SHA-256) are one
+  transaction, so a failing migration leaves the database on the previous version. The app
+  **refuses to start the database** (and says so) if an applied file was edited afterwards, or
+  if the database is from a newer version than the image. To change the schema, add a file;
+  never edit one that has shipped.
+
+Tables (`0001_initial.sql`): `jobs` (type `magnet`|`youtube`, `external_id` = infohash or video
+id, unique per type; `metadata` is a JSON object; `status` queued, downloading, organizing, done
+or failed; `error`; `created_at`, `updated_at` as UTC text, the latter kept current by a
+trigger) and `subscriptions` (`channel_id` unique, `channel_name`, `last_checked`,
+`last_error`, `enabled`). Python: `ytp.db.Database` (one connection with a lock;
+`transaction()` for writes, `query()` for reads), no ORM.
+
+### The folder must belong to the app user
+
+The app runs as `PUID:PGID` and cannot create or `chown` `/config`. If `./config/app` does not
+exist, Docker would create it as `root:root` and the app could not write to it. So:
+
+- `docker-compose.yml` mounts it with `create_host_path: false`: a missing folder is an error at
+  `docker compose up`, not a root-owned folder.
+- `sudo scripts/host/create-layout.sh` (`make layout`) creates `config/app` owned by
+  `PUID:PGID`, mode 2775, and **hands over** an existing one (for example the `root:root` one
+  from the first start of the app) to `PUID:PGID`: that folder and `app.db*` only, not
+  recursively. `check-host.sh --only layout` fails with that hint when the owner is wrong.
+- If it is still wrong, the app does not crash-loop: it stays up **degraded**. The log has
+  `database unavailable` with the reason and the fix, `/health` answers `503` with
+  `"database": "unavailable: ..."`, and Docker shows it `unhealthy`. Fix the folder, then
+  `docker compose restart app`.
+
+Fix on the VM that currently has the `root:root` folder:
+
+```bash
+sudo scripts/host/create-layout.sh          # shows "fixing config/app" and hands it to PUID:PGID
+docker compose up -d app                    # picks up the new image / restarts; app turns healthy
+```
 
 ## Build and run
 

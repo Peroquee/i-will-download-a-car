@@ -92,7 +92,9 @@ def load_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
         )
     versions = [m.version for m in found]
     if versions != list(range(1, len(found) + 1)):
-        raise MigrationError(f"migrations must be numbered 0001, 0002, ... without gaps: {versions}")
+        raise MigrationError(
+            f"migrations must be numbered 0001, 0002, ... without gaps: {versions}"
+        )
     for migration in found:
         # The runner owns the transaction. (A trigger's own BEGIN ... END is not matched: its
         # BEGIN is not followed by a semicolon.)

@@ -7,6 +7,11 @@
 # Folders that already exist are left exactly as they are: no chmod, no chown, no
 # recursion, their contents are never touched. Safe to re-run.
 #
+# One exception, the app's own state folder config/app (the SQLite database, #9) in this
+# repository: it is created owned by PUID:PGID too, and if it exists with another owner (Docker
+# makes a missing bind-mount source as root:root) it is handed to PUID:PGID, non-recursively
+# (the folder and app.db*). The app runs as PUID:PGID and cannot do that itself.
+#
 # Why two trees: unfinished downloads must never show up in Jellyfin, whose libraries
 # point at the library folders. Finished files are HARDLINKED from downloads/ into them,
 # which needs both on one filesystem (scripts/host/check-host.sh --only layout proves it).
@@ -20,11 +25,14 @@
 #   --env-file  settings to read (default .env): DATA_ROOT, PUID, PGID, MEDIA_DIR_*
 #   --dry-run   print what would be created, change nothing
 #
-# Test hook: CHECK_ROOT prefixes every filesystem path (default empty).
+# Test hooks: CHECK_ROOT prefixes every filesystem path under DATA_ROOT (default empty);
+# APP_CONFIG_DIR replaces the repository's config/app.
 
 set -euo pipefail
 
 CHECK_ROOT="${CHECK_ROOT:-}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+APP_CONFIG_DIR="${APP_CONFIG_DIR:-$REPO_ROOT/config/app}"
 ENV_FILE=".env"
 DRY_RUN=0
 
@@ -35,7 +43,7 @@ log() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 run() {
@@ -75,6 +83,38 @@ ensure_dir() {
   else
     log "creating $dir"
     run install -d -m 2775 -o "$PUID" -g "$PGID" "$dir"
+  fi
+}
+
+# The app's state folder: owned by PUID:PGID, created if missing, handed over if it is not
+# (see the header). The parent (config/) stays owned by whoever owns the repository, so
+# the login user can still put files like config/expressvpn.ovpn there.
+ensure_app_config() {
+  local dir="$1" parent owner file
+  parent="$(dirname "$dir")"
+  if [ ! -d "$parent" ]; then
+    log "creating $parent"
+    run install -d -m 755 -o "$(stat -c '%u' "$REPO_ROOT")" -g "$(stat -c '%g' "$REPO_ROOT")" "$parent"
+  fi
+  if [ ! -e "$dir" ]; then
+    log "creating $dir"
+    run install -d -m 2775 -o "$PUID" -g "$PGID" "$dir"
+  elif [ ! -d "$dir" ]; then
+    die "$dir exists but is not a folder"
+  else
+    owner="$(stat -c '%u:%g' "$dir")"
+    if [ "$owner" = "$PUID:$PGID" ]; then
+      log "exists   $dir"
+    else
+      log "fixing   $dir (owned by $owner; the app runs as $PUID:$PGID and must write there)"
+      run chown "$PUID:$PGID" "$dir"
+      run chmod 2775 "$dir"
+      for file in app.db app.db-wal app.db-shm; do
+        if [ -e "$dir/$file" ]; then
+          run chown "$PUID:$PGID" "$dir/$file"
+        fi
+      done
+    fi
   fi
 }
 
@@ -129,6 +169,9 @@ main() {
   for name in "${library_dirs[@]}"; do
     ensure_dir "$root/$name"
   done
+  log "App state folder (the app's database; the app runs as $PUID:$PGID)"
+  ensure_app_config "$APP_CONFIG_DIR"
+
   log "Done. Prove hardlinks work: scripts/host/check-host.sh --only layout"
 }
 

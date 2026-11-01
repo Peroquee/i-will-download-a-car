@@ -115,3 +115,14 @@ def test_compose_passes_the_app_what_its_config_reads():
         "MEDIA_DIR_MUSIC",
         "MEDIA_DIR_YOUTUBE",
     }
+
+
+def test_the_migrations_are_part_of_the_image():
+    """The Dockerfile copies the whole ytp package; nothing may exclude the SQL files."""
+    migrations = REPO_ROOT / "app" / "ytp" / "migrations"
+    assert (migrations / "0001_initial.sql").is_file()
+    dockerfile = (REPO_ROOT / "app" / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY ytp ./ytp" in dockerfile
+    ignored = (REPO_ROOT / "app" / ".dockerignore").read_text(encoding="utf-8")
+    assert "sql" not in ignored
+    assert "migrations" not in ignored

@@ -1,8 +1,9 @@
 """The FastAPI application (issue #8): configuration, logging and /health.
 
 The database (#9) is opened at startup; later issues add the qBittorrent and Jellyfin clients
-(#10, #11) and the scheduler (#12). Everything with a lifetime is created in `create_app` / the lifespan and
-hung off `app.state`, so tests build the app with explicit settings and nothing is global.
+(#10, #11) and the scheduler (#12). Everything with a lifetime is created in `create_app` / the
+lifespan and hung off `app.state`, so tests build the app with explicit settings and nothing
+is global.
 """
 
 from __future__ import annotations

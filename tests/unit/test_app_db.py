@@ -226,9 +226,8 @@ def test_the_check_constraints_match_the_python_constants(database):
     ],
 )
 def test_bad_jobs_are_rejected(database, values):
-    with pytest.raises(sqlite3.IntegrityError):
-        with database.transaction() as conn:
-            insert_job(conn, **values)
+    with pytest.raises(sqlite3.IntegrityError), database.transaction() as conn:
+        insert_job(conn, **values)
     assert database.query("SELECT COUNT(*) FROM jobs")[0][0] == 0
 
 
@@ -245,14 +244,15 @@ def test_the_same_thing_twice_is_one_job_but_types_do_not_collide(database):
     with database.transaction() as conn:
         insert_job(conn, type="magnet", external_id="same")
         insert_job(conn, type="youtube", external_id="same")
-    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
-        with database.transaction() as conn:
-            insert_job(conn, type="magnet", external_id="same")
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"), database.transaction() as conn:
+        insert_job(conn, type="magnet", external_id="same")
 
 
 def test_updating_a_job_moves_updated_at_but_not_created_at(database):
     with database.transaction() as conn:
-        insert_job(conn, created_at="2026-01-01T00:00:00.000Z", updated_at="2026-01-01T00:00:00.000Z")
+        insert_job(
+            conn, created_at="2026-01-01T00:00:00.000Z", updated_at="2026-01-01T00:00:00.000Z"
+        )
     with database.transaction() as conn:
         conn.execute("UPDATE jobs SET status = 'downloading'")
     (row,) = database.query("SELECT * FROM jobs")
@@ -281,9 +281,8 @@ def test_subscriptions_defaults_and_constraints(database):
         "INSERT INTO subscriptions (channel_id, channel_name) VALUES ('', 'x')",
         "INSERT INTO subscriptions (channel_id, channel_name) VALUES ('UC8', NULL)",
     ):
-        with pytest.raises(sqlite3.IntegrityError):
-            with database.transaction() as conn:
-                conn.execute(sql)
+        with pytest.raises(sqlite3.IntegrityError), database.transaction() as conn:
+            conn.execute(sql)
 
 
 def test_the_expected_indexes_exist(database):
@@ -314,7 +313,7 @@ def fresh(tmp_path) -> sqlite3.Connection:
 
 
 def test_the_shipped_migrations_are_valid():
-    assert [m.name for m in SHIPPED][0] == "0001_initial.sql"
+    assert SHIPPED[0].name == "0001_initial.sql"
     assert [m.version for m in SHIPPED] == list(range(1, len(SHIPPED) + 1))
 
 
@@ -323,7 +322,9 @@ def test_pending_migrations_run_in_order_and_are_recorded(tmp_path, folder):
     write(folder, "0002_b.sql", "CREATE TABLE b (y); INSERT INTO a VALUES (1);")
     conn = fresh(tmp_path)
     assert migrate(conn, load_migrations(folder)) == ["0001_a.sql", "0002_b.sql"]
-    rows = conn.execute("SELECT version, name, checksum FROM schema_migrations ORDER BY 1").fetchall()
+    rows = conn.execute(
+        "SELECT version, name, checksum FROM schema_migrations ORDER BY 1"
+    ).fetchall()
     assert [(r["version"], r["name"]) for r in rows] == [(1, "0001_a.sql"), (2, "0002_b.sql")]
     assert all(len(r["checksum"]) == 64 for r in rows)
 
@@ -439,10 +440,14 @@ def test_open_closes_the_connection_when_a_migration_fails(tmp_path):
 def test_a_transaction_commits_on_success_and_rolls_back_on_error(database):
     with database.transaction() as conn:
         insert_job(conn, external_id="kept")
-    with pytest.raises(RuntimeError):
+
+    def fail_inside_a_transaction():
         with database.transaction() as conn:
             insert_job(conn, external_id="dropped")
             raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        fail_inside_a_transaction()
     assert [r["external_id"] for r in database.query("SELECT external_id FROM jobs")] == ["kept"]
     assert not database._conn.in_transaction
 

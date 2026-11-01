@@ -42,18 +42,32 @@ def image() -> Iterator[str]:
     docker.run(["rmi", "-f", tag])
 
 
-def start(image: str, env: dict[str, str], data: Path | None = None) -> str:
+def start(
+    image: str, env: dict[str, str], data: Path | None = None, config: Path | None = None
+) -> str:
     name = docker.unique_name("app")
     args = ["run", "-d", "--name", name, "--user", "4321:4321", *env_args(env)]
     if data is not None:
         args += ["-v", f"{data}:/data:ro"]
+    if config is not None:
+        args += ["-v", f"{config}:/config"]
     started = docker.run([*args, image], timeout=120)
     assert started.returncode == 0, started.stderr
     return name
 
 
+def folders(tmp_path: Path, config_mode: int = 0o777) -> tuple[Path, Path]:
+    """A media folder and a /config folder that the container user (4321, not us) may write or not."""
+    data, config = tmp_path / "data", tmp_path / "config"
+    data.mkdir()
+    config.mkdir()
+    config.chmod(config_mode)
+    return data, config
+
+
 def test_the_container_becomes_healthy_as_a_non_root_user(image, tmp_path):
-    name = start(image, ENV, tmp_path)
+    data, config = folders(tmp_path)
+    name = start(image, ENV, data, config)
     try:
         deadline = time.monotonic() + 120
         status = ""
@@ -63,6 +77,7 @@ def test_the_container_becomes_healthy_as_a_non_root_user(image, tmp_path):
         assert status == "healthy", docker.run(["logs", name]).stdout
         assert docker.run(["exec", name, "id", "-u"]).stdout.strip() == "4321"
         assert docker.run(["port", name]).stdout.strip() == ""
+        assert (config / "app.db").exists(), "the migrated database is created in /config"
     finally:
         docker.run(["rm", "-f", name])
 
@@ -93,5 +108,26 @@ def test_a_bad_configuration_exits_2_with_a_json_error(image):
         assert docker.run(["inspect", "-f", "{{.State.ExitCode}}", name]).stdout.strip() == "2"
         last = docker.run(["logs", name]).stdout.strip().splitlines()[-1]
         assert json.loads(last)["msg"] == "invalid configuration"
+    finally:
+        docker.run(["rm", "-f", name])
+
+
+def test_a_config_folder_the_user_cannot_write_makes_the_app_unhealthy_with_a_hint(image, tmp_path):
+    """What Docker's root:root ./config/app does to an app running as PUID:PGID."""
+    data, config = folders(tmp_path, config_mode=0o755)  # owned by us, not by uid 4321
+    name = start(image, ENV, data, config)
+    try:
+        time.sleep(8)
+        probe = (
+            "import urllib.request, urllib.error\n"
+            "try:\n urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)\n"
+            "except urllib.error.HTTPError as e:\n print(e.code, e.read().decode())\n"
+        )
+        answer = docker.run(["exec", name, "python", "-c", probe]).stdout
+        assert answer.startswith("503"), answer
+        assert "database" in answer
+        logs = docker.run(["logs", name]).stdout
+        assert '"msg": "database unavailable"' in logs
+        assert "make layout" in logs
     finally:
         docker.run(["rm", "-f", name])

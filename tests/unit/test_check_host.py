@@ -29,6 +29,11 @@ class Host:
     puid: int
     pgid: int
 
+    @property
+    def app_config(self) -> Path:
+        """The fake config/app: where the app keeps its database."""
+        return self.tmp / "config-app"
+
     def docker(
         self,
         *,
@@ -118,7 +123,7 @@ else echo "{vm}"; [ "{vm}" != none ] || exit 1; fi""",
             ["--env-file", str(self.env_file), *args],
             stubs=self.stubs,
             isolate_path=self.base,
-            env={"CHECK_ROOT": str(self.root)},
+            env={"CHECK_ROOT": str(self.root), "APP_CONFIG_DIR": str(self.app_config)},
         )
 
 
@@ -143,6 +148,11 @@ def host(tmp_path: Path) -> Host:
         pgid,
     )
     h.write_env()
+    # A correct app state folder, as create-layout.sh leaves it; tests break it on purpose.
+    h.app_config.mkdir()
+    h.app_config.chmod(0o2775)
+    if os.geteuid() == 0:
+        os.chown(h.app_config, puid, pgid)
     return h
 
 
@@ -559,3 +569,39 @@ def test_layout_skips_when_sudo_would_need_a_password(host):
     finally:
         folder.chmod(0o755)
     assert status(result, "layout") == "SKIP"
+
+
+# ------------------------------------------------------------------ layout: app state folder
+
+
+def test_layout_fails_when_the_app_state_folder_is_missing(host):
+    host.layout()
+    host.app_config.rmdir()
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert "state folder" in result.stdout
+    assert "create-layout.sh" in result.stdout
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to give the folder to another user")
+def test_layout_fails_when_the_app_state_folder_belongs_to_root(host):
+    """What Docker leaves behind for a missing bind-mount source: root:root, app cannot write."""
+    host.layout()
+    os.chown(host.app_config, 0, 0)
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert f"owned by 0:0, but the app runs as {host.puid}:{host.pgid}" in result.stdout
+    assert "create-layout.sh" in result.stdout
+
+
+def test_layout_fails_when_the_owner_cannot_use_the_state_folder(host):
+    host.layout()
+    host.app_config.chmod(0o555)
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert "needs rwx" in result.stdout
+
+
+def test_layout_passes_with_a_correct_app_state_folder(host):
+    host.layout()
+    assert status(_layout(host), "layout") == "PASS"
