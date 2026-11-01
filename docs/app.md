@@ -53,8 +53,9 @@ There is no `/docs`, `/redoc` or `/openapi.json`.
 ## Reachability
 
 The app is on the default bridge network and **publishes no port**, so it cannot be reached
-from outside the host. The reverse proxy with login (#29) will reach it as `http://app:8000`
-over the bridge. To look at it meanwhile, from the VM:
+from outside the host. The reverse proxy with login (#29, [proxy.md](proxy.md)) reaches it as
+`http://app:8000` over the bridge, and is the only way in from the LAN: `http://<vm>/`. To
+look at it directly, from the VM:
 
 ```bash
 docker compose exec app python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/health').read().decode())"

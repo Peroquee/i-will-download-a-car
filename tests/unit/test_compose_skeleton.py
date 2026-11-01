@@ -60,14 +60,13 @@ def test_image_tag_is_explicit(name):
 
 def test_only_built_services_start_by_default():
     # Placeholders for later issues sit behind profiles so `up -d` works today.
-    assert set(default_services(COMPOSE)) == {"gluetun", "qbittorrent", "app"}
+    assert set(default_services(COMPOSE)) == {"gluetun", "qbittorrent", "app", "proxy"}
 
 
 @pytest.mark.parametrize(
     ("name", "profile"),
     [
         ("watchdog", "planned"),
-        ("proxy", "planned"),
     ],
 )
 def test_placeholder_services_are_behind_profiles(name, profile):
@@ -153,10 +152,11 @@ def test_gluetun_has_its_own_health_check_that_qbittorrent_waits_for():
 
 
 @pytest.mark.security
-def test_only_gluetun_publishes_ports():
-    # qbittorrent shares gluetun's namespace, so its ports are gluetun's.
+def test_only_gluetun_and_the_proxy_publish_ports():
+    # qbittorrent shares gluetun's namespace, so its ports are gluetun's. The proxy (#29) is the
+    # way in from the LAN; the app publishes nothing.
     published = {n for n, svc in services(COMPOSE).items() if svc.get("ports")}
-    assert published == {"gluetun"}
+    assert published == {"gluetun", "proxy"}
 
 
 @pytest.mark.security
