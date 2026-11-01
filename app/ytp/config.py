@@ -56,6 +56,11 @@ class Settings:
         return bool(self.jellyfin_url and self.jellyfin_api_key)
 
     @property
+    def database_path(self) -> Path:
+        """The SQLite file, in the /config bind mount (./config/app on the host)."""
+        return self.config_dir / "app.db"
+
+    @property
     def downloads_dir(self) -> Path:
         return self.data_root / "downloads"
 

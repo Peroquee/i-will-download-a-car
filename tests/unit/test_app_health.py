@@ -26,7 +26,12 @@ ENV = {
 
 
 def make(tmp_path: Path, **env: str) -> TestClient:
-    settings = Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path), **env})
+    """An app whose /config is a real folder (tmp_path/config), as the bind mount is."""
+    config = tmp_path / "config"
+    config.mkdir(exist_ok=True)
+    settings = Settings.from_env(
+        {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config), **env}
+    )
     return TestClient(create_app(settings))
 
 
@@ -37,13 +42,13 @@ def test_health_is_ok_when_the_data_root_is_there(tmp_path):
     assert response.json() == {
         "status": "ok",
         "version": __version__,
-        "checks": {"data_root": "ok"},
+        "checks": {"data_root": "ok", "database": "ok"},
     }
 
 
 def test_health_is_503_degraded_when_the_media_volume_is_missing(tmp_path):
     """So Docker's health check notices an empty mount point or a detached volume."""
-    with make(tmp_path / "not-mounted") as client:
+    with make(tmp_path, DATA_ROOT=str(tmp_path / "not-mounted")) as client:
         response = client.get("/health")
     assert response.status_code == 503
     assert response.json()["status"] == "degraded"
@@ -90,7 +95,9 @@ def test_startup_says_when_jellyfin_is_not_configured(tmp_path, capsys):
 
 
 def test_create_app_reads_the_environment_by_default(tmp_path, monkeypatch):
-    for name, value in {**ENV, "DATA_ROOT": str(tmp_path)}.items():
+    (tmp_path / "config").mkdir()
+    env = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(tmp_path / "config")}
+    for name, value in env.items():
         monkeypatch.setenv(name, value)
     with TestClient(create_app()) as client:
         assert client.get("/health").status_code == 200
@@ -127,3 +134,58 @@ def test_a_bad_configuration_stops_the_process_with_a_json_error_and_exit_2():
     error = json.loads(result.stdout.strip().splitlines()[-1])
     assert error["msg"] == "invalid configuration"
     assert any("MEDIA_DIR_MOVIES" in p for p in error["problems"])
+
+
+def test_health_is_503_when_the_database_folder_is_missing(tmp_path, capfd):
+    """/config not mounted: the app stays up, says why in the log and in /health."""
+    with make(tmp_path, CONFIG_DIR=str(tmp_path / "no-such-config")) as client:
+        response = client.get("/health")
+    body = response.json()
+    assert response.status_code == 503
+    assert body["status"] == "degraded"
+    assert body["checks"]["data_root"] == "ok"
+    assert body["checks"]["database"].startswith("unavailable: database folder")
+    log = capfd.readouterr().out
+    assert '"msg": "database unavailable"' in log
+    assert "make layout" in log
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_health_is_503_when_the_database_folder_is_not_writable(tmp_path):
+    """The VM case: Docker made ./config/app as root, the app runs as another user."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config").chmod(0o555)
+    try:
+        with make(tmp_path) as client:
+            response = client.get("/health")
+    finally:
+        (tmp_path / "config").chmod(0o755)
+    assert response.status_code == 503
+    assert "not writable" in response.json()["checks"]["database"]
+
+
+def test_health_notices_a_database_that_stops_being_usable(tmp_path):
+    with make(tmp_path) as client:
+        assert client.get("/health").status_code == 200
+        client.app.state.db.close()
+        response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json()["checks"]["database"].startswith("unavailable: query failed")
+
+
+def test_the_database_is_closed_when_the_app_stops(tmp_path):
+    with make(tmp_path) as client:
+        db = client.app.state.db
+        assert db is not None
+    with pytest.raises(Exception, match="closed"):
+        db.query("SELECT 1")
+
+
+def test_a_broken_database_file_does_not_stop_the_app(tmp_path):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "app.db").write_bytes(b"this is not a database" * 100)
+    with make(tmp_path) as client:
+        response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json()["checks"]["database"].startswith("unavailable:")

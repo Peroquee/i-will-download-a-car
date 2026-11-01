@@ -1,7 +1,7 @@
 """The FastAPI application (issue #8): configuration, logging and /health.
 
-Later issues add the database (#9), the qBittorrent and Jellyfin clients (#10, #11) and the
-scheduler (#12). Everything with a lifetime is created in `create_app` / the lifespan and
+The database (#9) is opened at startup; later issues add the qBittorrent and Jellyfin clients
+(#10, #11) and the scheduler (#12). Everything with a lifetime is created in `create_app` / the lifespan and
 hung off `app.state`, so tests build the app with explicit settings and nothing is global.
 """
 
@@ -15,6 +15,7 @@ from fastapi import FastAPI, Response, status
 
 from . import __version__
 from .config import Settings
+from .db import Database, DatabaseError
 from .logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("starting", extra={"version": __version__, **settings.summary()})
     if not settings.jellyfin_configured:
         logger.warning("jellyfin is not configured: library refreshes are disabled")
-    yield
-    logger.info("stopped")
+    # A database that cannot be opened must not hide behind a crash loop: the app stays up
+    # "degraded", logs the reason and the fix, and /health answers 503 until it is restarted.
+    app.state.db = None
+    app.state.db_error = None
+    try:
+        app.state.db = Database.open(settings.database_path)
+        logger.info("database ready", extra={"path": str(settings.database_path)})
+    except DatabaseError as exc:
+        app.state.db_error = str(exc)
+        logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
+    try:
+        yield
+    finally:
+        if app.state.db is not None:
+            app.state.db.close()
+        logger.info("stopped")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -44,6 +59,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
     )
     app.state.settings = resolved
+    app.state.db = None
+    app.state.db_error = None
 
     @app.get("/health")
     async def health(response: Response) -> dict[str, object]:
@@ -54,13 +71,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         own watchdog, #18/#22). A degraded app answers 503, so Docker's HEALTHCHECK sees it.
         """
         data_root_ok = resolved.data_root.is_dir()
-        healthy = data_root_ok
+        db: Database | None = app.state.db
+        if db is None:
+            db_state = f"unavailable: {app.state.db_error or 'not opened'}"
+        else:
+            problem = db.check()
+            db_state = "ok" if problem is None else f"unavailable: {problem}"
+        healthy = data_root_ok and db_state == "ok"
         if not healthy:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
             "status": "ok" if healthy else "degraded",
             "version": __version__,
-            "checks": {"data_root": "ok" if data_root_ok else "missing"},
+            "checks": {"data_root": "ok" if data_root_ok else "missing", "database": db_state},
         }
 
     return app
