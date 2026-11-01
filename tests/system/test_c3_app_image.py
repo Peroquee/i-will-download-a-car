@@ -57,7 +57,7 @@ def start(
 
 
 def folders(tmp_path: Path, config_mode: int = 0o777) -> tuple[Path, Path]:
-    """A media folder and a /config folder that the container user (4321, not us) may write or not."""
+    """A media folder and a /config folder that the container user (4321) may or may not write."""
     data, config = tmp_path / "data", tmp_path / "config"
     data.mkdir()
     config.mkdir()
