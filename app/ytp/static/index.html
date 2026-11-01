@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>youtube-premium</title>
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link id="favicon" rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<div id="vpn" class="vpn-bar vpn-unknown" role="status">
+  <span class="vpn-dot" aria-hidden="true"></span>
+  <span class="vpn-main"><strong id="vpn-text" data-i18n="vpn.unknown"></strong><span id="vpn-detail" class="vpn-detail"></span></span>
+</div>
 <div class="wrap">
   <main class="card" aria-labelledby="title">
     <header class="header">
@@ -32,9 +36,6 @@
         <p class="subtitle" data-i18n="subtitle"></p>
       </div>
       <div class="tools">
-        <span id="vpn" class="badge badge-unknown" role="status" aria-live="polite">
-          <span class="dot" aria-hidden="true"></span><span id="vpn-text" data-i18n="vpn.unknown"></span>
-        </span>
         <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
       </div>
     </header>
@@ -248,6 +249,16 @@
     "err.extra_forbidden": "Unerwartetes Feld.",
     "err.string_type": "Bitte Text eingeben.",
     "err.other": "Ungültiger Wert.",
+    "vpn.mismatch": "ACHTUNG: Die Verbindung läuft nicht über das VPN",
+    "vpn.stale": "Status veraltet – der Server antwortet nicht",
+    "vpn.d.down": "Downloads sind angehalten, bis das VPN wieder da ist.",
+    "vpn.d.mismatch": "Die Prüfung der Ausgangsadresse schlägt Alarm. Downloads am besten anhalten und das VPN prüfen.",
+    "vpn.d.blind": "Der Wächter kann den VPN-Zustand nicht lesen. Sicherheitshalber wie „aus“ behandeln.",
+    "vpn.d.starting": "Der Wächter hat noch keinen Zustand gemessen.",
+    "vpn.d.unknown": "Der Wächter antwortet nicht. Der VPN-Zustand ist nicht bekannt.",
+    "vpn.paused": "Torrents angehalten",
+    "vpn.since": "seit {when}",
+    "vpn.country": "Ausgang: {country}",
     "help.title": "Hilfe",
     "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Das Ergebnis erscheint später in Jellyfin."
   },
@@ -329,6 +340,16 @@
     "err.extra_forbidden": "Unexpected field.",
     "err.string_type": "Please enter text.",
     "err.other": "Invalid value.",
+    "vpn.mismatch": "WARNING: traffic is not going through the VPN",
+    "vpn.stale": "Status out of date - the server does not answer",
+    "vpn.d.down": "Downloads are paused until the VPN is back.",
+    "vpn.d.mismatch": "The exit address check raised an alarm. Best pause downloads and check the VPN.",
+    "vpn.d.blind": "The watchdog cannot read the VPN state. Treat it like down to be safe.",
+    "vpn.d.starting": "The watchdog has not measured a state yet.",
+    "vpn.d.unknown": "The watchdog does not answer. The VPN state is not known.",
+    "vpn.paused": "torrents paused",
+    "vpn.since": "since {when}",
+    "vpn.country": "exit: {country}",
     "help.title": "Help",
     "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. The result appears in Jellyfin later."
   }

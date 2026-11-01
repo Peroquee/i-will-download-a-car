@@ -208,20 +208,43 @@
     $("probe-duration").textContent = "";
   }
 
-  /* ---------------------------------------------------------------- VPN badge */
+  /* ---------------------------------------------------------------- VPN bar (#28) */
 
-  var vpnState = "unknown";
+  var VPN_POLL_MS = 5000;
+  var vpnData = null;       // last answer of /api/vpn; null = never answered
+  var vpnStale = false;     // the last request failed: what is shown may be old
+  var baseTitle = document.title;
 
   function refreshVpnText() {
-    $("vpn").className = "badge badge-" + vpnState;
-    $("vpn-text").textContent = t("vpn." + vpnState);
+    var info = L.vpnView(vpnStale ? null : vpnData);
+    var bar = $("vpn");
+    bar.className = "vpn-bar vpn-" + info.view + (vpnStale ? " vpn-stale" : "");
+    bar.setAttribute("role", info.alert ? "alert" : "status");
+    $("vpn-text").textContent = vpnStale ? t("vpn.stale") : t("vpn." + info.view);
+    var parts = [];
+    if (!vpnStale && ["down", "mismatch", "blind", "starting", "unknown"].indexOf(info.view) >= 0) {
+      parts.push(t("vpn.d." + info.view));
+    }
+    if (!vpnStale && info.paused) parts.push(t("vpn.paused"));
+    if (!vpnStale && info.since && info.view !== "unknown") {
+      var age = L.age(info.since, Date.now());
+      if (age) parts.push(t("vpn.since", { when: age.unit === "now" ? t("time.now") : t("time." + age.unit, { n: age.n }) }));
+    }
+    if (info.country) parts.push(t("vpn.country", { country: info.country }));
+    $("vpn-detail").textContent = parts.join(" · ");
+    // The tab shows it too, for when the page is in the background.
+    document.title = (info.alert || vpnStale ? "\u26a0 " : "") + baseTitle;
+    $("favicon").setAttribute("href", info.alert ? "/static/favicon-alert.svg" : "/static/favicon.svg");
   }
 
   function pollVpn() {
     fetch("/api/vpn", { credentials: "same-origin", headers: { "Accept": "application/json" } })
-      .then(function (response) { return response.json(); })
-      .then(function (data) { vpnState = ["ok", "down", "blind", "starting"].indexOf(data.state) >= 0 ? data.state : "unknown"; })
-      .catch(function () { vpnState = "unknown"; })
+      .then(function (response) {
+        if (!response.ok) throw new Error("status " + response.status);
+        return response.json();
+      })
+      .then(function (data) { vpnData = data; vpnStale = false; })
+      .catch(function () { vpnStale = true; })
       .then(refreshVpnText);
   }
 
@@ -255,7 +278,12 @@
       clearErrors();
     });
     pollVpn();
-    window.setInterval(pollVpn, 15000);
+    window.setInterval(function () {
+      if (document.visibilityState !== "hidden") pollVpn();
+    }, VPN_POLL_MS);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") pollVpn();
+    });
   }
 
   init();
