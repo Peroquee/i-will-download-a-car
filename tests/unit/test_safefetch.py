@@ -12,6 +12,7 @@ from __future__ import annotations
 import http.server
 import socket
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -708,3 +709,52 @@ def test_destination_is_never_overwritten(world, server, tmp_path):
             "http://podcast.example/e.mp3", target, kind="media", max_bytes=100
         )
     assert target.read_bytes() == b"mine"
+
+
+@pytest.mark.security
+def test_headers_that_trickle_in_are_cut_off_by_the_deadline(monkeypatch):
+    """A server that sends its headers a byte at a time must not hold the thread (slow loris)."""
+    monkeypatch.setattr(safefetch, "HEADER_DEADLINE", 0.3)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    done = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        conn.recv(4096)
+        try:
+            for byte in b"HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nX-Slow: " + b"a" * 200:
+                conn.sendall(bytes([byte]))
+                if done.wait(0.1):
+                    break
+        except OSError:
+            pass
+        conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    fetcher = SafeFetcher(
+        resolver=lambda h, p: [PUBLIC],
+        dialer=lambda target, ip: socket.create_connection(("127.0.0.1", port)),
+    )
+    started = time.monotonic()
+    with pytest.raises(FetchError) as error:
+        fetcher.fetch_bytes("http://podcast.example/x", kind="feed", max_bytes=100)
+    done.set()
+    listener.close()
+    assert error.value.kind == "network"
+    assert time.monotonic() - started < 5
+
+
+@pytest.mark.security
+def test_a_body_that_trickles_in_is_cut_off_by_the_deadline(world, server):
+    server.routes["/x"] = (200, {"Content-Type": "text/xml"}, b"x" * 300_000)
+    ticks = iter(range(0, 10_000, 100))
+    fetcher = world.fetcher(clock=lambda: next(ticks))
+    with pytest.raises(FetchError) as error:
+        fetcher.fetch_bytes(
+            "http://podcast.example/x", kind="feed", max_bytes=10**6, deadline_seconds=150
+        )
+    assert error.value.kind == "network"
+    assert "too slowly" in error.value.message

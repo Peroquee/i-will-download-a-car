@@ -41,12 +41,14 @@ the rules above), `network`, `not_found` (404/410), `temporary` (429/5xx), `bad_
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import ipaddress
 import logging
 import re
 import socket
 import ssl
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -64,6 +66,8 @@ MAX_ADDRESSES_TRIED = 3
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 20.0
 CHUNK = 64 * 1024
+HEADER_DEADLINE = 30.0  # the whole wait for the answer's headers, however slowly they trickle
+SMALL_DEADLINE = 60.0  # a whole feed or cover
 HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
 
 # IPv6 ranges that carry an IPv4 address inside: refused whatever they wrap.
@@ -219,6 +223,11 @@ def _connect_through_proxy(proxy_host: str, proxy_port: int, ip: str, port: int)
         raise
 
 
+def _abort(sock: socket.socket) -> None:
+    with contextlib.suppress(OSError):  # already closed
+        sock.shutdown(socket.SHUT_RDWR)
+
+
 def make_dialer(proxy: str = "", ssl_context: ssl.SSLContext | None = None) -> Dialer:
     """The real way to reach a checked address: directly, or through an HTTP proxy tunnel."""
     proxy_parts = urlsplit(proxy) if proxy else None
@@ -340,12 +349,20 @@ class SafeFetcher:
             request_target = f"http://{shown}:{target.port}{target.path}"
         else:
             request_target = target.path
+        # A server that sends its headers one byte at a time must not hold this thread for long:
+        # the per-read timeout alone would allow that. After the deadline the socket is shut down,
+        # which makes the blocked read fail.
+        timer = threading.Timer(HEADER_DEADLINE, _abort, args=(sock,))
+        timer.daemon = True
+        timer.start()
         try:
             conn.request("GET", request_target, headers=headers)
             return conn, conn.getresponse()
         except BaseException:
             conn.close()
             raise
+        finally:
+            timer.cancel()
 
     def _open(self, url: str, kind: str):
         """Follow redirects (each hop fully checked); returns (conn, response, final Target)."""
@@ -405,20 +422,34 @@ class SafeFetcher:
 
     # -- the two public ways to use it -------------------------------------------------------
 
-    def fetch_bytes(self, url: str, *, kind: str, max_bytes: int) -> Fetched:
-        """A small answer (feed, cover) in memory."""
+    def fetch_bytes(
+        self, url: str, *, kind: str, max_bytes: int, deadline_seconds: float = SMALL_DEADLINE
+    ) -> Fetched:
+        """A small answer (feed, cover) in memory, within `deadline_seconds` altogether."""
         conn, response, target, content_type = self._open(url, kind)
+        started = self._clock()
+        chunks: list[bytes] = []
+        size = 0
         try:
             self._declared_size(response, max_bytes)
-            try:
-                body = response.read(max_bytes + 1)
-            except (OSError, http.client.HTTPException):
-                raise FetchError("network", f"{target.host} stopped answering") from None
+            while True:
+                if self._clock() - started > deadline_seconds:
+                    raise FetchError("network", f"{target.host} answered too slowly")
+                try:
+                    chunk = response.read(CHUNK)
+                except (OSError, http.client.HTTPException):
+                    raise FetchError("network", f"{target.host} stopped answering") from None
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise FetchError(
+                        "too_large", f"the answer is larger than {max_bytes // 1024} KiB"
+                    )
+                chunks.append(chunk)
         finally:
             conn.close()
-        if len(body) > max_bytes:
-            raise FetchError("too_large", f"the answer is larger than {max_bytes // 1024} KiB")
-        return Fetched(target.url, content_type, body, len(body))
+        return Fetched(target.url, content_type, b"".join(chunks), size)
 
     def download(
         self,

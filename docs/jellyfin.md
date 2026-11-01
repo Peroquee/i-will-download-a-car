@@ -46,6 +46,12 @@ and shows that in its job list instead of failing silently.
   bits; the new files hardlinked by the app inherit mode 664/775 from `UMASK=002`, which keeps
   them readable.
 
+## Podcasts: which library type (issue #34)
+
+Jellyfin has no podcast library type. Recommended: a library of type **Music** pointing at
+`/media/jellyfin/Podcasts`; each podcast is then an artist/album and each episode a track, from
+the tags in the files. Details and the alternative (Audiobookshelf) in [podcasts.md](podcasts.md#jellyfin).
+
 ## Audiobooks: open question for the owner
 
 The library folder `Hörbücher` exists, but Jellyfin has no first-class audiobook support. Two
