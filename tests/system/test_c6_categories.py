@@ -47,7 +47,10 @@ class Client:
         self.base = base
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
         data = urllib.parse.urlencode({"username": USER, "password": PASSWORD}).encode()
-        assert self.opener.open(f"{base}/api/v2/auth/login", data, timeout=20).read() == b"Ok."
+        # 204 with no body on success (current qBittorrent), 200 "Ok." on older versions;
+        # a wrong password raises HTTPError 401, which the caller's retry loop treats as "not up".
+        with self.opener.open(f"{base}/api/v2/auth/login", data, timeout=20) as resp:
+            assert resp.status == 204 or resp.read() == b"Ok."
 
     def get(self, path: str):
         return json.loads(self.opener.open(f"{self.base}/api/v2/{path}", timeout=20).read())
