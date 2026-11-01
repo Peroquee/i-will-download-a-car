@@ -92,13 +92,13 @@ library folders):
   downloads/            <- qBittorrent only; Jellyfin never sees it
     movies/ series/ audiobooks/ music/
     incomplete/         <- unfinished torrents, moved to the category folder when done
-  Filme/ Serien/ Hörbücher/ Musik/ Youtube/    <- the library folders
+  Filme/ Serien/ Hörbücher/ Musik/ Podcasts/ Youtube/    <- the library folders
 ```
 
 The library folder names are settings in `.env` (relative to `DATA_ROOT`), so another setup
 can use other names; the defaults are the owner's: `MEDIA_DIR_MOVIES=Filme`,
 `MEDIA_DIR_SERIES=Serien`, `MEDIA_DIR_AUDIOBOOKS=Hörbücher`, `MEDIA_DIR_MUSIC=Musik`,
-`MEDIA_DIR_YOUTUBE=Youtube`. Spell them exactly as on disk (`ö`, `ü` included). **An `.env`
+`MEDIA_DIR_PODCASTS=Podcasts`, `MEDIA_DIR_YOUTUBE=Youtube`. Spell them exactly as on disk (`ö`, `ü` included). **An `.env`
 made before this step lacks these lines:** copy them from `.env.example`, otherwise
 `docker compose` stops and names the missing one.
 

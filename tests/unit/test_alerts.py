@@ -31,6 +31,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 NOW = Alert(

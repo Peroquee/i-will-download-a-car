@@ -33,7 +33,7 @@ and shows that in its job list instead of failing silently.
 ## How the libraries relate to this stack
 
 - **Jellyfin manages its libraries itself** (Dashboard > Libraries). They already point at the
-  media subfolders: `Filme`, `Serien`, `Hörbücher`, `Musik`, `Youtube`. Nothing in this repo
+  media subfolders: `Filme`, `Serien`, `Hörbücher`, `Musik`, `Podcasts`, `Youtube`. Nothing in this repo
   creates or changes a library.
 - **A library must never point at `/media/jellyfin` as a whole.** That share also holds
   `downloads/` (unfinished and seeding torrents), which would then show up in Jellyfin.

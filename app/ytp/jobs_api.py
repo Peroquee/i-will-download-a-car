@@ -31,6 +31,7 @@ from . import jobs
 from .apiutil import hand_to_qbittorrent, problem
 from .clients.qbittorrent import QbitClient, QbitError
 from .jobs import Job
+from .podcast_jobs import JOB_TYPE as PODCAST_JOB_TYPE
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,8 @@ def job_label(job: Job) -> str:
         label = f"{text('artist')} - {text('album')}"
     elif kind == "youtube":
         label = f"{text('channel')} - {text('title')}"
+    elif kind == "podcast":
+        label = f"{text('podcast')} - {text('title')}"
     else:
         label = ""
     label = label.strip(" -")
@@ -107,8 +110,8 @@ def job_progress(job: Job, torrents: dict[str, int], youtube: dict[int, int]) ->
         return 100
     if job.status != "downloading":
         return None
-    if job.type == YOUTUBE_JOB_TYPE:
-        return youtube.get(job.id)
+    if job.type in (YOUTUBE_JOB_TYPE, PODCAST_JOB_TYPE):
+        return youtube.get(job.id)  # the workers' progress, by job id (one dict for both)
     return torrents.get(job.external_id.lower())
 
 
@@ -144,10 +147,14 @@ async def list_jobs(request: Request, limit: int = DEFAULT_LIMIT, status: str | 
     rows = await asyncio.to_thread(jobs.list_jobs, db, limit=limit, status=status)
     counts = await asyncio.to_thread(jobs.status_counts, db)
     torrents: dict[str, int] = {}
-    if any(j.status == "downloading" and j.type != YOUTUBE_JOB_TYPE for j in rows):
+    own_work = (YOUTUBE_JOB_TYPE, PODCAST_JOB_TYPE)
+    if any(j.status == "downloading" and j.type not in own_work for j in rows):
         torrents = await asyncio.to_thread(request.app.state.torrent_progress.get)
     worker = request.app.state.youtube_worker
     youtube = dict(worker.progress) if worker is not None else {}
+    podcast_worker = request.app.state.podcast_worker
+    if podcast_worker is not None:
+        youtube.update(podcast_worker.progress)
     return {"jobs": [summarize(j, torrents, youtube) for j in rows], "counts": counts}
 
 
@@ -171,6 +178,17 @@ async def retry_job(job_id: int, request: Request):
         if outcome != "requeued":
             return problem(409, "only a failed job can be retried", job.id)
         worker.wake()
+        return summarize(queued, {}, {})
+    if job.type == PODCAST_JOB_TYPE:
+        podcast_worker = request.app.state.podcast_worker
+        if podcast_worker is None:
+            return problem(503, "the download worker is not running", job.id)
+        queued, outcome = await asyncio.to_thread(
+            jobs.submit_job, db, job.type, job.external_id, metadata_json
+        )
+        if outcome != "requeued":
+            return problem(409, "only a failed job can be retried", job.id)
+        podcast_worker.wake()
         return summarize(queued, {}, {})
     if job.type != "magnet":
         return problem(409, "this kind of job cannot be retried", job.id)

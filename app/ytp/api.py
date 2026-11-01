@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_core import PydanticCustomError
 
-from . import jobs, jobs_api, subscriptions_api
+from . import jobs, jobs_api, podcasts_api, subscriptions_api
 from .apiutil import PROBE_STATUS, hand_to_qbittorrent, problem
 from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
@@ -195,3 +195,4 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/youtube/download", youtube_download, methods=["POST"])
     jobs_api.register(app)
     subscriptions_api.register(app)
+    podcasts_api.register(app)
