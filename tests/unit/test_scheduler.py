@@ -305,7 +305,7 @@ def test_the_scheduler_runs_with_the_app_and_stops_with_it(tmp_path):
     with make_client(tmp_path) as client:
         scheduler = client.app.state.scheduler
         assert scheduler.running
-        assert scheduler.job_ids() == [HEARTBEAT_JOB_ID]
+        assert sorted(scheduler.job_ids()) == sorted([HEARTBEAT_JOB_ID, "subscription-poll"])
         assert client.get("/health").json()["checks"]["scheduler"] == "ok"
         assert get_state(client.app.state.db, KEY_LAST_HEARTBEAT) is not None
     assert not scheduler.running

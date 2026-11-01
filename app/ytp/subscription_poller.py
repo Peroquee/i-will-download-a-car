@@ -124,7 +124,7 @@ class SubscriptionPoller:
         try:
             entries = parse_feed(self.feeds.fetch(sub.channel_id), sub.channel_id)
         except FeedError as error:
-            subscriptions.record_poll(self.db, sub.id, error.message)
+            subscriptions.record_poll(self.db, sub.id, error.message, self._now())
             raise
         queued = 0
         for entry in new_entries(sub, entries):
@@ -141,7 +141,7 @@ class SubscriptionPoller:
                 retry_failed=False,
             )
             queued += outcome == "created"
-        subscriptions.record_poll(self.db, sub.id, None)
+        subscriptions.record_poll(self.db, sub.id, None, self._now())
         logger.info(
             "channel polled",
             extra={"subscription_id": sub.id, "entries": len(entries), "queued": queued},
@@ -169,7 +169,9 @@ class SubscriptionPoller:
             except Exception:  # a bug in one channel must not stop the others
                 result.failed += 1
                 logger.exception("channel poll crashed", extra={"subscription_id": sub.id})
-                subscriptions.record_poll(self.db, sub.id, "internal error while polling")
+                subscriptions.record_poll(
+                    self.db, sub.id, "internal error while polling", self._now()
+                )
             result.polled += 1
         if result.queued and self.worker is not None:
             self.worker.wake()

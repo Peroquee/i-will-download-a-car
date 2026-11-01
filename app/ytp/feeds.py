@@ -76,8 +76,9 @@ def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
     if root.tag != f"{ATOM}feed":
         raise FeedError("bad_feed", "this is not an Atom feed")
     if channel_id is not None:
+        # The feed's own `yt:channelId` comes WITHOUT the "UC" prefix (the entries have it).
         declared = (root.findtext(f"{YT}channelId") or "").strip()
-        if declared and declared != channel_id:
+        if declared and declared not in (channel_id, channel_id.removeprefix("UC")):
             raise FeedError("bad_feed", "the feed belongs to a different channel")
     entries: list[FeedEntry] = []
     for node in root.findall(f"{ATOM}entry")[:MAX_ENTRIES]:

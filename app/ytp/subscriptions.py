@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from .db import Database
 
@@ -103,13 +104,25 @@ def delete(db: Database, subscription_id: int) -> bool:
         )
 
 
-def record_poll(db: Database, subscription_id: int, error: str | None = None) -> None:
-    """Note that the channel was just polled: `last_checked` = now, `last_error` = the reason
-    (None clears it). Used by the poller (#20)."""
+def record_poll(
+    db: Database, subscription_id: int, error: str | None = None, when: datetime | None = None
+) -> None:
+    """Note that the channel was just polled: `last_checked` = now (or `when`), `last_error` =
+    the reason (None clears it). Used by the poller (#20)."""
     message = None if error is None else error[:MAX_ERROR_LENGTH]
     with db.transaction() as conn:
-        conn.execute(
-            "UPDATE subscriptions SET last_checked = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
-            "last_error = ? WHERE id = ?",
-            (message, subscription_id),
-        )
+        if when is None:
+            stamp = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+            conn.execute(
+                f"UPDATE subscriptions SET last_checked = {stamp}, last_error = ? WHERE id = ?",
+                (message, subscription_id),
+            )
+        else:
+            text = (
+                when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.")
+                + f"{when.microsecond // 1000:03d}Z"
+            )
+            conn.execute(
+                "UPDATE subscriptions SET last_checked = ?, last_error = ? WHERE id = ?",
+                (text, message, subscription_id),
+            )
