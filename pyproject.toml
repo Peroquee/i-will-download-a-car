@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The app package lives in app/ytp (the Docker build context is app/).
-pythonpath = ["app"]
+pythonpath = ["app", "scripts/install"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
 markers = [
