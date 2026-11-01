@@ -151,7 +151,12 @@ def test_add_list_filter_and_pause_a_magnet(client):
         # Whichever generation the image is, both names of the state work through the client.
         assert [t.hash for t in client.list_torrents("paused")] == [HASH]
         assert [t.hash for t in client.list_torrents("stopped")] == [HASH]
-        assert client.list_torrents("downloading") == []
+        # The "downloading" filter is qBittorrent's isDownloading(): it ALSO matches stoppedDL,
+        # queuedDL and stalledDL, so a paused torrent is still listed. The state decides.
+        (paused,) = client.list_torrents(hashes=[HASH])
+        assert paused.state in {"stoppedDL", "pausedDL"}
+        assert paused.paused
+        assert [t.hash for t in client.list_torrents("downloading")] == [HASH]
 
         client.resume_all()
     finally:

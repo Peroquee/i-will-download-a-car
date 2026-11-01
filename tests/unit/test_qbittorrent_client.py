@@ -414,6 +414,24 @@ def test_a_finished_torrent_and_missing_optional_fields(fake):
     assert torrent.size == 0
 
 
+@pytest.mark.parametrize(
+    ("state", "paused"),
+    [
+        ("stoppedDL", True),
+        ("stoppedUP", True),
+        ("pausedDL", True),
+        ("pausedUP", True),
+        ("downloading", False),
+        ("stalledDL", False),
+        ("queuedDL", False),
+        ("uploading", False),
+    ],
+)
+def test_paused_is_decided_by_the_state_not_by_a_filter(state, paused):
+    torrent = Torrent.from_api({"hash": HASH, "name": "x", "state": state, "progress": 0.5})
+    assert torrent.paused is paused
+
+
 def test_no_filter_sends_no_filter_parameter(fake):
     client_for(fake).list_torrents()
     assert fake.calls("torrents/info")[0].query == {}
