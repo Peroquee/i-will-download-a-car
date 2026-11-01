@@ -25,7 +25,7 @@ docs/watchdog.md       the VPN watchdog: second layer that pauses torrents when 
 docs/proxy.md          reverse proxy and login: setup, design, what is tested
 docs/jellyfin.md       the external Jellyfin: API key, libraries, audiobooks question
 docs/testing.md        test levels, markers and rules
-index.html             first draft of the submission form (moves into app/ with #8)
+docs/youtube.md        YouTube probe and download, the VPN route, yt-dlp upkeep
 ```
 
 ## Quick start

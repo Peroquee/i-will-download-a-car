@@ -78,6 +78,8 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/vpn",
         "/api/youtube/probe",
         "/api/youtube/download",
+        "/",
+        "/static",  # the form's files (#25)
     }
 
 

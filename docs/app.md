@@ -315,6 +315,45 @@ docker compose logs app           # JSON lines
 For development without Docker: `make venv`, then `cd app && python -m ytp` with the
 variables above set.
 
+## The submission form (issue #25)
+
+`GET /` (through the proxy: `http://<vm>/`) is the form: one text field for a link, a
+YouTube/Magnet toggle, and the fields of the chosen branch. Plain HTML, CSS and two small scripts
+from `app/ytp/static/`; **nothing is loaded from another site** (no CDN, no web font; a test
+fails if a page file mentions one) and the content security policy allows only this site's own
+scripts and styles.
+
+- **Paste detection:** a `magnet:` link switches to the Magnet branch, a YouTube address to the
+  YouTube branch; the toggle changes it by hand.
+- **YouTube branch:** on paste the page asks `POST /api/youtube/probe` and fills **channel** and
+  **title** (editable; if the lookup fails, they can be typed). Submit sends the confirmed names to
+  `POST /api/youtube/download`. The thumbnail is deliberately **not shown**: it would be loaded from
+  YouTube by the browser on the home connection. "Subscribe to the channel" is present but
+  disabled until subscriptions exist.
+- **Magnet branch:** a media type (movie, series, audiobook, music) swaps the fields: movie title +
+  year; series title + season + episode, or "whole season" (no episode); audiobook author + title;
+  music artist + album. Submit sends `POST /api/magnet`.
+- **Errors per field:** the server's 422 answers are placed under the right input (the same names
+  the API uses), with a short check in the browser first; failures of the services (YouTube not
+  reachable, VPN, qBittorrent) appear as a message under the button.
+- **German and English** (text in `index.html`, chosen from the browser language, switch at the top
+  right, remembered in the browser). Umlauts work everywhere (UTF-8).
+- **Mobile:** one column under 520 px, 44 px touch targets, 16 px inputs (phones do not zoom in).
+- A small **VPN badge** at the top reads `GET /api/vpn` every 15 s.
+
+**Same-origin protection (the note on !20):** the JSON endpoints are state-changing, and the
+browser holds the proxy login, so a page on another website could otherwise make it add downloads.
+Every POST/PUT/PATCH/DELETE is refused with 403 unless the browser says the request comes from this
+site: `Sec-Fetch-Site` must be `same-origin` or `none`, and an `Origin` header must name the same
+host and port as `Host` (Caddy passes `Host` through). `Origin: null` is refused. Requests with
+neither header are not from a page in a browser (curl, scripts) and are allowed, since they have to
+pass the proxy's login like everything else. The JSON endpoints also need
+`Content-Type: application/json`, which a cross-site HTML form cannot send. No CORS headers are sent.
+Security headers on every answer: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`.
+
+Not part of this form: the job list and live status (#26), the how-to guide (#33).
+
 ## Job metadata (issue #14)
 
 `ytp.metadata` defines what the user must say about a download, per type. `type` picks the

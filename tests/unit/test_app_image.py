@@ -126,3 +126,12 @@ def test_the_migrations_are_part_of_the_image():
     ignored = (REPO_ROOT / "app" / ".dockerignore").read_text(encoding="utf-8")
     assert "sql" not in ignored
     assert "migrations" not in ignored
+
+
+def test_the_web_ui_files_are_part_of_the_image():
+    static = REPO_ROOT / "app" / "ytp" / "static"
+    for name in ("index.html", "app.css", "app.js", "logic.js", "favicon.svg"):
+        assert (static / name).is_file(), name
+    ignored = (REPO_ROOT / "app" / ".dockerignore").read_text(encoding="utf-8")
+    assert "static" not in ignored
+    assert not (REPO_ROOT / "index.html").exists(), "the old draft at the repository root is gone"

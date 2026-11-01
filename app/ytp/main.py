@@ -25,6 +25,7 @@ from .logging_setup import configure_logging
 from .organizer import FileOrganizer
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .scheduler import AppScheduler
+from .web import SecurityMiddleware, register_ui
 from .youtube import YoutubeProbe
 from .youtube_download import YoutubeDownloader
 from .youtube_jobs import YoutubeWorker
@@ -132,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.youtube_worker = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     api.register(app)
+    register_ui(app)
+    app.add_middleware(SecurityMiddleware)
 
     @app.get("/health")
     async def health(response: Response) -> dict[str, object]:
