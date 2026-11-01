@@ -102,6 +102,23 @@
     return result;
   }
 
+  /* How long ago an ISO timestamp is: {unit: "now"|"minutes"|"hours"|"days", n}; null if unreadable. */
+  function age(iso, nowMs) {
+    var then = Date.parse(iso);
+    if (isNaN(then)) return null;
+    var seconds = Math.max(0, Math.floor((nowMs - then) / 1000));
+    if (seconds < 60) return { unit: "now", n: 0 };
+    if (seconds < 3600) return { unit: "minutes", n: Math.floor(seconds / 60) };
+    if (seconds < 86400) return { unit: "hours", n: Math.floor(seconds / 3600) };
+    return { unit: "days", n: Math.floor(seconds / 86400) };
+  }
+
+  /* Which i18n key names a job's kind (the library it ends up in). */
+  function kindKey(kind) {
+    return { movies: "type.movies", series: "type.series", audiobooks: "type.audiobooks",
+             music: "type.music", youtube: "mode.youtube" }[kind] || null;
+  }
+
   /* What the VPN bar shows for an /api/vpn answer. `view` is the colour/state, in order of
      priority: down, mismatch (the egress check caught a leak), blind, starting, unknown, ok.
      `alert` = the bar must be unmissable. Anything unreadable counts as unknown, never as ok. */
@@ -121,6 +138,8 @@
   }
 
   return {
+    age: age,
+    kindKey: kindKey,
     vpnView: vpnView,
     detectMode: detectMode,
     looksLikeVideoUrl: looksLikeVideoUrl,

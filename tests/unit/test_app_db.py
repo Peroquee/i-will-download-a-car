@@ -157,6 +157,7 @@ def test_a_new_database_gets_the_initial_schema(database):
         "error",
         "created_at",
         "updated_at",
+        "source",
     ]
     assert list(columns(conn, "subscriptions")) == [
         "id",

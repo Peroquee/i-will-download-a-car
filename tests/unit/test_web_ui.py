@@ -333,6 +333,7 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     }
     used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
+    used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
     missing = {k for k in used if k not in t}
     assert not missing, sorted(missing)
 
@@ -485,6 +486,43 @@ def test_the_first_look_in_the_browser_catches_empty_fields_and_a_bad_year():
 def test_the_text_template_fills_in_values():
     assert run_node("L.format('Job #{id} ({status})', {id: 7, status: 'done'})") == "Job #7 (done)"
     assert run_node("L.format('no {missing} here', {})") == "no {missing} here"
+
+
+# --- the job list (#26) ----------------------
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("iso", "expected"),
+    [
+        ("2026-11-01T10:00:00.000Z", {"unit": "now", "n": 0}),
+        ("2026-11-01T09:59:30.000Z", {"unit": "now", "n": 0}),
+        ("2026-11-01T09:58:00.000Z", {"unit": "minutes", "n": 2}),
+        ("2026-11-01T07:00:00.000Z", {"unit": "hours", "n": 3}),
+        ("2026-10-29T10:00:00.000Z", {"unit": "days", "n": 3}),
+        ("2026-11-01T10:05:00.000Z", {"unit": "now", "n": 0}),  # a clock a little ahead
+        ("not a time", None),
+    ],
+)
+def test_the_age_of_a_timestamp(iso, expected):
+    now = "Date.parse('2026-11-01T10:00:00.000Z')"
+    assert run_node(f"L.age({json.dumps(iso)}, {now})") == expected
+
+
+@needs_node
+def test_job_kinds_map_to_known_translations():
+    t = translations()["en"]
+    for kind in ("movies", "series", "audiobooks", "music", "youtube"):
+        assert run_node(f"L.kindKey({json.dumps(kind)})") in t
+    assert run_node("L.kindKey('nonsense')") is None
+
+
+def test_the_page_has_the_job_list_and_the_script_builds_rows_without_innerhtml():
+    for element_id in ("jobs-list", "jobs-banner", "jobs-error", "jobs-empty", "jobs-filter"):
+        assert f'id="{element_id}"' in HTML
+    assert "innerHTML" not in APP_JS
+    assert "/api/jobs" in APP_JS
+    assert "visibilityState" in APP_JS, "polling pauses while the tab is hidden"
 
 
 # --- the VPN bar (#28) ----------------------

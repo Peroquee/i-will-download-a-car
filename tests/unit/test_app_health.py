@@ -78,6 +78,8 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/vpn",
         "/api/youtube/probe",
         "/api/youtube/download",
+        "/api/jobs",  # the job list (#26)
+        "/api/jobs/{job_id}/retry",
         "/",
         "/static",  # the form's files (#25)
     }

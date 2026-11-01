@@ -23,15 +23,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_core import PydanticCustomError
 
-from . import jobs
-from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError, QbitUnavailable
+from . import jobs, jobs_api
+from .apiutil import hand_to_qbittorrent, problem
+from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
 from .db import Database
 from .magnet import InvalidMagnet, infohash_from_magnet
@@ -61,25 +61,18 @@ class MagnetRequest(BaseModel):
         return value
 
 
-def _problem(status: int, detail: str, job_id: int | None = None) -> JSONResponse:
-    body: dict[str, Any] = {"detail": detail}
-    if job_id is not None:
-        body["job_id"] = job_id
-    return JSONResponse(body, status_code=status)
-
-
 async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     db: Database | None = request.app.state.db
     qbit: QbitClient | None = request.app.state.qbit
     if db is None:
-        return _problem(503, "The database is not available; see /health.")
+        return problem(503, "The database is not available; see /health.")
     if qbit is None:
-        return _problem(503, "qBittorrent is not configured (QBIT_PASSWORD is empty).")
+        return problem(503, "qBittorrent is not configured (QBIT_PASSWORD is empty).")
 
     infohash = infohash_from_magnet(body.magnet)
     category = body.metadata.type  # the metadata types are the qBittorrent category names
     job, outcome = await asyncio.to_thread(
-        jobs.submit_magnet_job, db, infohash, metadata_to_json(body.metadata)
+        jobs.submit_magnet_job, db, infohash, metadata_to_json(body.metadata), body.magnet
     )
     # Log the infohash, never the link: it can carry tracker URLs with a private passkey.
     logger.info("magnet job", extra={"job_id": job.id, "infohash": infohash, "outcome": outcome})
@@ -87,18 +80,9 @@ async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     if outcome == "duplicate":
         return JSONResponse({**summary, "duplicate": True}, status_code=200)
 
-    try:
-        await asyncio.to_thread(qbit.add_magnet, body.magnet, category)
-    except QbitError as exc:
-        reason = str(exc)
-        await asyncio.to_thread(jobs.mark_failed, db, job.id, reason)
-        logger.warning(
-            "adding the torrent failed",
-            extra={"job_id": job.id, "infohash": infohash, "error": reason},
-        )
-        unavailable = isinstance(exc, QbitUnavailable)
-        status = 503 if unavailable or isinstance(exc, QbitAuthError) else 502
-        return _problem(status, f"qBittorrent did not take the torrent: {reason}", job.id)
+    failure = await hand_to_qbittorrent(db, qbit, job, body.magnet, category)
+    if failure is not None:
+        return failure
     return JSONResponse({**summary, "duplicate": False}, status_code=201)
 
 
@@ -184,7 +168,7 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
     db: Database | None = request.app.state.db
     worker: YoutubeWorker | None = request.app.state.youtube_worker
     if db is None or worker is None:
-        return _problem(503, "The database is not available; see /health.")
+        return problem(503, "The database is not available; see /health.")
     ref = parse_video_url(body.url)
     metadata = YoutubeJobMetadata(video_id=ref.video_id, channel=body.channel, title=body.title)
     job, outcome = await asyncio.to_thread(
@@ -218,3 +202,4 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/vpn", vpn_status, methods=["GET"])
     app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])
     app.add_api_route("/api/youtube/download", youtube_download, methods=["POST"])
+    jobs_api.register(app)

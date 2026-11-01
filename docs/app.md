@@ -352,7 +352,43 @@ pass the proxy's login like everything else. The JSON endpoints also need
 Security headers on every answer: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`.
 
-Not part of this form: the job list and live status (#26), the how-to guide (#33).
+Not part of this form: the how-to guide (#33).
+
+## Job list and retry (issue #26)
+
+Below the form the page lists the jobs, newest first (50 at a time), and refreshes itself every
+5 seconds. It stops while the browser tab is hidden and catches up when the tab comes back, so an
+open tab on a phone does not keep asking.
+
+Each row shows the name (movie "Title (Year)", series "Title S03E07" or "S03", audiobook
+"Author - Title", music "Artist - Album", YouTube "Channel - Title"), the status (queued,
+downloading, being filed, done, failed), the age, and for a running download a **progress bar**.
+Torrent progress comes from qBittorrent (one call, kept for 3 seconds, so several viewers do not
+multiply it; if qBittorrent cannot be asked the bar is simply missing, never an error). YouTube
+progress is kept in memory by the download worker (it is gone after a restart, and a download that
+restarts begins again anyway).
+
+**Failures are never silent.** A failed job is outlined in red and shows the reason the app
+recorded (qBittorrent unreachable or refusing, yt-dlp's classified message, a missing file, ...;
+the reason texts are English, as the logs are). A red banner above the list says how many jobs have
+failed, with a button "Failed only" for when they have scrolled out of the 50. A failed job has a
+**Try again** button.
+
+- `GET /api/jobs?limit=50&status=failed` returns `{"jobs": [...], "counts": {...}}`; `counts` always
+  covers all jobs, whatever the filter. `limit` is clamped to 1-200, an unknown `status` is a 422.
+  The answer never contains the magnet link.
+- `POST /api/jobs/{id}/retry` works only for a `failed` job (409 otherwise, 404 if unknown). A
+  torrent goes to qBittorrent again; a video goes back into the download queue. If qBittorrent
+  refuses or is unreachable the job is `failed` again with the new reason (502/503, as for
+  `POST /api/magnet`). The route is covered by the same-origin check like every other POST.
+
+**The magnet link is kept for retries.** A retry needs the trackers, which the infohash alone does
+not have, so migration `0003_job_source` adds `jobs.source` and the magnet endpoint stores the
+original link there. It can contain a tracker passkey, so it is read only by the retry, never
+returned by the API, never logged. Jobs made before the migration have no stored link; their retry
+falls back to a bare `magnet:?xt=urn:btih:<hash>` (DHT and peer exchange find peers, but a private
+tracker would need the link sent again). The database is `config/app.db`; it is covered by the
+backups (#30) like the other secrets in `config/`.
 
 ## Job metadata (issue #14)
 
