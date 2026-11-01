@@ -18,7 +18,8 @@
       "QBIT_URL": "http://gluetun:8080",
       "QBIT_USER": "admin",
       "TZ": "Europe/Berlin",
-      "UMASK": "002"
+      "UMASK": "002",
+      "WATCHDOG_STATUS_URL": "http://watchdog:8090"
     },
     "healthcheck": null,
     "image": "youtube-premium/app:dev",
@@ -183,6 +184,9 @@
     "depends_on": {},
     "devices": [],
     "environment": {
+      "ALERT_FORMAT": "ntfy",
+      "ALERT_TOKEN": "",
+      "ALERT_URL": "",
       "GLUETUN_CONTROL_APIKEY": "changeme",
       "GLUETUN_CONTROL_URL": "http://gluetun:8000",
       "LOG_LEVEL": "INFO",
@@ -192,6 +196,7 @@
       "TZ": "Europe/Berlin",
       "WATCHDOG_INTERVAL": "1",
       "WATCHDOG_RESUME_AFTER": "0",
+      "WATCHDOG_STATUS_PORT": "8090",
       "WATCHDOG_THRESHOLD": "3"
     },
     "healthcheck": {
