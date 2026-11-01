@@ -60,17 +60,13 @@ def test_image_tag_is_explicit(name):
 
 def test_only_built_services_start_by_default():
     # Placeholders for later issues sit behind profiles so `up -d` works today.
-    assert set(default_services(COMPOSE)) == {"gluetun", "qbittorrent", "app", "proxy"}
+    assert set(default_services(COMPOSE)) == {"gluetun", "qbittorrent", "app", "proxy", "watchdog"}
 
 
-@pytest.mark.parametrize(
-    ("name", "profile"),
-    [
-        ("watchdog", "planned"),
-    ],
-)
-def test_placeholder_services_are_behind_profiles(name, profile):
-    assert services(COMPOSE)[name].get("profiles") == [profile]
+def test_no_placeholder_services_are_left():
+    """Every service of the stack is real now; a new placeholder needs a `planned` profile."""
+    for name, svc in services(COMPOSE).items():
+        assert not svc.get("profiles"), f"{name} is still a placeholder"
 
 
 @pytest.mark.security
@@ -215,9 +211,9 @@ def test_the_app_reaches_qbittorrent_through_gluetun_and_gets_the_login_from_env
     assert env["QBIT_PASSWORD"] == "${QBIT_PASSWORD:-}"
 
 
-def test_only_the_app_knows_the_qbittorrent_password():
+def test_only_the_app_and_the_watchdog_know_the_qbittorrent_password():
     for name, svc in services(COMPOSE).items():
-        if name != "app":
+        if name not in {"app", "watchdog"}:
             assert "QBIT_PASSWORD" not in environment_as_dict(svc), name
 
 

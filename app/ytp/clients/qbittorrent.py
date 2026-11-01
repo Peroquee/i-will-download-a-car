@@ -34,6 +34,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -401,12 +402,31 @@ class QbitClient:
         """Resume every torrent: `torrents/start` (5.x), falling back to `torrents/resume` (4.x)."""
         self._all_torrents("start", "resume")
 
-    def _all_torrents(self, new_name: str, old_name: str) -> None:
-        status, _ = self._request("POST", f"torrents/{new_name}", form={"hashes": "all"})
+    def pause_torrents(self, hashes: list[str]) -> None:
+        """Pause just these torrents (infohashes); same stop/pause fallback as pause_all()."""
+        self._all_torrents("stop", "pause", _hash_list(hashes))
+
+    def resume_torrents(self, hashes: list[str]) -> None:
+        """Resume just these torrents (infohashes); same start/resume fallback as resume_all()."""
+        self._all_torrents("start", "resume", _hash_list(hashes))
+
+    def _all_torrents(self, new_name: str, old_name: str, hashes: str = "all") -> None:
+        status, _ = self._request("POST", f"torrents/{new_name}", form={"hashes": hashes})
         if status == 404:
-            status, _ = self._request("POST", f"torrents/{old_name}", form={"hashes": "all"})
+            status, _ = self._request("POST", f"torrents/{old_name}", form={"hashes": hashes})
         if status != 200:
             raise QbitRequestError(f"torrents/{new_name} answered {status}", status)
+
+
+_INFOHASH = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _hash_list(hashes: list[str]) -> str:
+    """The `a|b|c` form qBittorrent takes; each entry must be a lower-case infohash (v1 or v2)."""
+    cleaned = [h.lower() for h in hashes]
+    if not cleaned or not all(_INFOHASH.fullmatch(h) for h in cleaned):
+        raise ValueError("hashes must be a non-empty list of infohashes")
+    return "|".join(cleaned)
 
 
 def _session_cookie_from(headers: http.client.HTTPMessage) -> str | None:

@@ -7,7 +7,7 @@ the VPN) and files the result into the right library.
 ## Layout
 
 ```
-docker-compose.yml     the stack (gluetun, qbittorrent, app, proxy; watchdog planned; Jellyfin is external)
+docker-compose.yml     the stack (gluetun, qbittorrent, app, proxy, watchdog; Jellyfin is external)
 proxy/                 the Caddyfile of the reverse proxy (LAN check + login)
 app/                   the FastAPI app (package ytp) and its Dockerfile
 compose/               per-VPN-type gluetun settings (vpn-openvpn.yml, vpn-wireguard.yml)
@@ -17,9 +17,11 @@ scripts/host/          bootstrap, check and lay out folders on the Debian Docker
 scripts/qbittorrent/   seed qBittorrent's login and VPN binding; categories; netwatch (dead-namespace restart)
 scripts/vpn/           render ExpressVPN's .ovpn for gluetun; the killswitch test
 scripts/proxy/         set the proxy login; verify the proxy from the LAN
+scripts/watchdog/      create the watchdog's read-only gluetun key
 tests/<level>/         unit, integration, smoke, system, regression
 docs/host-setup.md     step-by-step host setup (issue #1)
 docs/app.md            the app: configuration, /health, database and migrations
+docs/watchdog.md       the VPN watchdog: second layer that pauses torrents when the VPN drops
 docs/proxy.md          reverse proxy and login: setup, design, what is tested
 docs/jellyfin.md       the external Jellyfin: API key, libraries, audiobooks question
 docs/testing.md        test levels, markers and rules

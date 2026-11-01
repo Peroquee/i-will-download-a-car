@@ -35,12 +35,7 @@ def test_config_is_valid_with_every_profile():
 
 def test_default_services_are_only_the_built_ones():
     result = compose("config", "--services")
-    assert sorted(result.stdout.split()) == ["app", "gluetun", "proxy", "qbittorrent"]
-
-
-def test_planned_profile_adds_the_placeholders():
-    result = compose("config", "--services", profiles=("planned",))
-    assert "watchdog" in set(result.stdout.split())
+    assert sorted(result.stdout.split()) == ["app", "gluetun", "proxy", "qbittorrent", "watchdog"]
 
 
 def test_every_rendered_service_restarts_unless_stopped():
@@ -328,3 +323,46 @@ def test_the_app_config_mount_is_never_created_by_docker():
     assert config["bind"]["create_host_path"] is False
     (data,) = [v for v in volumes if v["target"] == "/data"]
     assert data["bind"].get("create_host_path", True) is True, "the media mount is unchanged"
+
+
+# --- VPN watchdog (#21) ---
+
+
+@pytest.mark.security
+def test_the_watchdog_renders_hardened_and_without_a_way_in():
+    watchdog = rendered_config()["services"]["watchdog"]
+    assert watchdog["command"] == ["python", "-m", "ytp.watchdog"]
+    assert watchdog["read_only"] is True
+    assert watchdog["cap_drop"] == ["ALL"]
+    assert "ports" not in watchdog
+    assert "volumes" not in watchdog
+    assert "network_mode" not in watchdog
+    assert watchdog["healthcheck"]["test"] == ["CMD", "python", "-m", "ytp.watchdog", "--check"]
+    assert watchdog["environment"]["GLUETUN_CONTROL_URL"] == "http://gluetun:8000"
+
+
+def test_the_watchdog_gets_its_settings_from_env(tmp_path: Path):
+    env_file = write_env(
+        tmp_path / ".env",
+        GLUETUN_CONTROL_APIKEY="k" * 22,
+        QBIT_PASSWORD="a password 12",
+        WATCHDOG_INTERVAL="2",
+        WATCHDOG_THRESHOLD="5",
+        WATCHDOG_RESUME_AFTER="300",
+    )
+    env = rendered_config(env_file)["services"]["watchdog"]["environment"]
+    assert env["GLUETUN_CONTROL_APIKEY"] == "k" * 22
+    assert env["QBIT_PASSWORD"] == "a password 12"
+    assert (env["WATCHDOG_INTERVAL"], env["WATCHDOG_THRESHOLD"], env["WATCHDOG_RESUME_AFTER"]) == (
+        "2",
+        "5",
+        "300",
+    )
+
+
+@pytest.mark.security
+def test_a_missing_control_key_stops_compose(tmp_path: Path):
+    env_file = write_env(tmp_path / ".env", GLUETUN_CONTROL_APIKEY=None)
+    result = compose("config", "--quiet", env_file=env_file)
+    assert result.returncode != 0
+    assert "GLUETUN_CONTROL_APIKEY must be set" in result.stderr
