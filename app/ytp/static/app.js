@@ -158,6 +158,31 @@
     });
   }
 
+  /* ---------------------------------------------------------------- subscribe (#19) */
+
+  /* Ticked "subscribe" next to a YouTube download: the video's address names the channel. */
+  function subscribeToChannel(link, name, downloadText) {
+    var body = { channel: link.trim() };
+    if (name && name.trim()) body.name = name.trim();
+    post("/api/subscriptions", body).then(function (reply) {
+      if (reply.status === 201 || reply.status === 200) {
+        var key = reply.data.duplicate ? "sub.duplicate" : "sub.created";
+        showResult(downloadText + " " + t(key, { name: reply.data.channel_name }), true);
+        return;
+      }
+      var detail = "";
+      if (reply.status === 422) {
+        var errors = L.serverErrors(reply.data.detail);
+        detail = Object.keys(errors).map(function (field) { return message(errors[field]); }).join(" ");
+      } else if (reply.data && typeof reply.data.detail === "string") {
+        detail = reply.data.detail;
+      }
+      showResult(downloadText + " " + t("sub.failed") + (detail ? " " + detail : ""), false);
+    }).catch(function () {
+      showResult(downloadText + " " + t("sub.failed") + " " + t("result.network"), false);
+    });
+  }
+
   /* ---------------------------------------------------------------- submit */
 
   function onSubmit(event) {
@@ -183,9 +208,13 @@
       $("submit").disabled = false;
       if (reply.status === 201 || reply.status === 200) {
         var vars = { id: reply.data.id, status: statusText(reply.data.status) };
-        showResult(t(reply.data.duplicate ? "result.duplicate" : "result.created", vars), true);
+        var text = t(reply.data.duplicate ? "result.duplicate" : "result.created", vars);
+        var wantSubscribe = current === "youtube" && $("subscribe").checked;
+        var channelName = data.channel;
+        showResult(text, true);
         if (!reply.data.duplicate) resetFields();
         pollJobs();
+        if (wantSubscribe) subscribeToChannel(link, channelName, text);
         return;
       }
       if (reply.status === 422) {
@@ -205,6 +234,7 @@
   function resetFields() {
     document.querySelectorAll("#form input[type=text]").forEach(function (input) { input.value = ""; });
     $("pack").checked = false;
+    $("subscribe").checked = false;
     $("f-episode").disabled = false;
     $("probe-status").textContent = "";
     $("probe-duration").textContent = "";

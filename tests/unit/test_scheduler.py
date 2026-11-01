@@ -76,6 +76,7 @@ def test_the_migration_creates_app_state_without_touching_the_first_tables(datab
         "0001_initial.sql",
         "0002_app_state.sql",
         "0003_job_source.sql",
+        "0004_subscription_backfill.sql",
     ]
 
 

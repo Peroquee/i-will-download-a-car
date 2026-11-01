@@ -168,6 +168,11 @@ def test_a_shell_looking_tail_is_never_in_what_ytdlp_gets():
             "ERROR: [youtube] x: Unable to connect to proxy: Tunnel connection failed: 503",
             "network",
         ),
+        (
+            "ERROR: [youtube:tab] @nobody: Unable to download API page: HTTP Error 404: Not Found",  # seen for real
+            "not_found",
+        ),
+        ("ERROR: [youtube:tab] x: Unable to download API page: HTTP Error 503", "network"),
         ("ERROR: Unsupported URL: https://example.com", "unsupported"),
         ("ERROR: something nobody has seen before", "unknown"),
         ("", "unknown"),

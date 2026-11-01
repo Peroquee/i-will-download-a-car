@@ -18,7 +18,7 @@ probes run at once (an abandoned slow probe cannot pile up).
 
 Failures become `ProbeError(kind, message)` with a stable `kind` for the UI: `private`,
 `unavailable` (deleted or removed), `region`, `age`, `members`, `live`, `bot_check`, `network`,
-`timeout`, `busy`, `unsupported`, `unknown`.
+`not_found`, `timeout`, `busy`, `unsupported`, `unknown`.
 """
 
 from __future__ import annotations
@@ -150,6 +150,11 @@ _CLASSIFY: tuple[tuple[str, str, str], ...] = (
         "This video is deleted or no longer available.",
     ),
     (
+        "not_found",
+        r"http error 404|404: not found",
+        "Nothing was found at this address.",
+    ),
+    (
         "network",
         r"unable to download|urlopen error|connection (refused|reset|aborted)|timed out|"
         r"tunnel connection failed|proxy|name or service not known|temporary failure|"
@@ -267,6 +272,10 @@ class YoutubeProbe:
         self._socket_timeout = socket_timeout
         self._extract = extract
         self._slots = threading.BoundedSemaphore(max_parallel)
+
+    @property
+    def socket_timeout(self) -> float:
+        return self._socket_timeout
 
     def __repr__(self) -> str:
         return f"YoutubeProbe(proxy={'set' if self.proxy else 'none'}, timeout={self.timeout})"

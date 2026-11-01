@@ -29,8 +29,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_core import PydanticCustomError
 
-from . import jobs, jobs_api
-from .apiutil import hand_to_qbittorrent, problem
+from . import jobs, jobs_api, subscriptions_api
+from .apiutil import PROBE_STATUS, hand_to_qbittorrent, problem
 from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
 from .db import Database
@@ -123,15 +123,6 @@ class DownloadRequest(BaseModel):
         return value
 
 
-# HTTP status per probe failure kind: the video itself (404), a restriction on it (403), the
-# upstream or the VPN path (502/504), our own limit (429).
-PROBE_STATUS = {
-    "private": 404, "unavailable": 404, "unsupported": 422,
-    "region": 403, "age": 403, "members": 403, "live": 409,
-    "bot_check": 502, "network": 502, "unknown": 502, "timeout": 504, "busy": 429,
-}  # fmt: skip
-
-
 async def youtube_probe(body: ProbeRequest, request: Request) -> JSONResponse:
     """POST /api/youtube/probe {"url"}: title, channel, duration and thumbnail of ONE video.
 
@@ -203,3 +194,4 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])
     app.add_api_route("/api/youtube/download", youtube_download, methods=["POST"])
     jobs_api.register(app)
+    subscriptions_api.register(app)

@@ -1,4 +1,4 @@
-# YouTube (issues #17, #18)
+# YouTube (issues #17, #18, #19)
 
 The app reads a YouTube video's metadata (and, with #18, downloads it) with **yt-dlp used as a
 library**: pinned in `app/requirements.txt`, never started through a shell.
@@ -90,6 +90,34 @@ issue text says `/data/media/youtube/...`; the stack's real library folder is `M
   `tests/system/test_c18_youtube_download.py` does it for real in the built image. If downloads
   start failing with `n challenge` or "format not available" errors, a JS runtime in the image is
   the next step.
+
+## Subscriptions: `/api/subscriptions` (issue #19)
+
+A subscription is a channel the app watches for new videos (the polling itself is #20). The
+channel's RSS feed is keyed by the channel id (`UC...`, 24 characters), not by the `@handle`, so
+the id is looked up **once**, when subscribing, and stored.
+
+- `POST /api/subscriptions {"channel": ..., "name": ..., "backfill": 0}`. `channel` can be the
+  channel id, an `@handle`, a `youtube.com/channel/UC...` or `youtube.com/@handle` address
+  (optionally with a tab like `/videos`), or the address of **one video** (which is how the form
+  subscribes: the channel is read from the video). Everything else is refused with a message, the
+  same way as for videos (other sites, ports, logins, playlists, the legacy `/c/` and `/user/`
+  names), and what yt-dlp gets is rebuilt from the parsed value. The lookup uses the same proxy and
+  restricted yt-dlp as the probe (YouTube extractors only, nothing downloaded, nothing cached).
+  Answers: 201 with the subscription; 200 `duplicate: true` if the channel is already subscribed
+  (nothing changes, whatever address was used); 422 per field; 409 above 200 subscriptions; a failed
+  lookup keeps the probe's `kind` and status (`not_found` 404 for a channel that does not exist,
+  `network` 502 for YouTube/VPN problems, ...).
+- `name` is the **library folder** the channel's videos will go to (default: YouTube's channel
+  name, with `/` and `\` replaced by `-` and control characters dropped; the channel id if
+  nothing usable is left). An explicit name goes through the same check as everywhere else.
+- `backfill` (0-15, default **0**) is how many of the channel's existing videos the first poll
+  should also fetch. The default means: **only videos published after subscribing; the back
+  catalogue is never downloaded.** 15 is the size of a channel's RSS feed.
+- `GET /api/subscriptions` lists them (by name) with `last_checked` and `last_error` (both empty
+  until the poller of #20 has run; it records them with `subscriptions.record_poll`).
+- `DELETE /api/subscriptions/{id}` unsubscribes (204; 404 if unknown). Videos already downloaded
+  stay where they are.
 
 ## Through the VPN or not (recommendation; the owner decides)
 

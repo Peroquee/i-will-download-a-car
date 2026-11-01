@@ -73,11 +73,11 @@
           <p id="f-yt-title-error" class="error" role="alert"></p>
         </div>
         <p id="probe-duration" class="note"></p>
-        <label class="checkbox muted-box" for="subscribe">
-          <input id="subscribe" type="checkbox" disabled>
+        <label class="checkbox" for="subscribe">
+          <input id="subscribe" type="checkbox">
           <span data-i18n="yt.subscribe"></span>
         </label>
-        <p class="note" data-i18n="yt.subscribe_soon"></p>
+        <p class="note" data-i18n="yt.subscribe_note"></p>
       </section>
 
       <section id="magnet-fields" class="panel" hidden>
@@ -193,7 +193,7 @@
     "yt.channel": "Kanal",
     "yt.title": "Titel",
     "yt.subscribe": "Kanal abonnieren",
-    "yt.subscribe_soon": "Abos gibt es noch nicht; diese Option wird mit der Kanal-Abo-Funktion freigeschaltet.",
+    "yt.subscribe_note": "Neue Videos dieses Kanals werden dann automatisch geladen. Es zählen nur Videos, die nach dem Abonnieren erscheinen; ältere werden nicht nachgeladen.",
     "mg.type": "Art des Inhalts",
     "type.movies": "Film",
     "type.series": "Serie",
@@ -240,6 +240,7 @@
     "kind.network": "YouTube ist nicht erreichbar (läuft das VPN?).",
     "kind.timeout": "YouTube hat nicht rechtzeitig geantwortet.",
     "kind.busy": "Es laufen schon mehrere Abfragen. Gleich noch einmal versuchen.",
+    "kind.not_found": "Unter dieser Adresse wurde nichts gefunden.",
     "kind.unsupported": "Das ist keine Video-Adresse.",
     "kind.unknown": "YouTube hat einen unerwarteten Fehler gemeldet.",
     "err.required": "Bitte ausfüllen.",
@@ -286,6 +287,10 @@
     "time.minutes": "vor {n} Min.",
     "time.hours": "vor {n} Std.",
     "time.days": "vor {n} Tagen",
+    "sub.created": "Kanal „{name}“ abonniert.",
+    "sub.duplicate": "Der Kanal „{name}“ war schon abonniert.",
+    "sub.failed": "Das Abonnieren hat nicht geklappt.",
+    "err.channel_invalid": "Das ist keine Kanal-Adresse.",
     "help.title": "Hilfe",
     "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Das Ergebnis erscheint später in Jellyfin."
   },
@@ -300,7 +305,7 @@
     "yt.channel": "Channel",
     "yt.title": "Title",
     "yt.subscribe": "Subscribe to the channel",
-    "yt.subscribe_soon": "Subscriptions do not exist yet; this option will be enabled with the channel subscription feature.",
+    "yt.subscribe_note": "New videos of this channel are then downloaded automatically. Only videos published after subscribing count; older ones are not fetched.",
     "mg.type": "Kind of content",
     "type.movies": "Movie",
     "type.series": "Series",
@@ -347,6 +352,7 @@
     "kind.network": "YouTube could not be reached (is the VPN up?).",
     "kind.timeout": "YouTube did not answer in time.",
     "kind.busy": "Several lookups are already running. Try again in a moment.",
+    "kind.not_found": "Nothing was found at this address.",
     "kind.unsupported": "This is not a video address.",
     "kind.unknown": "YouTube reported an unexpected error.",
     "err.required": "Please fill this in.",
@@ -393,6 +399,10 @@
     "time.minutes": "{n} min ago",
     "time.hours": "{n} h ago",
     "time.days": "{n} days ago",
+    "sub.created": "Subscribed to the channel \"{name}\".",
+    "sub.duplicate": "The channel \"{name}\" was already subscribed.",
+    "sub.failed": "Subscribing did not work.",
+    "err.channel_invalid": "This is not a channel address.",
     "help.title": "Help",
     "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. The result appears in Jellyfin later."
   }
