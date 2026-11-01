@@ -332,6 +332,10 @@ scripts and styles.
   `POST /api/subscriptions` with the video's address and the confirmed channel name once the
   download is queued (see youtube.md, "Subscriptions"); the result line says whether it worked,
   and a failed subscription never undoes the download.
+- **Target (issue #35):** a YouTube download can be filed as a *Podcast episode* instead of a
+  video, optionally *Audio only*; the two name fields then mean podcast and episode. The
+  *Subscribe* checkbox and the subscription form take the same choice. See
+  [youtube.md](youtube.md#as-a-podcast-episode-optionally-audio-only-issue-35).
 - **Magnet branch:** a media type (movie, series, audiobook, music) swaps the fields: movie title +
   year; series title + season + episode, or "whole season" (no episode); audiobook author + title;
   music artist + album. Submit sends `POST /api/magnet`.

@@ -169,6 +169,8 @@ def test_a_new_database_gets_the_initial_schema(database):
         "enabled",
         "created_at",
         "backfill",
+        "target",
+        "audio_only",
     ]
 
 
@@ -542,7 +544,7 @@ def test_the_podcast_migration_keeps_every_job_and_its_indexes(tmp_path):
     conn.execute("COMMIT")
     before = [tuple(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id")]
 
-    assert dbmod.migrate(conn, migrations) == ["0005_podcasts.sql"]
+    assert dbmod.migrate(conn, migrations[:5]) == ["0005_podcasts.sql"]
 
     after = [tuple(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id")]
     assert after == before

@@ -65,12 +65,26 @@
       <section id="youtube-fields" class="panel" aria-live="polite">
         <p id="probe-status" class="note"></p>
         <div class="row">
-          <label class="field" for="f-channel" data-i18n="yt.channel"></label>
+          <label class="field" for="yt-target" data-i18n="yt.target"></label>
+          <select id="yt-target" name="target">
+            <option value="video" data-i18n="yt.target_video"></option>
+            <option value="podcast" data-i18n="yt.target_podcast"></option>
+          </select>
+        </div>
+        <div id="yt-audio-row" hidden>
+          <label class="checkbox" for="yt-audio">
+            <input id="yt-audio" type="checkbox">
+            <span data-i18n="yt.audio"></span>
+          </label>
+          <p class="note" data-i18n="yt.audio_note"></p>
+        </div>
+        <div class="row">
+          <label class="field" id="yt-channel-label" for="f-channel" data-i18n="yt.channel"></label>
           <input id="f-channel" name="channel" type="text" maxlength="200" aria-describedby="f-channel-error">
           <p id="f-channel-error" class="error" role="alert"></p>
         </div>
         <div class="row">
-          <label class="field" for="f-yt-title" data-i18n="yt.title"></label>
+          <label class="field" id="yt-title-label" for="f-yt-title" data-i18n="yt.title"></label>
           <input id="f-yt-title" name="title" type="text" maxlength="200" aria-describedby="f-yt-title-error">
           <p id="f-yt-title-error" class="error" role="alert"></p>
         </div>
@@ -79,7 +93,7 @@
           <input id="subscribe" type="checkbox">
           <span data-i18n="yt.subscribe"></span>
         </label>
-        <p class="note" data-i18n="yt.subscribe_note"></p>
+        <p id="yt-subscribe-note" class="note" data-i18n="yt.subscribe_note"></p>
       </section>
 
       <section id="podcast-fields" class="panel" aria-live="polite" hidden>
@@ -211,6 +225,17 @@
           <p id="subs-note" class="note" data-i18n="subs.note"></p>
         </div>
         <div class="row">
+          <label class="field" for="subs-target" data-i18n="subs.target"></label>
+          <select id="subs-target">
+            <option value="video" data-i18n="yt.target_video"></option>
+            <option value="podcast" data-i18n="yt.target_podcast"></option>
+          </select>
+        </div>
+        <label class="checkbox" for="subs-audio">
+          <input id="subs-audio" type="checkbox" disabled>
+          <span data-i18n="yt.audio"></span>
+        </label>
+        <div class="row">
           <label class="field" for="subs-backfill" data-i18n="subs.backfill"></label>
           <input id="subs-backfill" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="subs-backfill-note">
           <p id="subs-backfill-note" class="note" data-i18n="subs.backfill_note"></p>
@@ -272,6 +297,17 @@
     "err.feed_invalid": "Das ist keine gültige Feed-Adresse (https://…).",
     "subs.podcast": "Podcast",
     "subs.channel_tag": "Kanal",
+    "yt.target": "Ziel",
+    "yt.target_video": "Video (Ordner Youtube)",
+    "yt.target_podcast": "Podcast-Folge",
+    "yt.podcast": "Podcast",
+    "yt.episode": "Folge",
+    "yt.audio": "Nur Audio",
+    "yt.audio_note": "Nur der Ton, kleiner und ohne Bild. Er wird ohne Neuberechnung übernommen (m4a, sonst opus), mit Titel, Podcast und Cover als Tags.",
+    "yt.subscribe_note_podcast": "Neue Videos dieses Kanals werden dann automatisch als Folgen dieses Podcasts abgelegt. Es zählen nur Videos, die nach dem Abonnieren erscheinen.",
+    "subs.target": "Neue Videos ablegen als",
+    "subs.target_podcast": "Podcast",
+    "subs.target_audio": "Podcast, nur Audio",
     "yt.channel": "Kanal",
     "yt.title": "Titel",
     "yt.subscribe": "Kanal abonnieren",
@@ -439,6 +475,17 @@
     "err.feed_invalid": "This is not a valid feed address (https://…).",
     "subs.podcast": "Podcast",
     "subs.channel_tag": "Channel",
+    "yt.target": "Target",
+    "yt.target_video": "Video (Youtube folder)",
+    "yt.target_podcast": "Podcast episode",
+    "yt.podcast": "Podcast",
+    "yt.episode": "Episode",
+    "yt.audio": "Audio only",
+    "yt.audio_note": "Just the sound, smaller and without picture. It is taken over without re-encoding (m4a, otherwise opus), with title, podcast and cover as tags.",
+    "yt.subscribe_note_podcast": "New videos of this channel are then filed automatically as episodes of this podcast. Only videos published after subscribing count.",
+    "subs.target": "File new videos as",
+    "subs.target_podcast": "Podcast",
+    "subs.target_audio": "Podcast, audio only",
     "yt.channel": "Channel",
     "yt.title": "Title",
     "yt.subscribe": "Subscribe to the channel",

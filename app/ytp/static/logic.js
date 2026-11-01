@@ -60,8 +60,26 @@
     return { magnet: String(link).trim(), metadata: magnetMetadata(type, values) };
   }
 
-  function youtubePayload(link, channel, title) {
-    return { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
+  /* target: "video" (the default) or "podcast"; audioOnly only means something for a podcast. */
+  function youtubePayload(link, channel, title, target, audioOnly) {
+    var body = { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
+    if (target === "podcast") {
+      body.target = "podcast";
+      if (audioOnly) body.audio_only = true;
+    }
+    return body;
+  }
+
+  /* The body of POST /api/subscriptions for a channel; target "video" sends nothing extra. */
+  function subscribePayload(channel, name, backfill, target, audioOnly) {
+    var body = { channel: String(channel).trim() };
+    if (name && String(name).trim()) body.name = String(name).trim();
+    if (backfill != null) body.backfill = backfill;
+    if (target === "podcast") {
+      body.target = "podcast";
+      if (audioOnly) body.audio_only = true;
+    }
+    return body;
   }
 
   var MAX_PODCAST_BACKFILL = 20;
@@ -186,6 +204,7 @@
     magnetMetadata: magnetMetadata,
     magnetPayload: magnetPayload,
     youtubePayload: youtubePayload,
+    subscribePayload: subscribePayload,
     clientErrors: clientErrors,
     serverErrors: serverErrors,
     MIN_YEAR: MIN_YEAR,

@@ -276,7 +276,9 @@ def test_the_ids_the_script_uses_exist_in_the_page():
 
 
 def test_the_media_types_offered_are_the_ones_the_server_knows():
-    options = re.findall(r'<option value="(\w+)"', HTML)
+    select = re.search(r'<select id="media-type".*?</select>', HTML, re.S)
+    assert select
+    options = re.findall(r'<option value="(\w+)"', select.group(0))
     assert options == list(METADATA_TYPES)
 
 
@@ -333,6 +335,8 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "mode.podcast",
         "type.podcast",
         "subs.podcast",
+        "subs.target_podcast",
+        "yt.podcast",
     }, same
 
 
@@ -712,3 +716,72 @@ def test_server_422s_for_a_feed_land_on_the_right_fields():
     ]
     got = run_node(f"L.serverErrors({json.dumps(detail)})")
     assert set(got) == {"link", "key", "backfill"}
+
+
+# --- YouTube as a podcast episode (#35) ------------------------------------------------------
+
+
+def test_the_page_has_the_target_choice_and_the_audio_checkbox():
+    for element_id in (
+        "yt-target",
+        "yt-audio",
+        "yt-audio-row",
+        "yt-channel-label",
+        "yt-title-label",
+        "subs-target",
+        "subs-audio",
+    ):
+        assert f'id="{element_id}"' in HTML
+    target = re.search(r'<select id="yt-target".*?</select>', HTML, re.S)
+    assert target
+    assert re.findall(r'<option value="(\w+)"', target.group(0)) == ["video", "podcast"]
+    assert 'id="yt-audio-row" hidden' in HTML, "audio only is offered only for podcast episodes"
+
+
+@needs_node
+def test_the_youtube_payload_only_carries_the_target_when_it_is_a_podcast():
+    plain = run_node(
+        "L.youtubePayload(' https://youtu.be/dQw4w9WgXcQ ', ' Blender ', ' Big ', 'video', true)"
+    )
+    assert plain == {"url": "https://youtu.be/dQw4w9WgXcQ", "channel": "Blender", "title": "Big"}, (
+        "audio only never goes with a video"
+    )
+    assert run_node("L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T')") == plain | {
+        "channel": "B",
+        "title": "T",
+    }
+    episode = run_node(
+        "L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T', 'podcast', false)"
+    )
+    assert episode == {
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "channel": "B",
+        "title": "T",
+        "target": "podcast",
+    }
+    audio = run_node("L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T', 'podcast', true)")
+    assert audio["audio_only"] is True
+
+
+@needs_node
+def test_the_subscribe_payload():
+    assert run_node("L.subscribePayload(' @x ', null, 3)") == {"channel": "@x", "backfill": 3}
+    assert run_node("L.subscribePayload('@x', ' My Cast ', null, 'podcast', true)") == {
+        "channel": "@x", "name": "My Cast", "target": "podcast", "audio_only": True,
+    }  # fmt: skip
+    assert run_node("L.subscribePayload('@x', '', 0, 'video', true)") == {
+        "channel": "@x",
+        "backfill": 0,
+    }
+
+
+@needs_node
+def test_what_the_page_sends_is_accepted_by_the_server(client):
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    for call in (
+        f"L.youtubePayload('{url}', 'B', 'T', 'podcast', true)",
+        f"L.youtubePayload('{url}', 'B', 'T', 'podcast', false)",
+        f"L.youtubePayload('{url}', 'B', 'T', 'video', false)",
+    ):
+        response = client.post("/api/youtube/download", json=run_node(call))
+        assert response.status_code in {200, 201}, (call, response.text)
