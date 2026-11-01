@@ -24,6 +24,7 @@ from .logging_setup import configure_logging
 from .organizer import FileOrganizer
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .scheduler import AppScheduler
+from .youtube import YoutubeProbe
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if app.state.qbit is None:
         logger.warning("qbittorrent is not configured (QBIT_PASSWORD is empty): downloads disabled")
     app.state.watchdog_status = WatchdogStatusClient(settings.watchdog_status_url)
+    app.state.youtube = YoutubeProbe(
+        proxy=settings.ytdlp_proxy, timeout=settings.youtube_probe_timeout
+    )
     # Jellyfin: with no URL or key the refresher does nothing (the warning above says so).
     app.state.jellyfin = LibraryRefresher(
         JellyfinClient.from_settings(settings) if settings.jellyfin_configured else None
@@ -107,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None
     app.state.watchdog_status = None
+    app.state.youtube = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     api.register(app)
 

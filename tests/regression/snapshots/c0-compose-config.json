@@ -19,7 +19,8 @@
       "QBIT_USER": "admin",
       "TZ": "Europe/Berlin",
       "UMASK": "002",
-      "WATCHDOG_STATUS_URL": "http://watchdog:8090"
+      "WATCHDOG_STATUS_URL": "http://watchdog:8090",
+      "YTDLP_PROXY": "http://gluetun:8888"
     },
     "healthcheck": null,
     "image": "youtube-premium/app:dev",
@@ -50,6 +51,8 @@
     ],
     "environment": {
       "FIREWALL_OUTBOUND_SUBNETS": "192.168.178.0/24",
+      "HTTPPROXY": "on",
+      "HTTPPROXY_LOG": "off",
       "OPENVPN_CUSTOM_CONFIG": "/gluetun/custom/expressvpn.ovpn",
       "OPENVPN_PASSWORD": "changeme",
       "OPENVPN_USER": "changeme",

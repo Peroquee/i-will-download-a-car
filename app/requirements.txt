@@ -1,11 +1,13 @@
 # Runtime dependencies of the app image, fully pinned (output of `pip freeze` in a clean venv
-# after installing the three direct ones). Direct: fastapi (the web framework), uvicorn (the
+# after installing the four direct ones). Direct: fastapi (the web framework), uvicorn (the
 # server, without the [standard] extras: no compiled uvloop/httptools, fewer moving parts) and
-# apscheduler (background jobs, #12; its only dependency is tzlocal). Everything else is pulled
-# in by them. Bumped deliberately; #30 covers the update cadence.
+# apscheduler (background jobs, #12; its only dependency is tzlocal) and yt-dlp (YouTube metadata
+# and downloads, #17/#18; no dependencies; YouTube changes often, so it is bumped on purpose,
+# see docs/youtube.md). Everything else is pulled in by them. Bumped deliberately; #30 covers the update cadence.
 fastapi==0.162.0
 uvicorn==0.54.0
 apscheduler==3.11.3
+yt-dlp==2026.10.26
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1

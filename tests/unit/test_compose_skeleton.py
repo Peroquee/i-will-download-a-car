@@ -255,3 +255,18 @@ def test_the_app_database_folder_must_exist_before_compose_starts_the_app():
     assert mount["type"] == "bind"
     assert mount["source"] == "./config/app"
     assert mount["bind"] == {"create_host_path": False}
+
+
+@pytest.mark.security
+def test_yt_dlp_goes_through_gluetuns_proxy_by_default_and_the_proxy_is_not_published():
+    """YouTube requests leave through the VPN (#17); the proxy listens inside the bridge only."""
+    gluetun = environment_as_dict(services(COMPOSE)["gluetun"])
+    assert gluetun["HTTPPROXY"] == "on"
+    assert gluetun["HTTPPROXY_LOG"] == "off", "the proxy must not log the URLs asked for"
+    ports = " ".join(map(str, services(COMPOSE)["gluetun"]["ports"]))
+    assert "8888" not in ports
+    app = environment_as_dict(services(COMPOSE)["app"])
+    assert app["YTDLP_PROXY"] == "${YTDLP_PROXY-http://gluetun:8888}", (
+        "unset = gluetun, set empty = direct"
+    )
+    assert parse_env_file(REPO_ROOT / ".env.example")["YTDLP_PROXY"] == "http://gluetun:8888"

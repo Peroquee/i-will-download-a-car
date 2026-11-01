@@ -61,6 +61,10 @@ class Settings:
     umask: int = 0o022
     # The watchdog's status page (it lives in its own container; the UI badge reads it, #22).
     watchdog_status_url: str = "http://watchdog:8090"
+    # Where yt-dlp's requests go out: gluetun's HTTP proxy by default, so YouTube is asked
+    # through the VPN. EMPTY = ask directly from the home line. See docs/youtube.md.
+    ytdlp_proxy: str = "http://gluetun:8888"
+    youtube_probe_timeout: float = 25.0
 
     @property
     def qbit_configured(self) -> bool:
@@ -165,6 +169,22 @@ class Settings:
                 f"WATCHDOG_STATUS_URL must be host[:port] without a path, got {watchdog_url!r}"
             )
 
+        raw_proxy = env.get("YTDLP_PROXY")  # unset = default, set but empty = no proxy
+        proxy = "http://gluetun:8888" if raw_proxy is None else raw_proxy.strip()
+        if proxy and urlparse(proxy).scheme not in {"http", "https", "socks5", "socks5h"}:
+            problems.append("YTDLP_PROXY must be an http(s) or socks5 address, or empty")
+        raw_timeout = text("YOUTUBE_PROBE_TIMEOUT", "25")
+        try:
+            probe_timeout = float(raw_timeout)
+        except ValueError:
+            probe_timeout = 25.0
+            problems.append(
+                f"YOUTUBE_PROBE_TIMEOUT must be a number of seconds, got {raw_timeout!r}"
+            )
+        else:
+            if not 3 <= probe_timeout <= 120:
+                problems.append("YOUTUBE_PROBE_TIMEOUT must be between 3 and 120 seconds")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -181,6 +201,8 @@ class Settings:
             qbit_password=text("QBIT_PASSWORD"),
             umask=umask,
             watchdog_status_url=watchdog_url,
+            ytdlp_proxy=proxy,
+            youtube_probe_timeout=probe_timeout,
         )
 
 
