@@ -68,10 +68,11 @@ def test_no_interactive_api_docs_are_served(tmp_path, path):
         assert client.get(path).status_code == 404
 
 
-def test_the_app_has_only_the_health_route(tmp_path):
+def test_the_app_exposes_only_the_known_routes(tmp_path):
+    """Every route is a deliberate decision: add new ones here, with their issue."""
     app = create_app(Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path)}))
     paths = {getattr(route, "path", None) for route in app.routes}
-    assert paths == {"/health"}
+    assert paths == {"/health", "/api/magnet"}  # /api/magnet: #13
 
 
 def test_startup_logs_the_configuration_without_the_api_key(tmp_path, capsys):
