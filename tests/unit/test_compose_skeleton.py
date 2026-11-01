@@ -188,7 +188,7 @@ def test_media_writers_get_owner_and_umask(name):
 def test_media_writers_mount_the_same_data_root():
     # One mount for downloads and media, so hardlinks work (#5, #17).
     for name in ("qbittorrent", "app"):
-        volumes = services(COMPOSE)[name]["volumes"]
+        volumes = [v for v in services(COMPOSE)[name]["volumes"] if isinstance(v, str)]
         assert any(v.endswith(":/data") and v.startswith("${DATA_ROOT:?") for v in volumes), name
 
 
@@ -230,3 +230,15 @@ def test_qbittorrent_watches_its_network_namespace():
     assert "./scripts/qbittorrent/services:/custom-services.d:ro" in qbit["volumes"]
     assert qbit["healthcheck"]["test"] == ["CMD", "/custom-services.d/netwatch", "--check"]
     assert (REPO_ROOT / "scripts" / "qbittorrent" / "services" / "netwatch").exists()
+
+
+def test_the_app_database_folder_must_exist_before_compose_starts_the_app():
+    """Docker would make a missing source root:root, which the app (PUID:PGID) cannot write."""
+    (mount,) = [
+        v
+        for v in services(COMPOSE)["app"]["volumes"]
+        if isinstance(v, dict) and v["target"] == "/config"
+    ]
+    assert mount["type"] == "bind"
+    assert mount["source"] == "./config/app"
+    assert mount["bind"] == {"create_host_path": False}

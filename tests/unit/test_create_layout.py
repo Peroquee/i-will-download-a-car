@@ -28,6 +28,7 @@ class Layout:
         self.data = self.root / "data"
         self.data.mkdir(parents=True)
         self.env_file = tmp / "host.env"
+        self.config = tmp / "repo" / "config" / "app"  # stands for ./config/app
         # As root (CI) any non-root owner can be created; otherwise only our own ids work.
         if os.geteuid() == 0:
             self.puid = self.pgid = 4242
@@ -51,7 +52,7 @@ class Layout:
         return run_script(
             SCRIPT,
             ["--env-file", str(self.env_file), *args],
-            env={"CHECK_ROOT": str(self.root)},
+            env={"CHECK_ROOT": str(self.root), "APP_CONFIG_DIR": str(self.config)},
         )
 
 
@@ -92,7 +93,9 @@ def test_is_safe_to_run_twice(layout):
     second = layout.run()
     assert second.returncode == 0
     assert "creating" not in second.stdout
-    assert second.stdout.count("exists") == 1 + len(DOWNLOADS) + len(LIBRARIES)
+    assert (
+        second.stdout.count("exists") == 1 + len(DOWNLOADS) + len(LIBRARIES) + 1
+    )  # +1: the app state folder
 
 
 @pytest.mark.security
@@ -191,3 +194,159 @@ def test_the_download_folder_names_match_the_qbittorrent_categories():
     # create-layout.sh and the category script must agree on the four torrent types.
     text = SCRIPT.read_text(encoding="utf-8")
     assert 'DOWNLOAD_DIRS="movies series audiobooks music incomplete"' in text
+
+
+# --------------------------------------------------------------------------- app state folder
+
+
+def owner(path: Path) -> tuple[int, int]:
+    info = path.stat()
+    return info.st_uid, info.st_gid
+
+
+def test_creates_the_app_state_folder_owned_by_the_app_user(layout):
+    layout.config.parent.mkdir(parents=True)
+    result = layout.run()
+    assert result.returncode == 0, result.stderr
+    assert owner(layout.config) == (layout.puid, layout.pgid)
+    assert stat.S_IMODE(layout.config.stat().st_mode) == 0o2775
+
+
+def test_creates_the_config_parent_for_the_repository_owner(layout):
+    """config/ is not the app's: it stays with whoever owns the repository."""
+    assert not layout.config.parent.exists()
+    layout.run()
+    repo = Path(__file__).resolve().parents[2]
+    assert owner(layout.config.parent) == (repo.stat().st_uid, repo.stat().st_gid)
+    assert stat.S_IMODE(layout.config.parent.stat().st_mode) == 0o755
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+def test_hands_a_root_owned_state_folder_to_the_app_user(layout):
+    """The VM case: Docker created ./config/app as root:root 755 before the app existed."""
+    layout.config.mkdir(parents=True)
+    layout.config.chmod(0o755)
+    (layout.config / "app.db").write_text("db")
+    (layout.config / "app.db-wal").write_text("wal")
+    result = layout.run()
+    assert result.returncode == 0, result.stderr
+    assert "fixing" in result.stdout
+    for path in (layout.config, layout.config / "app.db", layout.config / "app.db-wal"):
+        assert owner(path) == (layout.puid, layout.pgid), path
+    assert stat.S_IMODE(layout.config.stat().st_mode) == 0o2775
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+def test_the_fix_is_not_recursive(layout):
+    layout.config.mkdir(parents=True)
+    sub = layout.config / "keep"
+    sub.mkdir()
+    (sub / "file").write_text("x")
+    layout.run()
+    assert owner(sub) == (0, 0)
+    assert owner(sub / "file") == (0, 0)
+
+
+def test_a_correct_state_folder_is_left_alone(layout):
+    layout.run()
+    (layout.config / "app.db").write_text("db")
+    before = layout.config.stat().st_mtime_ns
+    result = layout.run()
+    assert f"exists   {layout.config}" in result.stdout
+    assert "fixing" not in result.stdout
+    assert layout.config.stat().st_mtime_ns == before
+    assert (layout.config / "app.db").read_text() == "db"
+
+
+def test_dry_run_changes_nothing_for_the_state_folder(layout):
+    result = layout.run("--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert not layout.config.exists()
+    assert not layout.config.parent.exists()
+    assert (
+        f"+ install -d -m 2775 -o {layout.puid} -g {layout.pgid} {layout.config}" in result.stdout
+    )
+
+
+def test_a_file_in_place_of_the_state_folder_is_an_error(layout):
+    layout.config.parent.mkdir(parents=True)
+    layout.config.write_text("x")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "not a folder" in result.stderr
+
+
+# --------------------------------------------------------------------------- symbolic links
+
+
+def make_victim(tmp_path: Path) -> Path:
+    """A folder with a file that must never be changed: stands for /etc."""
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "passwd").write_text("root:x:0:0\n")
+    victim.chmod(0o750)
+    return victim
+
+
+def snapshot(path: Path) -> tuple[int, int, int]:
+    info = path.stat()
+    return info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)
+
+
+def test_a_symlinked_state_folder_is_refused_and_its_target_untouched(layout, tmp_path):
+    victim = make_victim(tmp_path)
+    before = snapshot(victim), snapshot(victim / "passwd")
+    layout.config.parent.mkdir(parents=True)
+    layout.config.symlink_to(victim)
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert (snapshot(victim), snapshot(victim / "passwd")) == before
+    assert layout.config.is_symlink()
+
+
+def test_a_dangling_symlink_is_refused_not_created_through(layout, tmp_path):
+    layout.config.parent.mkdir(parents=True)
+    layout.config.symlink_to(tmp_path / "does-not-exist")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert not (tmp_path / "does-not-exist").exists()
+
+
+def test_the_refusal_also_applies_to_a_dry_run(layout, tmp_path):
+    layout.config.parent.mkdir(parents=True)
+    layout.config.symlink_to(make_victim(tmp_path))
+    assert layout.run("--dry-run").returncode != 0
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+@pytest.mark.parametrize("name", ["app.db", "app.db-wal", "app.db-shm"])
+def test_a_symlinked_database_file_is_refused_before_anything_is_changed(layout, tmp_path, name):
+    victim = make_victim(tmp_path)
+    layout.config.mkdir(parents=True)
+    (layout.config / name).symlink_to(victim / "passwd")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert owner(victim / "passwd") == (0, 0)
+    assert owner(layout.config) == (0, 0), "nothing was changed before the refusal"
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+def test_a_hardlinked_database_file_is_refused(layout, tmp_path):
+    victim = make_victim(tmp_path)
+    layout.config.mkdir(parents=True)
+    os.link(victim / "passwd", layout.config / "app.db")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "hard link" in result.stderr
+    assert owner(victim / "passwd") == (0, 0)
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+def test_a_normal_database_file_is_still_handed_over(layout):
+    layout.config.mkdir(parents=True)
+    (layout.config / "app.db").write_text("db")
+    assert layout.run().returncode == 0
+    assert owner(layout.config / "app.db") == (layout.puid, layout.pgid)

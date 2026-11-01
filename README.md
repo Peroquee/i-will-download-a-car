@@ -19,6 +19,7 @@ scripts/vpn/           render ExpressVPN's .ovpn for gluetun; the killswitch tes
 scripts/proxy/         set the proxy login; verify the proxy from the LAN
 tests/<level>/         unit, integration, smoke, system, regression
 docs/host-setup.md     step-by-step host setup (issue #1)
+docs/app.md            the app: configuration, /health, database and migrations
 docs/proxy.md          reverse proxy and login: setup, design, what is tested
 docs/jellyfin.md       the external Jellyfin: API key, libraries, audiobooks question
 docs/testing.md        test levels, markers and rules

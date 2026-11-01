@@ -15,7 +15,7 @@ help:
 	@echo "vpn-config        render config/expressvpn.ovpn for gluetun (resolves the server name to an IP)"
 	@echo "up                vpn-config, then docker compose up -d"
 	@echo "killswitch-test   on the media VM: stop gluetun, prove qbittorrent has no network, check recovery"
-	@echo "layout            on the media VM: create missing download/library folders and prove hardlinks"
+	@echo "layout            on the media VM: create missing download/library folders and config/app (owned by PUID:PGID), prove hardlinks"
 	@echo "categories        set up the qBittorrent categories and save paths (asks for the Web UI password)"
 	@echo "proxy-password  set the proxy login in .env (asks for the password, hashes it with Caddy)"
 	@echo "proxy-check     from a LAN machine: 401 without login, 200 with it, backend ports closed"

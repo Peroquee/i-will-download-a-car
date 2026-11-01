@@ -128,7 +128,15 @@ services:
       JELLYFIN_URL: ${JELLYFIN_URL:-}
       JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
     volumes:
-      - ./config/app:/config
+      # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
+      # and Docker would create a MISSING source as root:root, which the app can then not write.
+      # So the source must exist already, made by `make layout` (scripts/host/create-layout.sh);
+      # create_host_path: false turns "forgot it" into an error at `up` instead of a root-owned folder.
+      - type: bind
+        source: ./config/app
+        target: /config
+        bind:
+          create_host_path: false
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
 
   # Second safety layer: pauses all torrents when the VPN drops. Placeholder until #18.

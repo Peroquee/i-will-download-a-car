@@ -313,3 +313,18 @@ def test_a_single_quoted_hash_reaches_the_proxy_literally(tmp_path: Path):
     # `compose config` prints a literal "$" as "$$" (so the output can be read back); the
     # container gets the single "$". Interpolated, "$2a" would have come out empty.
     assert env["PROXY_PASSWORD_HASH"] == hashed.replace("$", "$$")
+
+
+# --- database folder (#9) ---
+
+
+@pytest.mark.security
+def test_the_app_config_mount_is_never_created_by_docker():
+    """A missing ./config/app must stop `up` instead of becoming a root-owned folder."""
+    volumes = rendered_config()["services"]["app"]["volumes"]
+    (config,) = [v for v in volumes if v["target"] == "/config"]
+    assert config["type"] == "bind"
+    assert config["source"].endswith("/config/app")
+    assert config["bind"]["create_host_path"] is False
+    (data,) = [v for v in volumes if v["target"] == "/data"]
+    assert data["bind"].get("create_host_path", True) is True, "the media mount is unchanged"
