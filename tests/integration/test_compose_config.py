@@ -149,7 +149,8 @@ def gluetun_env(env_file: Path) -> dict[str, str]:
 def test_openvpn_is_the_default_and_renders_only_openvpn_settings():
     env = gluetun_env(ENV_EXAMPLE)
     assert env["VPN_TYPE"] == "openvpn"
-    assert env["VPN_SERVICE_PROVIDER"] == "expressvpn"
+    assert env["VPN_SERVICE_PROVIDER"] == "custom"
+    assert env["OPENVPN_CUSTOM_CONFIG"] == "/gluetun/custom/expressvpn.ovpn"
     assert VPN_ENV["openvpn"] <= set(env)
     assert not VPN_ENV["wireguard"] & set(env)
 

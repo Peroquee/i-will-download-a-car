@@ -61,6 +61,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    volumes:
+      # Gluetun's state (servers.json and so on) survives container recreation, and the
+      # rendered ExpressVPN config sits in ./config/gluetun/custom/ (scripts/vpn/render_ovpn.py).
+      - ./config/gluetun:/gluetun
     ports:
       # qBittorrent's Web UI lives in gluetun's network namespace, so its
       # port is published here and ONLY here. Bound to localhost until the
@@ -82,8 +86,19 @@ services:
     environment:
       <<: *media-env
       WEBUI_PORT: "8080"
+    # Unhealthy while the container's network namespace is dead (gluetun was restarted
+    # as the same container). The watcher below then stops the container so that
+    # `restart: unless-stopped` re-attaches it to gluetun's new namespace.
+    healthcheck:
+      test: ["CMD", "/custom-services.d/netwatch", "--check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     volumes:
       - ./config/qbittorrent:/config
+      # An s6 service of the linuxserver image (see scripts/qbittorrent/netwatch.sh).
+      - ./scripts/qbittorrent/netwatch.sh:/custom-services.d/netwatch:ro
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
 
   # FastAPI app. Placeholder until #8 adds the Dockerfile.

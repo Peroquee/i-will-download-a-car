@@ -116,7 +116,8 @@ start_guest_agent() {
     run systemctl start --no-block qemu-guest-agent
   else
     log "No QEMU guest agent device ($QGA_DEVICE): not starting qemu-guest-agent."
-    log "Hint: in Proxmox set VM > Options > QEMU Guest Agent = Enabled, then reboot the VM."
+    log "Hint: in Proxmox set VM > Options > QEMU Guest Agent = Enabled"
+    log "Then shut the VM down and start it again (a reboot from inside is not enough: Proxmox adds the device at VM start)."
   fi
 }
 
@@ -169,7 +170,11 @@ ensure_media_owner() {
 
 attach_media_volume() {
   if [ -z "$MEDIA_DEVICE" ] && [ -z "$MEDIA_UUID" ]; then
-    log "No media volume given; creating $DATA_ROOT on the system disk (attach a volume before real use)"
+    if mountpoint -q "$DATA_ROOT" 2>/dev/null; then
+      log "$DATA_ROOT is already a mount point; using the mounted volume (setting owner and mode only)"
+    else
+      log "No media volume given; creating $DATA_ROOT on the system disk (attach a volume before real use)"
+    fi
     run install -d -m 2775 -o "$PUID" -g "$PGID" "$DATA_ROOT"
     return
   fi
