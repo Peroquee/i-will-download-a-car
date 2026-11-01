@@ -15,6 +15,14 @@ module, which enforces:
   address of a name is not public the name is refused (a mixed answer is how rebinding starts).
   IP literals in any spelling (`127.1`, `2130706433`, `0x7f.1`, `[::1]`) are resolved by the same
   system call and so judged by the same rule.
+* **Not the home network's own global addresses either.** On a DS-Lite line the LAN has native
+  global IPv6 addresses, which count as "global" by the rules above although the devices behind
+  them are the home network. With a direct connection (`PODCAST_PROXY=` empty) a feed that names
+  such an address, or a name that resolves to it, would reach a LAN device from this VM. So the
+  prefixes in `HOME_PUBLIC_IP` and `FETCH_BLOCKED_NETWORKS` (settings) and the global IPv6
+  networks of this host's own interfaces (read from `/proc/net/if_inet6`, at least a /64 each,
+  refreshed every few minutes) are refused too. Through the VPN proxy such an address could
+  not be reached anyway; the rule is for direct mode and costs nothing there.
 * **The checked address is the one connected to.** The connection goes to the IP that was
   checked, with the real host name only in the TLS handshake (SNI and certificate check) and the
   `Host` header. A second DNS lookup by someone else cannot change where the request goes.
@@ -150,15 +158,51 @@ def check_url(url: str) -> Target:
     return Target(parts.scheme, host, port, path, normalised)
 
 
-def is_public_address(text: str) -> bool:
-    """True only for an address on the public internet (see the module description)."""
+Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+IF_INET6 = Path("/proc/net/if_inet6")
+LOCAL_REFRESH_SECONDS = 300.0
+
+
+def is_public_address(text: str, blocked: tuple[Network, ...] = ()) -> bool:
+    """True only for an address on the public internet (see the module description) that is not
+    inside one of the `blocked` networks (the home network's own global addresses)."""
     try:
         address = ipaddress.ip_address(text.split("%", 1)[0])
     except ValueError:
         return False
     if address.version == 6 and any(address in net for net in _WRAPPED_V6):
         return False
+    if any(address.version == net.version and address in net for net in blocked):
+        return False
     return address.is_global and not address.is_multicast
+
+
+def local_networks(path: Path = IF_INET6) -> tuple[Network, ...]:
+    """The global IPv6 networks of this host's own interfaces, from `/proc/net/if_inet6`.
+
+    Each line is `<32 hex digits> <ifindex> <prefix length> <scope> <flags> <name>`. For every
+    global address the network is returned, at least a /64 (a /128 or /80 address says little about
+    the LAN around it). Empty if the file is missing or unreadable (no IPv6, not Linux).
+    """
+    found: list[Network] = []
+    try:
+        lines = path.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ()
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 3 or len(fields[0]) != 32:
+            continue
+        try:
+            address = ipaddress.IPv6Address(int(fields[0], 16))
+            prefix = min(int(fields[2], 16), 64)
+        except ValueError:
+            continue
+        if address.is_global and not address.is_multicast:
+            network = ipaddress.ip_network((address, prefix), strict=False)
+            if network not in found:
+                found.append(network)
+    return tuple(found)
 
 
 def system_resolver(host: str, port: int) -> list[str]:
@@ -170,7 +214,9 @@ Resolver = Callable[[str, int], list[str]]
 Dialer = Callable[[Target, str], socket.socket]
 
 
-def resolve_public(target: Target, resolver: Resolver = system_resolver) -> list[str]:
+def resolve_public(
+    target: Target, resolver: Resolver = system_resolver, blocked: tuple[Network, ...] = ()
+) -> list[str]:
     """The addresses to connect to, IPv4 first; raises FetchError("blocked"/"network")."""
     try:
         ipaddress.ip_address(target.host)
@@ -186,7 +232,7 @@ def resolve_public(target: Target, resolver: Resolver = system_resolver) -> list
         ) from None
     if not found:
         raise FetchError("network", f"the name {target.host} could not be found")
-    if not all(is_public_address(address) for address in found):
+    if not all(is_public_address(address, blocked) for address in found):
         # Not echoed: this may be a private address of the home network.
         logger.warning("refused a non-public address", extra={"host": target.host})
         raise FetchError(
@@ -318,14 +364,27 @@ class SafeFetcher:
         resolver: Resolver = system_resolver,
         dialer: Dialer | None = None,
         clock: Callable[[], float] = time.monotonic,
+        blocked_networks: tuple[Network, ...] = (),
+        own_networks: Callable[[], tuple[Network, ...]] = local_networks,
     ):
         self.proxy = proxy.strip()
+        self._blocked = tuple(blocked_networks)
+        self._own = own_networks
+        self._own_cache: tuple[float, tuple[Network, ...]] | None = None
         self._resolver = resolver
         self._dial = dialer or make_dialer(self.proxy)
         self._clock = clock
 
     def __repr__(self) -> str:
         return f"SafeFetcher(proxy={'set' if self.proxy else 'none'})"
+
+    def _blocked_networks(self) -> tuple[Network, ...]:
+        """The configured networks plus this host's own, the latter re-read every few minutes
+        (a DS-Lite provider can hand out a new prefix without a restart)."""
+        now = self._clock()
+        if self._own_cache is None or now - self._own_cache[0] > LOCAL_REFRESH_SECONDS:
+            self._own_cache = (now, tuple(self._own()))
+        return self._blocked + self._own_cache[1]
 
     # -- one request, following redirects --------------------------------------------------
 
@@ -368,7 +427,7 @@ class SafeFetcher:
         """Follow redirects (each hop fully checked); returns (conn, response, final Target)."""
         target = check_url(url)
         for _hop in range(MAX_REDIRECTS + 1):
-            addresses = resolve_public(target, self._resolver)
+            addresses = resolve_public(target, self._resolver, self._blocked_networks())
             conn = response = None
             last_error: Exception | None = None
             for ip in addresses[:MAX_ADDRESSES_TRIED]:

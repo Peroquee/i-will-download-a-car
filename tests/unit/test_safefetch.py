@@ -10,6 +10,7 @@ WHICH address the fetcher decided to connect to.
 from __future__ import annotations
 
 import http.server
+import ipaddress
 import socket
 import threading
 import time
@@ -758,3 +759,149 @@ def test_a_body_that_trickles_in_is_cut_off_by_the_deadline(world, server):
         )
     assert error.value.kind == "network"
     assert "too slowly" in error.value.message
+
+
+# --- the home network's own global addresses (DS-Lite: native global IPv6 on the LAN) ----------
+
+HOME_V6 = ipaddress.ip_network("2003:abcd:1200::/56")
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "address",
+    ["2003:abcd:1200::1", "2003:abcd:1200:ff:ffff::5", "2003:abcd:1200:12:9abc:def0:1:2"],
+)
+def test_addresses_inside_a_blocked_network_are_refused(address):
+    assert is_public_address(address)  # global, so public by the general rule
+    assert not is_public_address(address, (HOME_V6,))
+
+
+@pytest.mark.parametrize(
+    "address", ["2003:abcd:1300::1", "2003:abce:1200::1", "2606:4700:4700::1111"]
+)
+def test_addresses_outside_the_blocked_networks_stay_allowed(address):
+    assert is_public_address(address, (HOME_V6,))
+
+
+def test_a_blocked_ipv4_address_is_refused_and_networks_of_the_other_family_do_not_interfere():
+    home_v4 = ipaddress.ip_network("93.184.216.34/32")
+    assert not is_public_address("93.184.216.34", (home_v4, HOME_V6))
+    assert is_public_address("93.184.216.35", (home_v4, HOME_V6))
+    assert is_public_address("2606:4700:4700::1111", (home_v4,))
+
+
+@pytest.mark.security
+def test_a_name_that_resolves_into_the_home_prefix_is_refused():
+    target = check_url("http://podcast.example/x")
+    with pytest.raises(FetchError) as error:
+        resolve_public(target, resolver_returning("2003:abcd:1200::7"), (HOME_V6,))
+    assert error.value.kind == "blocked"
+    assert "2003" not in error.value.message
+
+
+@pytest.mark.security
+def test_an_ipv6_literal_in_the_home_prefix_is_refused():
+    target = check_url("http://[2003:abcd:1200::1]/feed")
+    with pytest.raises(FetchError) as error:
+        resolve_public(target, resolver_returning(), (HOME_V6,))
+    assert error.value.kind == "blocked"
+
+
+def proc_line(address, prefix, scope="00", name="eth0"):
+    digits = ipaddress.IPv6Address(address).exploded.replace(":", "")
+    return f"{digits} 02 {prefix:02x} {scope} 00 {name}"
+
+
+IF_INET6 = "\n".join(
+    [
+        proc_line("2003:abcd:1200::1a", 64),
+        proc_line("2003:abcd:1200::1b", 64),  # the same network twice: once
+        proc_line("fe80::a00:27ff:fe12:3456", 64, "20"),  # link-local
+        proc_line("fd12:3456:789a::1", 64, "00"),  # unique local
+        proc_line("::1", 128, "10", "lo"),
+        proc_line("2003:abcd:5555:5555::5555", 128, "00", "eth1"),
+        proc_line("2a02:aaaa:bb00::cc01", 56, "00", "wlan0"),
+        proc_line("ff02::1", 128),  # multicast
+        "this line is broken",
+        "zz03abcd120000000000000000000001 02 40 00 00 bad",
+    ]
+)
+
+
+def test_the_hosts_own_global_networks_are_read_from_proc(tmp_path):
+    path = tmp_path / "if_inet6"
+    path.write_text(IF_INET6)
+    got = safefetch.local_networks(path)
+    assert got == (
+        ipaddress.ip_network("2003:abcd:1200::/64"),
+        ipaddress.ip_network("2003:abcd:5555:5555::/64"),  # a /128 address says little: /64
+        ipaddress.ip_network("2a02:aaaa:bb00::/56"),  # a wider prefix than /64 is kept
+    )
+
+
+@pytest.mark.parametrize("content", ["", "\n\n", "garbage"])
+def test_an_empty_or_odd_proc_file_means_no_networks(tmp_path, content):
+    path = tmp_path / "if_inet6"
+    path.write_text(content)
+    assert safefetch.local_networks(path) == ()
+
+
+def test_no_proc_file_means_no_networks(tmp_path):
+    assert safefetch.local_networks(tmp_path / "missing") == ()
+
+
+def test_the_real_proc_file_can_be_read_here():
+    """Whatever this machine has, the result is a tuple of global networks (maybe none)."""
+    for network in safefetch.local_networks():
+        assert network.version == 6
+        assert network.prefixlen <= 64
+        assert network.network_address.is_global
+
+
+@pytest.mark.security
+def test_the_fetcher_refuses_configured_and_own_networks_without_connecting():
+    dialled = []
+
+    def dial(target, ip):
+        dialled.append(ip)
+        raise AssertionError("must not connect")
+
+    own = ipaddress.ip_network("2a02:aaaa:bb00::/56")
+    fetcher = SafeFetcher(
+        resolver=lambda host, port: {
+            "home.example": ["2003:abcd:1200::5"],
+            "vm.example": ["2a02:aaaa:bb00::9"],
+            "fine.example": [PUBLIC],
+        }[host],
+        dialer=dial,
+        blocked_networks=(HOME_V6,),
+        own_networks=lambda: (own,),
+    )
+    for host in ("home.example", "vm.example"):
+        with pytest.raises(FetchError) as error:
+            fetcher.fetch_bytes(f"http://{host}/feed", kind="feed", max_bytes=100)
+        assert error.value.kind == "blocked", host
+    assert dialled == []
+
+
+def test_the_hosts_own_networks_are_re_read_after_a_while():
+    """A DS-Lite provider can renumber: a new prefix is noticed without a restart."""
+    answers = iter([(), (ipaddress.ip_network("2003:abcd:9900::/64"),)])
+    now = [0.0]
+    fetcher = SafeFetcher(
+        resolver=lambda h, p: ["2003:abcd:9900::5"],
+        dialer=lambda target, ip: (_ for _ in ()).throw(ConnectionRefusedError()),
+        own_networks=lambda: next(answers),
+        clock=lambda: now[0],
+    )
+    with pytest.raises(FetchError) as before:
+        fetcher.fetch_bytes("http://podcast.example/x", kind="feed", max_bytes=10)
+    assert before.value.kind == "network"  # allowed then: it got as far as connecting
+    now[0] = 10.0
+    with pytest.raises(FetchError) as soon:
+        fetcher.fetch_bytes("http://podcast.example/x", kind="feed", max_bytes=10)
+    assert soon.value.kind == "network"  # still the cached (empty) answer
+    now[0] = safefetch.LOCAL_REFRESH_SECONDS + 1
+    with pytest.raises(FetchError) as later:
+        fetcher.fetch_bytes("http://podcast.example/x", kind="feed", max_bytes=10)
+    assert later.value.kind == "blocked"

@@ -90,7 +90,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ).start()
     # Podcast episodes (#34): the same kind of queue and worker thread. Feeds and files are
     # fetched through SafeFetcher (public addresses only, through the VPN proxy).
-    app.state.podcast_feeds = PodcastFeedClient(SafeFetcher(settings.podcast_proxy))
+    app.state.podcast_feeds = PodcastFeedClient(
+        SafeFetcher(settings.podcast_proxy, blocked_networks=settings.fetch_blocked_networks)
+    )
     app.state.podcast_worker = None
     if app.state.db is not None:
         app.state.podcast_worker = PodcastWorker(

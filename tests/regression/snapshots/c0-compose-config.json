@@ -4,6 +4,8 @@
     "depends_on": {},
     "devices": [],
     "environment": {
+      "FETCH_BLOCKED_NETWORKS": "",
+      "HOME_PUBLIC_IP": "",
       "JELLYFIN_API_KEY": "",
       "JELLYFIN_URL": "http://192.168.178.108:8096",
       "LOG_LEVEL": "INFO",
