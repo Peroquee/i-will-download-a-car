@@ -17,6 +17,7 @@
       "QBIT_PASSWORD": "",
       "QBIT_URL": "http://gluetun:8080",
       "QBIT_USER": "admin",
+      "SUBSCRIPTION_POLL_MINUTES": "60",
       "TZ": "Europe/Berlin",
       "UMASK": "002",
       "WATCHDOG_STATUS_URL": "http://watchdog:8090",

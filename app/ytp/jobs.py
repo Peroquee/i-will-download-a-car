@@ -51,7 +51,13 @@ def get_job(db: Database, job_id: int) -> Job | None:
 
 
 def submit_job(
-    db: Database, job_type: str, external_id: str, metadata_json: str, source: str | None = None
+    db: Database,
+    job_type: str,
+    external_id: str,
+    metadata_json: str,
+    source: str | None = None,
+    *,
+    retry_failed: bool = True,
 ) -> tuple[Job, Outcome]:
     """Create the job for a thing (`job_type`: 'magnet' or 'youtube'), or find the existing one.
 
@@ -62,7 +68,8 @@ def submit_job(
     * "requeued": it was there with status `failed`; it is queued again with the new metadata and
       the old error cleared (submitting a failed download again is a retry).
     * "duplicate": it is already in the system and not failed; nothing changes and the existing
-      job is returned.
+      job is returned. (With `retry_failed=False`, also when it failed: the channel poller must
+      not re-queue a video that failed, over and over; retrying one is the user's decision.)
     """
     with db.transaction() as conn:
         cursor = conn.execute(
@@ -74,7 +81,7 @@ def submit_job(
         row = conn.execute(
             "SELECT * FROM jobs WHERE type = ? AND external_id = ?", (job_type, external_id)
         ).fetchone()
-        if outcome == "duplicate" and row["status"] == "failed":
+        if outcome == "duplicate" and row["status"] == "failed" and retry_failed:
             conn.execute(
                 "UPDATE jobs SET status = 'queued', error = NULL, metadata = ?, "
                 "source = COALESCE(?, source) WHERE id = ?",

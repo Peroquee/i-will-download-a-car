@@ -145,6 +145,8 @@ services:
       YTDLP_PROXY: ${YTDLP_PROXY-http://gluetun:8888}
       # Tallest YouTube video to download in pixels (0 = no limit); a disk-space knob (#18).
       YOUTUBE_MAX_HEIGHT: ${YOUTUBE_MAX_HEIGHT:-1080}
+      # How often subscribed channels are checked for new videos, in minutes; 0 = never (#20).
+      SUBSCRIPTION_POLL_MINUTES: ${SUBSCRIPTION_POLL_MINUTES:-60}
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.
