@@ -165,7 +165,7 @@
       ],
       "timeout": "5s"
     },
-    "image": "lscr.io/linuxserver/qbittorrent:latest",
+    "image": "lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls485",
     "logging": {
       "driver": "json-file",
       "options": {
