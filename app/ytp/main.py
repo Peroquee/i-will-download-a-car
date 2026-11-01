@@ -20,6 +20,7 @@ from .clients.qbittorrent import QbitClient
 from .config import Settings
 from .db import Database, DatabaseError
 from .logging_setup import configure_logging
+from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .scheduler import AppScheduler
 
 logger = logging.getLogger(__name__)
@@ -53,9 +54,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
     # The scheduler needs the database (its jobs keep their state there).
     app.state.scheduler = None
+    app.state.reconciler = None
     if app.state.db is not None:
         app.state.scheduler = AppScheduler(app.state.db)
         app.state.scheduler.start()
+        if app.state.qbit is not None:
+            # Turns finished torrents into organized files (#15); the organizer arrives with #16.
+            app.state.reconciler = Reconciler(app.state.db, app.state.qbit, app.state.organizer)
+            app.state.scheduler.add_interval_job(
+                app.state.reconciler.run_once,
+                job_id=RECONCILE_JOB_ID,
+                seconds=RECONCILE_SECONDS,
+                run_immediately=True,
+            )
         if app.state.jellyfin.enabled:
             # Sends the debounced library refresh once things have been quiet for a while.
             app.state.scheduler.add_interval_job(
@@ -89,6 +100,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.qbit = None
     app.state.scheduler = None
     app.state.jellyfin = LibraryRefresher(None)
+    app.state.reconciler = None
+    app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     api.register(app)
 
     @app.get("/health")

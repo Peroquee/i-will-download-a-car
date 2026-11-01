@@ -86,3 +86,32 @@ def mark_failed(db: Database, job_id: int, error: str) -> None:
             "UPDATE jobs SET status = 'failed', error = ? WHERE id = ?",
             (error[:MAX_ERROR_LENGTH], job_id),
         )
+
+
+ACTIVE_STATUSES = ("queued", "downloading", "organizing")
+
+
+def active_magnet_jobs(db: Database) -> list[Job]:
+    """Magnet jobs that are not finished (the reconciler's work list), oldest first."""
+    rows = db.query(
+        "SELECT * FROM jobs WHERE type = 'magnet' "
+        "AND status IN ('queued', 'downloading', 'organizing') ORDER BY id"
+    )
+    return [Job.from_row(row) for row in rows]
+
+
+def transition(
+    db: Database, job_id: int, to: str, *, expected: tuple[str, ...], error: str | None = None
+) -> bool:
+    """Move a job to status `to` only if it is still in one of the `expected` statuses.
+
+    Returns False if someone else changed it meanwhile (so two actors never both win).
+    `error` is stored (cut to length) for `failed`, and cleared for every other status.
+    """
+    marks = ", ".join("?" for _ in expected)
+    with db.transaction() as conn:
+        cursor = conn.execute(
+            f"UPDATE jobs SET status = ?, error = ? WHERE id = ? AND status IN ({marks})",
+            (to, error[:MAX_ERROR_LENGTH] if error else None, job_id, *expected),
+        )
+        return cursor.rowcount == 1
