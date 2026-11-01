@@ -124,6 +124,56 @@ The jobs and subscriptions come back as they were. Downloads that were in progre
 beginning (the app requeues interrupted jobs at start); finished media is on the share and was
 never part of the backup. The full-stack recovery test (#32) exercises this path.
 
+## Full-stack recovery test: reboot and check (issue #32)
+
+After a power cut or a Proxmox update the whole chain has to come back **by itself and in the
+right order**: Proxmox starts the VM, Docker starts, gluetun and the VPN come up first,
+qBittorrent only after the VPN is healthy, the app before the proxy, and the jobs that were
+running either carry on or fail with a reason. This is the test for that. It is yours to run
+(it needs a reboot, which no script on the VM can do for itself), and the owner decides when.
+
+**Before the first run, once, on the Proxmox node** (a script cannot check this from inside the VM):
+
+```bash
+qm config 210 | grep -E 'onboot|startup'     # expect: onboot: 1  and  startup: order=1
+```
+
+The VM then starts with the host. On the VM, Docker must start at boot (`systemctl is-enabled
+docker` says `enabled`; `verify` checks it) and every service has `restart: unless-stopped`
+(checked per container).
+
+```bash
+# 1. on the VM, stack up and healthy, with a download in progress (add a small legal torrent
+#    or a YouTube video so there is a job to judge):
+make recovery-prepare
+# 2. reboot: the whole Proxmox host (the real test) or only the VM (a quicker, weaker one):
+#      on the Proxmox node:  reboot          on the VM:  sudo reboot
+# 3. when you can log in again, on the VM:
+make recovery-verify
+```
+
+`recovery-prepare` writes `reports/recovery-state.json` (mode 600; container start times, the boot
+id, the in-progress job ids and states, no names or links). `recovery-verify` waits up to 10 minutes
+for the stack (`--wait`) and prints one line per check, never an address:
+
+| Check | Passes when |
+|---|---|
+| reboot | the boot id changed (`--no-reboot-check` for a test that only restarts containers) |
+| every service | running again, **started after** the reboot, healthy, with a restart policy that brings it back |
+| order | gluetun started before qbittorrent, app before proxy, and qbittorrent was started only after gluetun's log says healthy (a WARN if the log cannot be read: then only the start order is judged) |
+| VPN before traffic | the watchdog says `ok`; qBittorrent's public address is a VPN one, not the home one (`VPN IP`, never `HOME IP LEAK`); no torrent is running while the VPN is not ok |
+| jobs | each job that was in progress is `done`, `failed` **with a reason**, or on its way again (`queued`/`downloading`); one stuck in `organizing` for over 10 minutes, one that failed without a reason or one that vanished is a failure; with no job in progress it WARNs (`--require-jobs` makes that a failure) |
+
+Exit code 0 = passed, 1 = a check failed, 2 = it could not run (stack not healthy at `prepare`, no
+state file). What the app does by itself after a restart: YouTube jobs that were `downloading` or
+`organizing` go back to `queued` and start again, and the reconciler fails a torrent job whose
+torrent qBittorrent no longer has, with that reason.
+
+What this does **not** prove: that no packet left the VM outside the VPN during the first seconds
+of boot (the killswitch is gluetun's firewall plus qBittorrent sharing its network, which cannot
+exist before gluetun does; [killswitch.md](killswitch.md) proves that part separately), and that the
+VM starts with the host (the `qm config` check above).
+
 ## Updates
 
 Everything is **pinned and updated on purpose**. There is no Watchtower: it needs the Docker

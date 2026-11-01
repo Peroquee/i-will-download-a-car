@@ -89,10 +89,12 @@ def test_every_variable_of_the_scripts_is_documented():
     for script in (ROOT / "scripts").rglob("*"):
         if script.is_file() and script.suffix in {".sh", ".py"}:
             text = script.read_text(encoding="utf-8")
-            names |= set(re.findall(r"\$\{((?:KS|AB)_[A-Z_]+)[:}-]", text))
-            names |= set(re.findall(r"""environ\.get\(\s*["'](YTP_[A-Z_]+)["']""", text))
+            names |= set(re.findall(r"\$\{((?:KS|AB|RT)_[A-Z_]+)[:}-]", text))
+            names |= set(re.findall(r"""environ\.get\(\s*["']((?:YTP|RT)_[A-Z_]+)["']""", text))
     names |= {"YTP_NETWORK_TESTS", "YTP_YTDLP_PROXY", "YTP_VPN_ENV_FILE", "YTP_OVPN_SOURCE"}
-    assert {"KS_COMPOSE", "AB_PROBE_URL", "YTP_BACKUP_DIR"} <= names, "the scan itself works"
+    assert {"KS_COMPOSE", "AB_PROBE_URL", "YTP_BACKUP_DIR", "RT_COMPOSE", "RT_IP_URL"} <= names, (
+        "the scan itself works"
+    )
     missing = sorted(n for n in names if n not in CONFIGURATION)
     assert not missing, f"docs/configuration.md lacks: {missing}"
 
