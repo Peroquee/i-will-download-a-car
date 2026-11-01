@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# netwatch.sh: restart qBittorrent when it is stuck in a dead network namespace (issue #4).
+# netwatch: restart qBittorrent when it is stuck in a dead network namespace (issue #4).
 #
 # qbittorrent shares gluetun's network namespace (network_mode: service:gluetun).
 # When gluetun restarts as the same container (a crash, Docker's restart policy,
@@ -7,7 +7,9 @@
 # no interfaces at all, no network, until qbittorrent itself is restarted.
 #
 # This script runs INSIDE the qbittorrent container as an s6 service (mounted at
-# /custom-services.d/netwatch). If the container has no network interface besides
+# /custom-services.d/netwatch; the whole folder scripts/qbittorrent/services is mounted, not
+# the single file; the image copies it into s6 at container start, so after a `git pull`
+# run `docker restart qbittorrent` to use the new version). If the container has no network interface besides
 # `lo` for several checks in a row, it stops the container (SIGTERM to PID 1).
 # `restart: unless-stopped` then starts it again, and it joins gluetun's current
 # namespace. No docker.sock is needed.
@@ -17,9 +19,9 @@
 # working. Only a namespace with nothing in it counts as dead.
 #
 # Usage:
-#   netwatch.sh [ARG]      watch forever (what s6 runs; s6 passes the service name,
+#   netwatch [ARG]         watch forever (what s6 runs; s6 passes the service name,
 #                          e.g. `custom-svc-netwatch`, as the first argument: ignored)
-#   netwatch.sh --check    exit 0 if the namespace has an interface, 1 if it is dead
+#   netwatch --check       exit 0 if the namespace has an interface, 1 if it is dead
 #                          (used as the container's health check)
 #
 # Test hooks: NETWATCH_NET_DEV (default /proc/net/dev), NETWATCH_INTERVAL (seconds, 10),

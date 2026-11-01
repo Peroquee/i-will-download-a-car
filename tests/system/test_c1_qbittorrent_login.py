@@ -82,25 +82,31 @@ def qbittorrent(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         docker.run(["rm", "-f", name])
 
 
-def login(container: str, password: str) -> str:
-    return sh(
+def login(container: str, password: str) -> bool:
+    """True if qBittorrent accepts the login. Current versions answer a good login with 204
+    and no body, a bad one with 401; older ones answer 200 "Ok." / "Fails."."""
+    answer = sh(
         container,
         *CURL,
+        "-w",
+        "\n%{http_code}",
         "--data-urlencode",
         f"username={USER}",
         "--data-urlencode",
         f"password={password}",
         "http://localhost:8080/api/v2/auth/login",
     )
+    body, _, code = answer.rpartition("\n")
+    return code == "204" or (code == "200" and body.strip() == "Ok.")
 
 
 def test_the_seeded_password_logs_in(qbittorrent):
-    assert login(qbittorrent, PASSWORD) == "Ok."
+    assert login(qbittorrent, PASSWORD)
 
 
 def test_a_wrong_password_and_the_old_default_do_not(qbittorrent):
-    assert login(qbittorrent, "wrong password") == "Fails."
-    assert login(qbittorrent, "adminadmin") == "Fails."
+    assert not login(qbittorrent, "wrong password")
+    assert not login(qbittorrent, "adminadmin")
 
 
 def test_no_temporary_password_is_generated(qbittorrent):
@@ -109,6 +115,6 @@ def test_no_temporary_password_is_generated(qbittorrent):
 
 
 def test_the_vpn_interface_binding_is_active(qbittorrent):
-    assert login(qbittorrent, PASSWORD) == "Ok."
+    assert login(qbittorrent, PASSWORD)
     prefs = sh(qbittorrent, *CURL, "http://localhost:8080/api/v2/app/preferences")
     assert '"current_network_interface":"tun0"' in prefs.replace(" ", "")

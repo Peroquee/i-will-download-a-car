@@ -61,6 +61,8 @@ _BASE_TOOLS = (
     "mkdir",
     "ln",
     "rm",
+    "true",
+    "chmod",
 )
 
 

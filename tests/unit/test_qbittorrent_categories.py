@@ -38,6 +38,9 @@ class FakeQbittorrent:
         }
         self.requests: list[tuple[str, str]] = []
         self.logins = 0
+        # modern: 204 + no body / 401 (current qBittorrent); legacy: 200 "Ok." / 200 "Fails.";
+        # banned: 403 for everyone (too many failed logins).
+        self.login_style = "modern"
 
     def handler(self):
         fake = self
@@ -63,7 +66,13 @@ class FakeQbittorrent:
                     fake.logins += 1
                     ok = one == {"username": USER, "password": PASSWORD}
                     cookie = {"Set-Cookie": "SID=abc; HttpOnly; path=/"} if ok else {}
-                    return self.reply("Ok." if ok else "Fails.", headers=cookie)
+                    if fake.login_style == "banned":
+                        return self.reply("Forbidden", 403)
+                    if fake.login_style == "legacy":
+                        return self.reply("Ok." if ok else "Fails.", headers=cookie)
+                    if ok:
+                        return self.reply("", 204, headers=cookie)
+                    return self.reply("Unauthorized", 401)
                 if "SID=abc" not in (self.headers.get("Cookie") or ""):
                     return self.reply("Forbidden", 403)
                 if path == "torrents/categories":
@@ -117,6 +126,45 @@ def run(url: str, *args: str, password: str = PASSWORD) -> subprocess.CompletedP
         text=True,
         check=False,
     )
+
+
+@pytest.mark.parametrize("style", ["modern", "legacy"])
+def test_both_login_answers_count_as_success(server, style):
+    """Current qBittorrent answers a good login with 204 and an EMPTY body (not 200 "Ok.");
+    the script used to report "login refused" to the owner with the right password."""
+    fake, url = server
+    fake.login_style = style
+    result = run(url)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(fake.categories) == 4
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("style", ["modern", "legacy"])
+def test_a_wrong_password_is_refused_with_either_answer(server, style):
+    fake, url = server
+    fake.login_style = style
+    result = run(url, password="wrong password")
+    assert result.returncode == 1
+    assert "login refused" in result.stderr
+    assert fake.categories == {}
+
+
+def test_a_401_mentions_the_port_mismatch_cause(server):
+    """qBittorrent also answers 401 when the Host header's port is not its Web UI port
+    (seen with a 127.0.0.1:18080->8080 mapping)."""
+    _, url = server
+    result = run(url, password="wrong password")
+    assert "18080->8080" in result.stderr
+    assert "Web UI port" in result.stderr
+
+
+def test_a_banned_client_gets_the_wait_hint(server):
+    fake, url = server
+    fake.login_style = "banned"
+    result = run(url)
+    assert result.returncode == 1
+    assert "too many failed logins" in result.stderr
 
 
 def test_creates_the_four_categories_with_their_download_folders(server):

@@ -151,7 +151,7 @@
     "volumes": [
       "/data:/data",
       "<repo>/config/qbittorrent:/config",
-      "<repo>/scripts/qbittorrent/netwatch.sh:/custom-services.d/netwatch:ro"
+      "<repo>/scripts/qbittorrent/services:/custom-services.d:ro"
     ]
   },
   "watchdog": {

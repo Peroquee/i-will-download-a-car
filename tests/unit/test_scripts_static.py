@@ -9,7 +9,13 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS = sorted((REPO_ROOT / "scripts").rglob("*.sh"))
+# Shell scripts, plus the extensionless s6 services mounted into containers (scripts/*/services/).
+SCRIPTS = sorted(
+    {
+        *(REPO_ROOT / "scripts").rglob("*.sh"),
+        *(p for p in (REPO_ROOT / "scripts").glob("*/services/*") if p.is_file()),
+    }
+)
 
 
 def test_there_are_scripts():

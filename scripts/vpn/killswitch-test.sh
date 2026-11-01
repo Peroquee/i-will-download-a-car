@@ -7,8 +7,9 @@
 # Steps:
 #   1. qbittorrent reaches the internet, and with an address that is NOT the home one
 #   2. docker stop gluetun: qbittorrent must have NO connectivity (no leak)
-#   3. docker start gluetun: qbittorrent must get connectivity back BY ITSELF, with an
-#      address that is again not the home one (see scripts/qbittorrent/netwatch.sh)
+#   3. docker start gluetun: qbittorrent must get connectivity back AUTOMATICALLY (netwatch
+#      restarts the container when its network namespace died), with an
+#      address that is again not the home one (see scripts/qbittorrent/services/netwatch)
 #
 # Output: only the verdicts "VPN IP", "no connection" and "HOME IP LEAK". No address is
 # ever printed, so the log can be shared.
@@ -86,7 +87,7 @@ dry_run() {
   log "+ docker stop <gluetun>"
   log "+ docker exec <qbittorrent> curl -s $IP_URL     (expect: no connection)"
   log "+ docker start <gluetun>, wait until healthy"
-  log "+ docker exec <qbittorrent> curl -s $IP_URL     (expect: VPN IP again, without restarting qbittorrent)"
+  log "+ docker exec <qbittorrent> curl -s $IP_URL     (expect: VPN IP again, recovered automatically)"
 }
 
 main() {
@@ -127,7 +128,7 @@ main() {
     fail "$result (expected no connection)"
   fi
 
-  log "Step 3: gluetun started again, qbittorrent must recover by itself"
+  log "Step 3: gluetun started again, qbittorrent must recover automatically (netwatch)"
   docker start "$GLUETUN" >/dev/null 2>&1 || die "could not start gluetun"
   STOPPED=0
   if wait_for_healthy; then
@@ -143,7 +144,7 @@ main() {
     sleep "$POLL"
   done
   case "$result" in
-    "VPN IP") pass "VPN IP again after $((SECONDS - start))s, without restarting qbittorrent" ;;
+    "VPN IP") pass "VPN IP again after $((SECONDS - start))s: recovered automatically (netwatch restarted the container)" ;;
     "HOME IP LEAK") fail "HOME IP LEAK after gluetun came back" ;;
     *) fail "no connection ${RECOVERY_TIMEOUT}s after gluetun came back (manual fix: docker restart qbittorrent)" ;;
   esac
