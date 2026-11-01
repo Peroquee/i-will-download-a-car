@@ -1,0 +1,5 @@
+# What the unit tests of the app need: its runtime dependencies plus the test client.
+# Kept apart from requirements-test.txt because the integration job installs that one on an
+# Alpine image with a newer Python, where pydantic-core would have to be compiled.
+-r app/requirements.txt
+httpx2==2.16.0

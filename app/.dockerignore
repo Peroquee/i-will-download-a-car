@@ -1,0 +1,5 @@
+# The image needs requirements.txt and the ytp package, nothing else.
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.venv/

@@ -104,13 +104,18 @@ services:
       - ./scripts/qbittorrent/services:/custom-services.d:ro
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
 
-  # FastAPI app. Placeholder until #8 adds the Dockerfile.
+  # The app (#8): FastAPI. It is on the default bridge network and publishes NO port, so
+  # nothing outside this host can reach it until the reverse proxy with login exists (#29);
+  # the proxy will reach it as http://app:8000 over the bridge. It runs as PUID:PGID.
+  # Docker builds the image from app/ (no daemon is available in CI: see docs/testing.md).
   app:
     <<: *service-defaults
-    profiles: [planned]
+    build: ./app
     image: youtube-premium/app:dev
+    user: "${PUID:?PUID must be set in .env}:${PGID:?PGID must be set in .env}"
     environment:
       <<: *media-env
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Library folder per media type, relative to /data (same names as in .env.example).
       MEDIA_DIR_MOVIES: ${MEDIA_DIR_MOVIES:?MEDIA_DIR_MOVIES must be set in .env}
       MEDIA_DIR_SERIES: ${MEDIA_DIR_SERIES:?MEDIA_DIR_SERIES must be set in .env}
@@ -118,8 +123,8 @@ services:
       MEDIA_DIR_MUSIC: ${MEDIA_DIR_MUSIC:?MEDIA_DIR_MUSIC must be set in .env}
       MEDIA_DIR_YOUTUBE: ${MEDIA_DIR_YOUTUBE:?MEDIA_DIR_YOUTUBE must be set in .env}
       # Jellyfin runs outside this stack (own LXC); the app only calls its API to refresh
-      # libraries. Optional in compose: the app is still a placeholder, and the key is a
-      # secret the owner creates in Jellyfin (docs/jellyfin.md). The app checks them itself.
+      # libraries. Optional in compose: the key is a secret the owner creates in Jellyfin
+      # (docs/jellyfin.md). The app starts without them and says so in its log.
       JELLYFIN_URL: ${JELLYFIN_URL:-}
       JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
     volumes:

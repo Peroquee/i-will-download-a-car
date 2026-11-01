@@ -19,7 +19,7 @@ help:
 	@echo "categories        set up the qBittorrent categories and save paths (asks for the Web UI password)"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
-$(VENV)/.installed: requirements-test.txt requirements-lint.txt
+$(VENV)/.installed: requirements-test.txt requirements-lint.txt requirements-app.txt
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -q -r requirements-dev.txt
 	touch $@

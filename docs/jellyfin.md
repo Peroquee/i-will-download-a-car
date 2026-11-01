@@ -12,7 +12,7 @@ yet because the app is still a placeholder):
 
 | Setting | Value |
 |---|---|
-| `JELLYFIN_URL` | Jellyfin's base address, e.g. `http://192.168.178.108:8096`. **The port is not confirmed yet** (8096 is Jellyfin's default); check it in the LXC (`ss -ltn` there) or in Dashboard > Networking before relying on it. |
+| `JELLYFIN_URL` | Jellyfin's base address, `http://192.168.178.108:8096` (confirmed: it answers from the VM). |
 | `JELLYFIN_API_KEY` | A secret you create in Jellyfin, below. Never in Git, never in chat. |
 
 ## Create the API key

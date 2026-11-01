@@ -7,7 +7,8 @@ the VPN) and files the result into the right library.
 ## Layout
 
 ```
-docker-compose.yml     the stack (gluetun, qbittorrent; app/watchdog/proxy planned; Jellyfin is external)
+docker-compose.yml     the stack (gluetun, qbittorrent, app; watchdog/proxy planned; Jellyfin is external)
+app/                   the FastAPI app (package ytp) and its Dockerfile
 compose/               per-VPN-type gluetun settings (vpn-openvpn.yml, vpn-wireguard.yml)
 .env.example           every setting; copy to .env on the host
 scripts/proxmox/       create the VM on the Proxmox node

@@ -133,3 +133,14 @@ def test_lint_covers_python_yaml_and_shell():
     text = "\n".join(script_text(resolved(j)) for n, j in JOBS.items() if n.startswith("lint:"))
     for tool in ("ruff check", "ruff format --check", "yamllint", "shellcheck"):
         assert tool in text
+
+
+def test_the_unit_job_installs_the_apps_test_requirements():
+    text = script_text({"script": resolved(JOBS["test:unit"]).get("before_script")})
+    assert "pip install -q -r requirements-app.txt" in text
+
+
+def test_the_integration_job_does_not_need_the_apps_dependencies():
+    # It runs on an Alpine image with a newer Python, where pydantic-core has no wheel.
+    text = script_text({"script": resolved(JOBS["test:integration"]).get("before_script")})
+    assert "requirements-app.txt" not in text

@@ -60,13 +60,12 @@ def test_image_tag_is_explicit(name):
 
 def test_only_built_services_start_by_default():
     # Placeholders for later issues sit behind profiles so `up -d` works today.
-    assert set(default_services(COMPOSE)) == {"gluetun", "qbittorrent"}
+    assert set(default_services(COMPOSE)) == {"gluetun", "qbittorrent", "app"}
 
 
 @pytest.mark.parametrize(
     ("name", "profile"),
     [
-        ("app", "planned"),
         ("watchdog", "planned"),
         ("proxy", "planned"),
     ],

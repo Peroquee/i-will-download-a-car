@@ -177,7 +177,10 @@ test:unit:
   stage: unit
   extends: [.python, .reports]
   needs: []
-  before_script: *venv-test
+  # The app's tests need FastAPI and its test client (requirements-app.txt).
+  before_script:
+    - *venv-test
+    - pip install -q -r requirements-app.txt
   script:
     - pytest tests/unit $PYTEST_COMMON
     # Add --cov=app and a coverage report here once app/ exists (#8).
