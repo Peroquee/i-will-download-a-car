@@ -16,6 +16,16 @@ class FakeGluetun:
     http_status: int = 200  # forced answer for the status route, e.g. 500
     body: str | None = None  # raw body override
     hits: list[dict] = field(default_factory=list)
+    public: dict | None = field(
+        default_factory=lambda: {
+            "public_ip": "185.107.12.34",
+            "country": "Germany",
+            "region": "Hesse",
+            "city": "Frankfurt",
+            "organization": "AS64500 Example Hosting",
+        }
+    )
+    public_http_status: int = 200
 
     def __post_init__(self) -> None:
         self.server: http.server.ThreadingHTTPServer | None = None
@@ -47,10 +57,16 @@ class FakeGluetun:
             def do_GET(self):
                 headers = {k.lower(): v for k, v in self.headers.items()}
                 fake.hits.append({"path": self.path, "headers": headers})
-                if self.path != "/v1/vpn/status":
+                if self.path not in {"/v1/vpn/status", "/v1/publicip/ip"}:
                     return self.reply(404)
                 if headers.get("x-api-key") != API_KEY:
                     return self.reply(401, "unauthorized")
+                if self.path == "/v1/publicip/ip":
+                    if fake.public_http_status != 200:
+                        return self.reply(fake.public_http_status, "boom")
+                    return self.reply(
+                        200, json.dumps(fake.public if fake.public is not None else {})
+                    )
                 if fake.http_status != 200:
                     return self.reply(fake.http_status, "boom")
                 self.reply(

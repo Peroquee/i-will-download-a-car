@@ -14,7 +14,8 @@ Usage:
 
 Safe to re-run: an existing key in .env is kept (the TOML file is rewritten from it, so they
 cannot drift apart, and a file written by an older version gains new routes); --rotate
-makes a new one. The key is never printed. Gluetun reads the file only at start: run `docker compose up -d --force-recreate gluetun watchdog` afterwards.
+makes a new one. The key is never printed. Gluetun reads the file only at start: run
+`docker compose up -d --force-recreate gluetun watchdog` afterwards.
 """
 
 from __future__ import annotations
