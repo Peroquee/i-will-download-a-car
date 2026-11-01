@@ -145,6 +145,21 @@ def test_the_qbittorrent_password_never_shows_in_repr_str_or_summary():
     assert s.summary()["qbit_configured"] is True
 
 
+@pytest.mark.parametrize(
+    ("value", "mask"), [(None, 0o022), ("002", 0o002), ("0027", 0o027), ("022", 0o022)]
+)
+def test_umask_is_an_octal_mask(value, mask):
+    if mask is None:
+        assert any("UMASK" in p for p in problems(UMASK=value))
+    else:
+        assert settings(UMASK=value).umask == mask
+
+
+@pytest.mark.parametrize("value", ["abc", "999", "2", "00022", "-1"])
+def test_a_bad_umask_is_reported(value):
+    assert any("UMASK" in p for p in problems(UMASK=value))
+
+
 def test_settings_are_immutable():
     with pytest.raises(AttributeError):
         settings().port = 1  # type: ignore[misc]

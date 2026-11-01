@@ -20,6 +20,7 @@ from .clients.qbittorrent import QbitClient
 from .config import Settings
 from .db import Database, DatabaseError
 from .logging_setup import configure_logging
+from .organizer import FileOrganizer
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .scheduler import AppScheduler
 
@@ -42,6 +43,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.jellyfin = LibraryRefresher(
         JellyfinClient.from_settings(settings) if settings.jellyfin_configured else None
     )
+    # Hardlinks finished downloads into the library (#16); the reconciler (#15) calls it.
+    app.state.organizer = FileOrganizer(settings, app.state.jellyfin)
     # A database that cannot be opened must not hide behind a crash loop: the app stays up
     # "degraded", logs the reason and the fix, and /health answers 503 until it is restarted.
     app.state.db = None
