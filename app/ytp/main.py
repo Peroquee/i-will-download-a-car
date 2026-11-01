@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
 
-from . import __version__
+from . import __version__, api
 from .clients.qbittorrent import QbitClient
 from .config import Settings
 from .db import Database, DatabaseError
@@ -69,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = None
     app.state.db_error = None
     app.state.qbit = None
+    api.register(app)
 
     @app.get("/health")
     async def health(response: Response) -> dict[str, object]:
