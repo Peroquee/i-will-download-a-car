@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify install update
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -26,6 +26,8 @@ help:
 	@echo "update-check     is the pinned yt-dlp the newest release? (exit 10 = newer exists); lists the pinned image tags"
 	@echo "recovery-prepare  before a reboot of the VM or the Proxmox host: record what runs and which jobs are in progress"
 	@echo "recovery-verify   after the reboot: all containers back, in order, VPN before traffic, jobs recovered or failed cleanly"
+	@echo "install          guided installation for beginners (asks questions in German or English; sudo)"
+	@echo "update           back up, fetch the new version, rebuild, check"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
 # Every file requirements-dev.txt pulls in (with -r, also nested) must be listed, or a venv made before
@@ -42,6 +44,7 @@ lint: venv
 	$(VENV)/bin/ruff format --check .
 	$(VENV)/bin/yamllint --strict .
 	find scripts -type f \( -name '*.sh' -o -path '*/services/*' \) -print0 | xargs -0 $(VENV)/bin/shellcheck --external-sources
+	$(VENV)/bin/shellcheck --external-sources install.sh update.sh
 
 test: venv
 	$(PYTEST) tests
@@ -101,6 +104,12 @@ recovery-prepare:
 
 recovery-verify:
 	scripts/ops/recovery_test.py verify
+
+install:
+	./install.sh
+
+update:
+	./update.sh
 
 snapshot: venv
 	UPDATE_SNAPSHOTS=1 $(PYTEST) tests/regression -k snapshot

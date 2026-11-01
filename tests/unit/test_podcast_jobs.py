@@ -528,6 +528,8 @@ def test_a_down_connection_stops_the_run_after_the_first_failure(world):
 def test_one_crashing_feed_does_not_stop_the_others(world, monkeypatch, caplog):
     podcast_subscriptions.add(world.db, "https://a.example/feed", "A")
     podcast_subscriptions.add(world.db, "https://b.example/feed", "B")
+    with world.db.transaction() as conn:  # subscribed long before the fixed test clock NOW
+        conn.execute("UPDATE podcast_subscriptions SET created_at = ?", (SUBSCRIBED,))
     world.fetcher.feeds["https://b.example/feed"] = feed_of(episode_item("n", "N", 0.1))
     real = world.feeds.load
 
