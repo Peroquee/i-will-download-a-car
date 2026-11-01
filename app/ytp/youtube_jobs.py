@@ -69,6 +69,8 @@ class YoutubeWorker:
         self._idle = idle_seconds
         self._wake = threading.Event()
         self.processed = 0
+        # Percent of the running download by job id, for the job list (not persisted).
+        self.progress: dict[int, int] = {}
 
     def wake(self) -> None:
         """A job was just queued: look now instead of at the next idle check."""
@@ -98,6 +100,8 @@ class YoutubeWorker:
         except Exception as exc:
             logger.exception("youtube job crashed", extra={"job_id": job.id})
             self._fail(job, f"the download failed: {type(exc).__name__}")
+        finally:
+            self.progress.pop(job.id, None)
         self.processed += 1
         return True
 
@@ -169,6 +173,7 @@ class YoutubeWorker:
             done = data.get("downloaded_bytes")
             if data.get("status") != "downloading" or not total or not done:
                 return
+            self.progress[job.id] = min(int(done * 100 / total), 100)
             quarter = int(done * 4 / total)
             if quarter > reached["quarter"]:
                 reached["quarter"] = quarter

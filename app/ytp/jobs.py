@@ -51,7 +51,7 @@ def get_job(db: Database, job_id: int) -> Job | None:
 
 
 def submit_job(
-    db: Database, job_type: str, external_id: str, metadata_json: str
+    db: Database, job_type: str, external_id: str, metadata_json: str, source: str | None = None
 ) -> tuple[Job, Outcome]:
     """Create the job for a thing (`job_type`: 'magnet' or 'youtube'), or find the existing one.
 
@@ -66,9 +66,9 @@ def submit_job(
     """
     with db.transaction() as conn:
         cursor = conn.execute(
-            "INSERT INTO jobs (type, external_id, metadata) VALUES (?, ?, ?) "
+            "INSERT INTO jobs (type, external_id, metadata, source) VALUES (?, ?, ?, ?) "
             "ON CONFLICT (type, external_id) DO NOTHING",
-            (job_type, external_id, metadata_json),
+            (job_type, external_id, metadata_json, source),
         )
         outcome: Outcome = "created" if cursor.rowcount == 1 else "duplicate"
         row = conn.execute(
@@ -76,17 +76,20 @@ def submit_job(
         ).fetchone()
         if outcome == "duplicate" and row["status"] == "failed":
             conn.execute(
-                "UPDATE jobs SET status = 'queued', error = NULL, metadata = ? WHERE id = ?",
-                (metadata_json, row["id"]),
+                "UPDATE jobs SET status = 'queued', error = NULL, metadata = ?, "
+                "source = COALESCE(?, source) WHERE id = ?",
+                (metadata_json, source, row["id"]),
             )
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
             outcome = "requeued"
         return Job.from_row(row), outcome
 
 
-def submit_magnet_job(db: Database, infohash: str, metadata_json: str) -> tuple[Job, Outcome]:
-    """`submit_job` for a magnet link, keyed by its infohash."""
-    return submit_job(db, "magnet", infohash, metadata_json)
+def submit_magnet_job(
+    db: Database, infohash: str, metadata_json: str, magnet: str | None = None
+) -> tuple[Job, Outcome]:
+    """`submit_job` for a magnet link, keyed by its infohash (the link is kept for a retry)."""
+    return submit_job(db, "magnet", infohash, metadata_json, magnet)
 
 
 def claim_next_queued(db: Database, job_type: str) -> Job | None:
@@ -158,3 +161,28 @@ def transition(
             (to, error[:MAX_ERROR_LENGTH] if error else None, job_id, *expected),
         )
         return cursor.rowcount == 1
+
+
+def list_jobs(db: Database, *, limit: int = 50, status: str | None = None) -> list[Job]:
+    """Jobs, newest first (the job list view)."""
+    if status is None:
+        rows = db.query("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))
+    else:
+        rows = db.query(
+            "SELECT * FROM jobs WHERE status = ? ORDER BY id DESC LIMIT ?", (status, limit)
+        )
+    return [Job.from_row(row) for row in rows]
+
+
+def status_counts(db: Database) -> dict[str, int]:
+    """How many jobs are in each status (zero for the empty ones)."""
+    counts = dict.fromkeys(("queued", "downloading", "organizing", "done", "failed"), 0)
+    for row in db.query("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"):
+        counts[row["status"]] = row["n"]
+    return counts
+
+
+def get_source(db: Database, job_id: int) -> str | None:
+    """The stored source of a job (the magnet link). Only the retry reads it."""
+    rows = db.query("SELECT source FROM jobs WHERE id = ?", (job_id,))
+    return rows[0]["source"] if rows else None

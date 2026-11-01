@@ -161,6 +161,17 @@
       <p id="result" class="result" role="status" aria-live="polite"></p>
     </form>
 
+    <section class="jobs" aria-labelledby="jobs-title">
+      <div class="jobs-head">
+        <h2 id="jobs-title" class="jobs-title" data-i18n="jobs.title"></h2>
+        <button type="button" id="jobs-filter" class="ghost small" aria-pressed="false" hidden></button>
+      </div>
+      <p id="jobs-banner" class="banner" role="alert" hidden></p>
+      <p id="jobs-error" class="error" role="status"></p>
+      <ul id="jobs-list" class="job-list"></ul>
+      <p id="jobs-empty" class="note" data-i18n="jobs.empty" hidden></p>
+    </section>
+
     <details class="help">
       <summary data-i18n="help.title"></summary>
       <p data-i18n="help.body"></p>
@@ -248,6 +259,22 @@
     "err.extra_forbidden": "Unerwartetes Feld.",
     "err.string_type": "Bitte Text eingeben.",
     "err.other": "Ungültiger Wert.",
+    "jobs.title": "Aufträge",
+    "jobs.empty": "Noch keine Aufträge. Oben einen Link einfügen.",
+    "jobs.load_error": "Die Auftragsliste lässt sich gerade nicht laden. Es wird weiter versucht.",
+    "jobs.banner": "{n} fehlgeschlagen. Unten steht der Grund; mit „Nochmal versuchen“ geht es weiter.",
+    "jobs.filter_failed": "Nur fehlgeschlagene ({n})",
+    "jobs.filter_all": "Alle anzeigen",
+    "jobs.retry": "Nochmal versuchen",
+    "jobs.retrying": "Wird erneut gestartet …",
+    "jobs.retry_failed": "Das erneute Starten hat nicht geklappt.",
+    "jobs.no_reason": "Kein Grund gemeldet.",
+    "jobs.id": "Auftrag #{id}",
+    "jobs.progress": "{n} %",
+    "time.now": "gerade eben",
+    "time.minutes": "vor {n} Min.",
+    "time.hours": "vor {n} Std.",
+    "time.days": "vor {n} Tagen",
     "help.title": "Hilfe",
     "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Das Ergebnis erscheint später in Jellyfin."
   },
@@ -329,6 +356,22 @@
     "err.extra_forbidden": "Unexpected field.",
     "err.string_type": "Please enter text.",
     "err.other": "Invalid value.",
+    "jobs.title": "Jobs",
+    "jobs.empty": "No jobs yet. Paste a link above.",
+    "jobs.load_error": "The job list cannot be loaded right now. Still trying.",
+    "jobs.banner": "{n} failed. The reason is shown below; Try again continues.",
+    "jobs.filter_failed": "Failed only ({n})",
+    "jobs.filter_all": "Show all",
+    "jobs.retry": "Try again",
+    "jobs.retrying": "Starting again …",
+    "jobs.retry_failed": "Starting it again did not work.",
+    "jobs.no_reason": "No reason was reported.",
+    "jobs.id": "Job #{id}",
+    "jobs.progress": "{n}%",
+    "time.now": "just now",
+    "time.minutes": "{n} min ago",
+    "time.hours": "{n} h ago",
+    "time.days": "{n} days ago",
     "help.title": "Help",
     "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. The result appears in Jellyfin later."
   }
