@@ -8,7 +8,7 @@ qBittorrent to the VPN interface tun0 as an extra guard on top of the shared
 network namespace: if the tunnel is down there is no tun0 and nothing connects.
 
 Usage:
-    scripts/qbittorrent/seed_config.py [--user NAME] [--config PATH] [--dry-run]
+    scripts/qbittorrent/seed_config.py [--user NAME] [--config PATH] [--port N] [--dry-run]
                                        [--password-stdin]
 
 The password is asked for twice on the terminal, or read from stdin with
@@ -55,7 +55,7 @@ def pbkdf2_value(password: str, salt: bytes | None = None) -> str:
     return f"@ByteArray({base64.b64encode(salt).decode()}:{base64.b64encode(key).decode()})"
 
 
-def wanted_settings(user: str, password: str) -> dict[str, dict[str, str]]:
+def wanted_settings(user: str, password: str, port: str = WEBUI_PORT) -> dict[str, dict[str, str]]:
     """section -> {key: value} that this script owns, in qBittorrent's INI syntax."""
     return {
         # Without this the headless qbittorrent-nox waits for an answer on stdin.
@@ -63,7 +63,7 @@ def wanted_settings(user: str, password: str) -> dict[str, dict[str, str]]:
         "Preferences": {
             "WebUI\\Username": user,
             "WebUI\\Password_PBKDF2": f'"{pbkdf2_value(password)}"',
-            "WebUI\\Port": WEBUI_PORT,
+            "WebUI\\Port": port,
             # Ask for the login from every client, localhost and LAN included.
             "WebUI\\LocalHostAuth": "true",
             "WebUI\\AuthSubnetWhitelistEnabled": "false",
@@ -126,6 +126,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--user", default="admin", help="Web UI user name (default: admin)")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="qBittorrent.conf path")
     parser.add_argument(
+        "--port",
+        type=int,
+        default=int(WEBUI_PORT),
+        choices=range(1, 65536),
+        metavar="PORT",
+        help=f"Web UI port (default {WEBUI_PORT}, as docker-compose.yml; only tests change it)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="show what would change, write nothing"
     )
     parser.add_argument(
@@ -138,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     password = read_password(args.password_stdin)
 
     existing = args.config.read_text(encoding="utf-8") if args.config.exists() else ""
-    updated = apply_settings(existing, wanted_settings(args.user, password))
+    updated = apply_settings(existing, wanted_settings(args.user, password, str(args.port)))
 
     if args.dry_run:
         print(f"dry run: would write {args.config}")

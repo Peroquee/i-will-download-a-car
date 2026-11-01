@@ -10,6 +10,7 @@ file land in the right folder, is manual: docs/host-setup.md, step 5d.
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 import sys
 import time
@@ -56,15 +57,26 @@ class Client:
         return json.loads(self.opener.open(f"{self.base}/api/v2/{path}", timeout=20).read())
 
 
+def free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 @pytest.fixture(scope="module")
 def webui(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     config = tmp_path_factory.mktemp("qbit-config")
+    # The same port number inside and outside: qBittorrent answers 401 to a Host header whose
+    # port differs from its own Web UI port (a mapping like 49153->8080 is refused).
+    port = free_port()
     seeded = python(
         SEED,
         "--user",
         USER,
         "--config",
         str(config / "qBittorrent" / "qBittorrent.conf"),
+        "--port",
+        str(port),
         "--password-stdin",
         stdin=PASSWORD + "\n",
     )
@@ -73,8 +85,8 @@ def webui(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     started = docker.run(
         [
             "run", "-d", "--name", name,
-            "-e", "PUID=1000", "-e", "PGID=1000", "-e", "TZ=UTC", "-e", "WEBUI_PORT=8080",
-            "-p", "127.0.0.1::8080",
+            "-e", "PUID=1000", "-e", "PGID=1000", "-e", "TZ=UTC", "-e", f"WEBUI_PORT={port}",
+            "-p", f"127.0.0.1:{port}:{port}",
             "-v", f"{config}:/config",
             IMAGE,
         ],
@@ -82,7 +94,6 @@ def webui(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     )  # fmt: skip
     assert started.returncode == 0, started.stderr
     try:
-        port = docker.run(["port", name, "8080/tcp"]).stdout.strip().rsplit(":", 1)[-1]
         base = f"http://127.0.0.1:{port}"
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:

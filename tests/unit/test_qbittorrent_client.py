@@ -63,7 +63,22 @@ def test_the_session_cookie_is_sent_on_later_calls_and_login_happens_once(fake):
     client.version()
     client.version()
     assert fake.logins == 1
-    assert all(s.headers["cookie"] == "SID=SID-0001" for s in fake.calls("app/version"))
+    assert all(s.headers["cookie"] == fake.cookie for s in fake.calls("app/version"))
+
+
+@pytest.mark.parametrize("name", ["SID", "QBT_SID_8080", "QBT_SID_1"])
+def test_the_session_cookie_name_of_any_generation_is_accepted_and_sent_back(fake, name):
+    """qBittorrent 5.2 renamed SID to QBT_SID_<port>; the client must not care."""
+    fake.cookie_name = name
+    client = client_for(fake)
+    assert client.version() == "v5.0.4"
+    assert fake.calls("app/version")[0].headers["cookie"] == f"{name}=SID-0001"
+
+
+def test_only_a_session_cookie_counts_other_cookies_in_the_login_answer_are_ignored(fake):
+    fake.cookie_name = "tracking"
+    with pytest.raises(QbitUnavailable, match="no session cookie"):
+        client_for(fake).version()
 
 
 def test_login_posts_the_credentials_as_a_form(fake):
@@ -162,9 +177,9 @@ def test_an_expired_session_logs_in_again_once_and_repeats_the_call(fake, caplog
         assert client.version() == "v5.0.4"
     assert fake.logins == 2
     assert [s.headers.get("cookie") for s in fake.calls("app/version")] == [
-        "SID=SID-0001",
-        "SID=SID-0001",
-        "SID=SID-0002",
+        f"QBT_SID_{fake.port}=SID-0001",
+        f"QBT_SID_{fake.port}=SID-0001",
+        f"QBT_SID_{fake.port}=SID-0002",
     ]
     assert "session expired" in caplog.text
 

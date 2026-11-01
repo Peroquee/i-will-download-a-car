@@ -82,12 +82,20 @@ def qbittorrent(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         docker.run(["rm", "-f", name])
 
 
-def login(container: str, password: str) -> bool:
+def login(container: str, password: str, *, keep_session: bool = False) -> bool:
     """True if qBittorrent accepts the login. Current versions answer a good login with 204
-    and no body, a bad one with 401; older ones answer 200 "Ok." / "Fails."."""
+    and no body, a bad one with 401; older ones answer 200 "Ok." / "Fails.".
+
+    By default NO cookie is sent: qBittorrent answers a login that arrives with a valid session
+    cookie by simply saying "Ok" without looking at the password (AuthController::loginAction),
+    so a shared cookie jar would make a wrong password look accepted after a good login.
+    keep_session=True starts from an empty jar and leaves the session in it for later calls."""
+    jar = CURL if keep_session else ["curl", "-s"]
+    if keep_session:
+        sh(container, "rm", "-f", "/tmp/jar")
     answer = sh(
         container,
-        *CURL,
+        *jar,
         "-w",
         "\n%{http_code}",
         "--data-urlencode",
@@ -105,8 +113,18 @@ def test_the_seeded_password_logs_in(qbittorrent):
 
 
 def test_a_wrong_password_and_the_old_default_do_not(qbittorrent):
+    assert login(qbittorrent, PASSWORD, keep_session=True)  # a good login first, as in real life
     assert not login(qbittorrent, "wrong password")
     assert not login(qbittorrent, "adminadmin")
+
+
+def test_localhost_is_not_let_in_without_a_login(qbittorrent):
+    """WebUI\\LocalHostAuth=true is honoured: the container's own loopback needs the login too."""
+    code = sh(
+        qbittorrent, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+        "http://localhost:8080/api/v2/app/version",
+    )  # fmt: skip
+    assert code == "403"
 
 
 def test_no_temporary_password_is_generated(qbittorrent):
@@ -115,6 +133,6 @@ def test_no_temporary_password_is_generated(qbittorrent):
 
 
 def test_the_vpn_interface_binding_is_active(qbittorrent):
-    assert login(qbittorrent, PASSWORD)
+    assert login(qbittorrent, PASSWORD, keep_session=True)
     prefs = sh(qbittorrent, *CURL, "http://localhost:8080/api/v2/app/preferences")
     assert '"current_network_interface":"tun0"' in prefs.replace(" ", "")

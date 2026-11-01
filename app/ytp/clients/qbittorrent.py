@@ -8,9 +8,10 @@ What this wrapper absorbs, each learned on the real VM:
 
 * **Login.** Current qBittorrent answers a good login with 204 and an empty body, a bad one
   with 401; older versions answer 200 "Ok." / 200 "Fails.". Both are accepted. The session is
-  the `SID` cookie, kept here by hand (never logged).
-* **Expired session.** An API call without a valid SID gets 403. The client logs in again ONCE
-  and repeats the call ONCE; a second 403 is an error, never a loop.
+  the session cookie, kept here by hand (never logged): `SID` up to qBittorrent 5.1, and
+  `QBT_SID_<webui port>` since 5.2 (any of these names is accepted and sent back unchanged).
+* **Expired session.** An API call without a valid session cookie gets 403. The client logs in
+  again ONCE and repeats the call ONCE; a second 403 is an error, never a loop.
 * **Banned address.** Five failed logins ban the source address for an hour (403 on login).
   A refused login is therefore never retried automatically: the client remembers the refusal
   and raises `QbitAuthError` without touching qBittorrent (wrong credentials: until the app is
@@ -24,8 +25,8 @@ What this wrapper absorbs, each learned on the real VM:
 * **qBittorrent 5.** `torrents/pause` and `resume` became `stop` and `start` (and the state
   filters `paused`/`resumed` became `stopped`/`running`). Both generations are supported.
 
-Credentials come from QBIT_USER / QBIT_PASSWORD (see `Settings`). The password and the SID are
-never written to a log line or an exception message.
+Credentials come from QBIT_USER / QBIT_PASSWORD (see `Settings`). The password and the session
+cookie are never written to a log line or an exception message.
 """
 
 from __future__ import annotations
@@ -171,7 +172,7 @@ class QbitClient:
         self._timeout = timeout
         self._clock = clock
         self._lock = threading.RLock()
-        self._sid: str | None = None
+        self._cookie: str | None = None  # "NAME=value", sent as the Cookie header
         self._login_blocked_until = 0.0
         self._login_block_reason = ""
 
@@ -186,7 +187,7 @@ class QbitClient:
 
     def _send(
         self, method: str, path: str, *, query: Mapping[str, str] | None = None,
-        form: Mapping[str, str] | None = None, sid: str | None = None,
+        form: Mapping[str, str] | None = None, cookie: str | None = None,
     ) -> tuple[int, str, http.client.HTTPMessage]:  # fmt: skip
         """One HTTP round trip on a fresh connection. Network trouble becomes QbitUnavailable."""
         target = f"/api/v2/{path}" + (f"?{urlencode(query)}" if query else "")
@@ -201,8 +202,8 @@ class QbitClient:
         if form is not None:
             body = urlencode(form).encode()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-        if sid:
-            headers["Cookie"] = f"SID={sid}"
+        if cookie:
+            headers["Cookie"] = cookie
         conn_class = (
             http.client.HTTPSConnection if self._scheme == "https" else http.client.HTTPConnection
         )
@@ -267,10 +268,10 @@ class QbitClient:
             raise QbitUnavailable(f"qBittorrent answered {status} to the login")
         if not (status == 204 or (status == 200 and body.strip() in {"Ok.", ""})):
             raise QbitUnavailable(f"unexpected answer to the login: HTTP {status}")
-        sid = _sid_from(headers)
-        if not sid:
+        cookie = _session_cookie_from(headers)
+        if not cookie:
             raise QbitUnavailable("qBittorrent accepted the login but sent no session cookie")
-        self._sid = sid
+        self._cookie = cookie
         logger.info("qbittorrent login ok", extra={"url": self.base_url})
 
     # ------------------------------------------------------------------ requests
@@ -281,16 +282,18 @@ class QbitClient:
     ) -> tuple[int, str]:  # fmt: skip
         """An authenticated call: logs in if needed, re-logs in ONCE on 403 and repeats ONCE."""
         with self._lock:
-            if self._sid is None:
+            if self._cookie is None:
                 self._login_locked()
             for attempt in (1, 2):
-                status, body, _ = self._send(method, path, query=query, form=form, sid=self._sid)
+                status, body, _ = self._send(
+                    method, path, query=query, form=form, cookie=self._cookie
+                )
                 if status != 403:
                     break
                 if attempt == 2:
                     raise QbitAuthError("qBittorrent rejects the session even after a new login")
                 logger.warning("qbittorrent session expired, logging in again")
-                self._sid = None
+                self._cookie = None
                 self._login_locked()
             if status == 401:
                 raise QbitAuthError(
@@ -379,12 +382,15 @@ class QbitClient:
             raise QbitRequestError(f"torrents/{new_name} answered {status}", status)
 
 
-def _sid_from(headers: http.client.HTTPMessage) -> str | None:
+def _session_cookie_from(headers: http.client.HTTPMessage) -> str | None:
+    """ "NAME=value" of the session cookie in a login answer: `SID` (qBittorrent up to 5.1) or
+    `QBT_SID_<port>` (5.2 and later). Other cookies are ignored."""
     for raw in headers.get_all("Set-Cookie") or []:
         try:
             cookie = SimpleCookie(raw)
         except CookieError:
             continue
-        if "SID" in cookie and cookie["SID"].value:
-            return cookie["SID"].value
+        for name, morsel in cookie.items():
+            if (name == "SID" or name.startswith("QBT_SID_")) and morsel.value:
+                return f"{name}={morsel.value}"
     return None

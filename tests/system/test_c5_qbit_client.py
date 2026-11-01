@@ -54,17 +54,19 @@ def free_port() -> int:
 @pytest.fixture(scope="module")
 def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     config = tmp_path_factory.mktemp("qbit-client-config")
+    port = free_port()
     seeded = python(
         SEED,
         "--user",
         USER,
         "--config",
         str(config / "qBittorrent" / "qBittorrent.conf"),
+        "--port",
+        str(port),
         "--password-stdin",
         stdin=PASSWORD + "\n",
     )
     assert seeded.returncode == 0, seeded.stderr
-    port = free_port()
     name = docker.unique_name("qbit-client")
     started = docker.run(
         [

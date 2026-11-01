@@ -169,3 +169,19 @@ def test_the_default_config_path_is_where_the_container_reads_it():
     # keeps qBittorrent's profile in /config/qBittorrent/.
     relative = seed.DEFAULT_CONFIG.relative_to(seed.REPO_ROOT)
     assert relative.as_posix() == "config/qbittorrent/qBittorrent/qBittorrent.conf"
+
+
+def test_the_web_ui_port_defaults_to_8080_and_can_be_chosen_for_tests(tmp_path):
+    """Only the system tests choose one (a free port, published under the same number)."""
+    default, chosen = tmp_path / "a.conf", tmp_path / "b.conf"
+    assert run(default).returncode == 0
+    assert run(chosen, "--port", "18123").returncode == 0
+    assert "WebUI\\Port=8080" in default.read_text()
+    assert "WebUI\\Port=18123" in chosen.read_text()
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "abc", "-1"])
+def test_a_bad_port_is_refused(tmp_path, port):
+    result = run(tmp_path / "c.conf", "--port", port)
+    assert result.returncode == 2
+    assert not (tmp_path / "c.conf").exists()
