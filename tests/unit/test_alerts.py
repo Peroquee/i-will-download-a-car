@@ -453,7 +453,10 @@ def test_the_status_client_passes_on_only_the_known_fields(gluetun, qbit_server,
         got = WatchdogStatusClient(f"http://127.0.0.1:{server.port}").fetch_status()
     finally:
         server.stop()
-    assert set(got) == {"state", "since", "reason", "paused", "last_poll", "auto_resume"}
+    assert set(got) == {
+        "state", "since", "reason", "paused", "last_poll", "auto_resume",
+        "egress", "egress_checked", "egress_country",
+    }  # fmt: skip
     assert got["state"] == "ok"
 
 

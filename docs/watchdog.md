@@ -46,6 +46,49 @@ Settings in `.env`: `WATCHDOG_INTERVAL` (seconds between polls, default 1),
 Only changes are logged, not every poll: `docker compose logs watchdog` shows `VPN unhealthy:
 pausing all torrents`, `all torrents paused`, `VPN is running again`, `torrents resumed`.
 
+## Egress sanity check (issue #23)
+
+A slow second question on top of "is the tunnel up": **is traffic really leaving through the
+VPN?** Every `EGRESS_CHECK_INTERVAL` seconds (default 300, `0` = off, at least 30) the watchdog
+asks gluetun for its public address (`GET /v1/publicip/ip` on the control server, with the same
+read-only key: **no third-party IP service is contacted**) and checks:
+
+| Check | Fails when |
+|---|---|
+| public address | the address is private, loopback, link-local or carrier-grade NAT |
+| not your home line | the address is inside `HOME_PUBLIC_IP` (addresses or prefixes, comma separated) |
+| country (optional) | `EGRESS_EXPECTED_COUNTRY` is set and gluetun reports another country (comma separated list allowed, case-insensitive) |
+| qBittorrent bound to the VPN | qBittorrent's `current_network_interface` is not `tun0`: every socket it opens, IPv4 and IPv6, then goes through the tunnel or nowhere |
+
+ExpressVPN publishes no address ranges, so "inside the provider's ranges" cannot be verified;
+these checks catch the failures that matter (the address is the home line's, or not a public
+one, or qBittorrent is no longer bound to the tunnel).
+
+- **Inconclusive is not a mismatch:** gluetun not answering (the tunnel restarting) or reporting
+  no address is logged as a warning and counts for nothing. Checks only run while the VPN poll is
+  healthy and the watchdog can see.
+- **Confirmed = `EGRESS_CONFIRM` (default 2) mismatches in a row.** Then: an **error** in the log,
+  an **urgent alert** through the #22 channel (if configured), and **all torrents are paused**.
+  Chosen because the tunnel is up but traffic may not be going where it should; the cost of a
+  false alarm is a pause you lift by hand. **Torrents are never resumed automatically after an
+  egress mismatch**, not even with `WATCHDOG_RESUME_AFTER`, and not when the next check passes
+  (the alert "egress check passes again" says they stay paused): a person has to look first.
+- **Addresses are never written in full.** Logs show `203.0.x.x` (IPv6: `2003:abcd:x`), alerts and
+  the status show no address at all (only `ok|mismatch|unknown`, the time and the country).
+  `HOME_PUBLIC_IP` is not shown in errors either (a bad entry is named by its position).
+- Status for the app: `egress`, `egress_checked`, `egress_country` in `GET /api/vpn`.
+
+### Finding `HOME_PUBLIC_IP`
+
+Optional but this is the check that matters. Your line is **DS-Lite**: the IPv4 address the
+internet sees is shared by the provider (carrier-grade NAT), and the native **IPv6 prefix** is your
+real public identity. So a realistic leak is an IPv6 one. Look at the Fritz!Box page *Internet >
+Online-Monitor* (it shows the IPv6 prefix, e.g. `2003:abcd:1200::/56`), and from a PC on the LAN
+once: `curl -4 https://ifconfig.me` and `curl -6 https://ifconfig.me` (your own manual choice of a
+service; the stack never asks one). Put what you find in `.env`, for example
+`HOME_PUBLIC_IP=84.150.20.30, 2003:abcd:1200::/56`. Prefixes survive provider re-assignments of
+the exact address better than single addresses; update it if your provider renumbers you.
+
 ## Abuse test (issue #24)
 
 `make vpn-abuse-test CYCLES=20` (script: `scripts/vpn/vpn-abuse-test.sh`, `--dry-run` shows the
