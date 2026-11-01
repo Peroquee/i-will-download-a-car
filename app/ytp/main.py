@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response, status
 
 from . import __version__, api
+from .clients.jellyfin import JellyfinClient, LibraryRefresher
 from .clients.qbittorrent import QbitClient
 from .config import Settings
 from .db import Database, DatabaseError
@@ -36,6 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.qbit = QbitClient.from_settings(settings) if settings.qbit_configured else None
     if app.state.qbit is None:
         logger.warning("qbittorrent is not configured (QBIT_PASSWORD is empty): downloads disabled")
+    # Jellyfin: with no URL or key the refresher does nothing (the warning above says so).
+    app.state.jellyfin = LibraryRefresher(
+        JellyfinClient.from_settings(settings) if settings.jellyfin_configured else None
+    )
     # A database that cannot be opened must not hide behind a crash loop: the app stays up
     # "degraded", logs the reason and the fix, and /health answers 503 until it is restarted.
     app.state.db = None
@@ -51,6 +56,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if app.state.db is not None:
         app.state.scheduler = AppScheduler(app.state.db)
         app.state.scheduler.start()
+        if app.state.jellyfin.enabled:
+            # Sends the debounced library refresh once things have been quiet for a while.
+            app.state.scheduler.add_interval_job(
+                app.state.jellyfin.flush_due, job_id="jellyfin-refresh", seconds=5
+            )
     try:
         yield
     finally:
@@ -78,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db_error = None
     app.state.qbit = None
     app.state.scheduler = None
+    app.state.jellyfin = LibraryRefresher(None)
     api.register(app)
 
     @app.get("/health")
