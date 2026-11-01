@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterator
 
 import pytest
@@ -44,6 +45,7 @@ done = YoutubeDownloader(min_free_bytes=0).download(ref, Path("/data/work"), aud
 published = upload_date(done.info)
 tags = Tags(title="Big Buck Bunny", artist="Blender Cast", album="Blender Cast",
             album_artist="Blender Cast", published=published, genre="Podcast")
+print("published", published.isoformat())
 print("tagged", embed_tags(done.video, tags, done.thumbnail))
 target = place_episode(done.video, Path("/data/Podcasts"), "Blender Cast", published,
                        "Big Buck Bunny", done.video.suffix.lower())
@@ -74,7 +76,12 @@ def test_a_real_video_becomes_a_tagged_audio_episode(image, tmp_path):
     files = sorted(p.name for p in folder.iterdir())
     assert len(files) == 1, files
     episode = files[0]
-    assert episode.startswith("2014-02-10 - Big Buck Bunny.")
+    # The date is whatever upload date yt-dlp reported (the script prints it): the test must not
+    # hard-code YouTube's idea of a video's age.
+    published = re.search(r"^published (\d{4}-\d{2}-\d{2})$", result.stdout, re.M)
+    assert published, result.stdout
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} - Big Buck Bunny\.(m4a|opus)", episode), episode
+    assert episode.startswith(f"{published.group(1)} - Big Buck Bunny.")
     assert episode.endswith((".m4a", ".opus"))
     size = (folder / episode).stat().st_size
     assert 100_000 < size < 60_000_000
@@ -88,7 +95,10 @@ def test_a_real_video_becomes_a_tagged_audio_episode(image, tmp_path):
     )  # fmt: skip
     assert probe.returncode == 0, probe.stdout + probe.stderr
     info = json.loads(probe.stdout)
-    tags = {k.lower(): v for k, v in info["format"]["tags"].items()}
+    # m4a keeps the tags with the file, Ogg/Opus with the stream: look in both
+    tags = {k.lower(): v for k, v in info["format"].get("tags", {}).items()}
+    for stream in info["streams"]:
+        tags |= {k.lower(): v for k, v in stream.get("tags", {}).items() if k.lower() not in tags}
     assert tags["title"] == "Big Buck Bunny"
     assert tags["album"] == "Blender Cast"
     assert tags["artist"] == "Blender Cast"
