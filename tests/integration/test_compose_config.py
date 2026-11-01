@@ -310,4 +310,6 @@ def test_a_single_quoted_hash_reaches_the_proxy_literally(tmp_path: Path):
     ]
     env_file.write_text("\n".join([*lines, f"PROXY_PASSWORD_HASH='{hashed}'"]) + "\n")
     env = rendered_config(env_file)["services"]["proxy"]["environment"]
-    assert env["PROXY_PASSWORD_HASH"] == hashed
+    # `compose config` prints a literal "$" as "$$" (so the output can be read back); the
+    # container gets the single "$". Interpolated, "$2a" would have come out empty.
+    assert env["PROXY_PASSWORD_HASH"] == hashed.replace("$", "$$")
