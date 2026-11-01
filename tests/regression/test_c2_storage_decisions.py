@@ -72,6 +72,10 @@ def test_c2_only_the_app_state_folder_may_be_handed_over_and_never_recursively()
     _, body = split_app_config(script_code())
     for forbidden in ("rm ", "mv ", "find ", " -R", " -r ", "DATA_ROOT", "data_root", "$root"):
         assert forbidden not in body, forbidden
-    targets = re.findall(r"run (?:chown|chmod) \S+ (\S+)", body)
+    targets = re.findall(r"run (?:chown -h|chmod) \S+ (\S+)", body)
     assert targets == ['"$dir"', '"$dir"', '"$dir/$file"']
+    # Every chown is -h (never follows a link), and links are refused before any change.
+    assert len(re.findall(r"\bchown\b", body)) == len(re.findall(r"\bchown -h\b", body)) == 2
+    assert body.count('[ -L "$dir" ]') == 1
+    assert body.count('[ -L "$dir/$file" ]') == 1
     assert "for file in app.db app.db-wal app.db-shm" in body

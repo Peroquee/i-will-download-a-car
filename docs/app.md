@@ -99,7 +99,8 @@ exist, Docker would create it as `root:root` and the app could not write to it. 
 - `sudo scripts/host/create-layout.sh` (`make layout`) creates `config/app` owned by
   `PUID:PGID`, mode 2775, and **hands over** an existing one (for example the `root:root` one
   from the first start of the app) to `PUID:PGID`: that folder and `app.db*` only, not
-  recursively. `check-host.sh --only layout` fails with that hint when the owner is wrong.
+  recursively. It runs as root, so it **refuses** a symlinked `config/app` or `app.db*` and an
+  `app.db*` with several hard links, and changes nothing in that case. `check-host.sh --only layout` fails with that hint when the owner is wrong.
 - If it is still wrong, the app does not crash-loop: it stays up **degraded**. The log has
   `database unavailable` with the reason and the fix, `/health` answers `503` with
   `"database": "unavailable: ..."`, and Docker shows it `unhealthy`. Fix the folder, then

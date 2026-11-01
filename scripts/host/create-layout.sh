@@ -91,6 +91,12 @@ ensure_dir() {
 # the login user can still put files like config/expressvpn.ovpn there.
 ensure_app_config() {
   local dir="$1" parent owner file
+  # This runs as root and chowns. A symlink (config/app -> /etc, or app.db -> /etc/passwd) would
+  # make it change something else entirely, so links are refused, never followed. (-L also
+  # catches a dangling link, which "! -e" alone would treat as "missing".)
+  if [ -L "$dir" ]; then
+    die "$dir is a symbolic link; refusing to change ownership through it (make it a real folder)"
+  fi
   parent="$(dirname "$dir")"
   if [ ! -d "$parent" ]; then
     log "creating $parent"
@@ -106,12 +112,21 @@ ensure_app_config() {
     if [ "$owner" = "$PUID:$PGID" ]; then
       log "exists   $dir"
     else
+      # Check every database file BEFORE changing anything, so a refusal leaves no half-done fix.
+      for file in app.db app.db-wal app.db-shm; do
+        if [ -L "$dir/$file" ]; then
+          die "$dir/$file is a symbolic link; refusing to change ownership through it"
+        fi
+        if [ -e "$dir/$file" ] && [ "$(stat -c '%h' "$dir/$file")" -gt 1 ]; then
+          die "$dir/$file has more than one hard link; refusing to change ownership of a shared file"
+        fi
+      done
       log "fixing   $dir (owned by $owner; the app runs as $PUID:$PGID and must write there)"
-      run chown "$PUID:$PGID" "$dir"
+      run chown -h "$PUID:$PGID" "$dir"
       run chmod 2775 "$dir"
       for file in app.db app.db-wal app.db-shm; do
         if [ -e "$dir/$file" ]; then
-          run chown "$PUID:$PGID" "$dir/$file"
+          run chown -h "$PUID:$PGID" "$dir/$file"
         fi
       done
     fi

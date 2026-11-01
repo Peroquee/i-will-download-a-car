@@ -274,3 +274,79 @@ def test_a_file_in_place_of_the_state_folder_is_an_error(layout):
     result = layout.run()
     assert result.returncode != 0
     assert "not a folder" in result.stderr
+
+
+# --------------------------------------------------------------------------- symbolic links
+
+
+def make_victim(tmp_path: Path) -> Path:
+    """A folder with a file that must never be changed: stands for /etc."""
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "passwd").write_text("root:x:0:0\n")
+    victim.chmod(0o750)
+    return victim
+
+
+def snapshot(path: Path) -> tuple[int, int, int]:
+    info = path.stat()
+    return info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)
+
+
+def test_a_symlinked_state_folder_is_refused_and_its_target_untouched(layout, tmp_path):
+    victim = make_victim(tmp_path)
+    before = snapshot(victim), snapshot(victim / "passwd")
+    layout.config.parent.mkdir(parents=True)
+    layout.config.symlink_to(victim)
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert (snapshot(victim), snapshot(victim / "passwd")) == before
+    assert layout.config.is_symlink()
+
+
+def test_a_dangling_symlink_is_refused_not_created_through(layout, tmp_path):
+    layout.config.parent.mkdir(parents=True)
+    layout.config.symlink_to(tmp_path / "does-not-exist")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert not (tmp_path / "does-not-exist").exists()
+
+
+def test_the_refusal_also_applies_to_a_dry_run(layout, tmp_path):
+    layout.config.parent.mkdir(parents=True)
+    layout.config.symlink_to(make_victim(tmp_path))
+    assert layout.run("--dry-run").returncode != 0
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+@pytest.mark.parametrize("name", ["app.db", "app.db-wal", "app.db-shm"])
+def test_a_symlinked_database_file_is_refused_before_anything_is_changed(layout, tmp_path, name):
+    victim = make_victim(tmp_path)
+    layout.config.mkdir(parents=True)
+    (layout.config / name).symlink_to(victim / "passwd")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert owner(victim / "passwd") == (0, 0)
+    assert owner(layout.config) == (0, 0), "nothing was changed before the refusal"
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+def test_a_hardlinked_database_file_is_refused(layout, tmp_path):
+    victim = make_victim(tmp_path)
+    layout.config.mkdir(parents=True)
+    os.link(victim / "passwd", layout.config / "app.db")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "hard link" in result.stderr
+    assert owner(victim / "passwd") == (0, 0)
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a root-owned folder")
+def test_a_normal_database_file_is_still_handed_over(layout):
+    layout.config.mkdir(parents=True)
+    (layout.config / "app.db").write_text("db")
+    assert layout.run().returncode == 0
+    assert owner(layout.config / "app.db") == (layout.puid, layout.pgid)

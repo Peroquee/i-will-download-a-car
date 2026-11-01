@@ -135,7 +135,7 @@ sudo scripts/host/check-host.sh --only layout  # hardlink test between downloads
 - **The app's database folder `config/app`** (in this repository, not under `/data`) is made by
   the same script, owned by `PUID:PGID`, because the app runs as that user and cannot create it.
   If it already exists as `root:root` (Docker's doing), the script hands it over, that folder
-  and `app.db*` only. This is the one existing folder it changes. Details: [app.md](app.md#database-issue-9).
+  and `app.db*` only; it refuses symbolic links and hard-linked files there. This is the one existing folder it changes. Details: [app.md](app.md#database-issue-9).
 
 ## 5. docker-compose.yml skeleton and .env with VPN credentials
 
