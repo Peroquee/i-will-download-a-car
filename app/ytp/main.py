@@ -26,7 +26,11 @@ from .feeds import FeedClient
 from .jobs_api import TorrentProgress
 from .logging_setup import configure_logging
 from .organizer import FileOrganizer
+from .podcast_jobs import POLL_JOB_ID as PODCAST_POLL_JOB_ID
+from .podcast_jobs import PodcastPoller, PodcastWorker
+from .podcasts import PodcastFeedClient
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
+from .safefetch import SafeFetcher
 from .scheduler import AppScheduler
 from .subscription_poller import POLL_JOB_ID, POLL_JOB_SECONDS, SubscriptionPoller
 from .web import SecurityMiddleware, register_ui
@@ -84,10 +88,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         threading.Thread(
             target=app.state.youtube_worker.run, args=(worker_stop,), name="youtube", daemon=True
         ).start()
+    # Podcast episodes (#34): the same kind of queue and worker thread. Feeds and files are
+    # fetched through SafeFetcher (public addresses only, through the VPN proxy).
+    app.state.podcast_feeds = PodcastFeedClient(SafeFetcher(settings.podcast_proxy))
+    app.state.podcast_worker = None
+    if app.state.db is not None:
+        app.state.podcast_worker = PodcastWorker(
+            app.state.db, settings, app.state.podcast_feeds, app.state.jellyfin
+        )
+        threading.Thread(
+            target=app.state.podcast_worker.run, args=(worker_stop,), name="podcasts", daemon=True
+        ).start()
     # The scheduler needs the database (its jobs keep their state there).
     app.state.scheduler = None
     app.state.reconciler = None
     app.state.poller = None
+    app.state.podcast_poller = None
     if app.state.db is not None:
         app.state.scheduler = AppScheduler(app.state.db)
         app.state.scheduler.start()
@@ -115,6 +131,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         else:
             logger.info("channel polling is off (SUBSCRIPTION_POLL_MINUTES=0)")
+        # Podcast feeds, the same way (#34); slower, and the "check now" button works regardless.
+        app.state.podcast_poller = PodcastPoller(
+            app.state.db,
+            app.state.podcast_feeds,
+            app.state.podcast_worker,
+            poll_minutes=settings.podcast_poll_minutes or 240,
+        )
+        if settings.podcast_poll_minutes > 0:
+            app.state.scheduler.add_interval_job(
+                app.state.podcast_poller.run_once,
+                job_id=PODCAST_POLL_JOB_ID,
+                seconds=POLL_JOB_SECONDS,
+            )
+        else:
+            logger.info("podcast polling is off (PODCAST_POLL_MINUTES=0)")
         if app.state.jellyfin.enabled:
             # Sends the debounced library refresh once things have been quiet for a while.
             app.state.scheduler.add_interval_job(
@@ -126,6 +157,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         worker_stop.set()
         if app.state.poller is not None:
             app.state.poller.stop.set()  # a run in progress ends after its current channel
+        if app.state.podcast_poller is not None:
+            app.state.podcast_poller.stop.set()
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown()
         if app.state.db is not None:
@@ -154,6 +187,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None
     app.state.poller = None
+    app.state.podcast_feeds = None
+    app.state.podcast_worker = None
+    app.state.podcast_poller = None
     app.state.watchdog_status = None
     app.state.youtube = None
     app.state.channels = None

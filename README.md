@@ -31,6 +31,7 @@ docs/testing.md        test levels, markers and rules
 docs/operations.md     backups and restore, updates (pinned versions), log rotation
 scripts/ops/           backup/restore and the yt-dlp update check
 docs/youtube.md        YouTube probe and download, the VPN route, yt-dlp upkeep
+docs/podcasts.md       podcasts: RSS feeds, episodes, the library, the SSRF-safe fetcher
 ```
 
 ## Quick start

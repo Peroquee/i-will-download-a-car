@@ -23,6 +23,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -166,6 +167,11 @@ def test_requests_from_other_sites_are_refused_before_anything_happens(client, h
         ("POST", "/api/subscriptions", {"channel": "@kurzgesagt"}),
         ("DELETE", "/api/subscriptions/1", None),
         ("POST", "/api/subscriptions/1/poll", None),
+        ("POST", "/api/podcasts/probe", {"feed": "https://podcast.example/feed.xml"}),
+        ("POST", "/api/podcasts/episode", {"feed": "https://podcast.example/feed.xml", "key": "0" * 40}),
+        ("POST", "/api/podcasts", {"feed": "https://podcast.example/feed.xml"}),
+        ("DELETE", "/api/podcasts/1", None),
+        ("POST", "/api/podcasts/1/poll", None),
     ],
 )  # fmt: skip
 def test_every_state_changing_route_is_protected_and_nothing_is_created(client, method, path, body):
@@ -324,6 +330,9 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "field.album",
         "mode.magnet",
         "yt.title",
+        "mode.podcast",
+        "type.podcast",
+        "subs.podcast",
     }, same
 
 
@@ -349,8 +358,12 @@ def test_every_server_error_and_probe_kind_has_a_text():
     for lang in ("de", "en"):
         for kind in PROBE_STATUS:
             assert f"kind.{kind}" in t[lang], (lang, kind)
+        from ytp.podcasts_api import KIND, STATUS
+
+        for kind in STATUS:
+            assert f"kind.{KIND.get(kind, f'feed_{kind}')}" in t[lang], (lang, kind)
         for error_type in (
-            "missing", "name_empty", "name_too_long", "name_path_separator", "name_control_character",
+            "missing", "feed_invalid", "name_empty", "name_too_long", "name_path_separator", "name_control_character",
             "name_dots_only", "year_out_of_range", "int_parsing", "greater_than_equal",
             "less_than_equal", "magnet_invalid", "video_url_invalid", "channel_invalid", "extra_forbidden",
         ):  # fmt: skip
@@ -389,8 +402,12 @@ def run_node(expression: str):
         ("http://music.youtube.com/watch?v=dQw4w9WgXcQ", "youtube"),
         ("MAGNET:?xt=urn:btih:abc", "magnet"),
         ("magnet:?xt=urn:btih:abc", "magnet"),
-        ("https://vimeo.com/1", None),
-        ("https://youtube.com.evil.example/x", None),
+        ("https://vimeo.com/1", "podcast"),
+        ("https://feeds.example.org/show.xml", "podcast"),
+        ("http://podcast.example/feed", "podcast"),
+        ("https://youtube.com.evil.example/x", "podcast"),
+        ("ftp://example.org/feed", None),
+        ("https://", None),
         ("hello", None),
         ("", None),
     ],
@@ -516,7 +533,7 @@ def test_the_age_of_a_timestamp(iso, expected):
 @needs_node
 def test_job_kinds_map_to_known_translations():
     t = translations()["en"]
-    for kind in ("movies", "series", "audiobooks", "music", "youtube"):
+    for kind in ("movies", "series", "audiobooks", "music", "youtube", "podcast"):
         assert run_node(f"L.kindKey({json.dumps(kind)})") in t
     assert run_node("L.kindKey('nonsense')") is None
 
@@ -596,3 +613,102 @@ def test_the_page_has_the_subscription_view_built_without_innerhtml():
     assert "innerHTML" not in APP_JS
     assert 'method: "DELETE"' in APP_JS or '"DELETE"' in APP_JS
     assert "window.confirm" not in APP_JS, "the two-step button is used instead of a dialog"
+
+
+# --- podcasts (#34) -------------------------------------------------------------------------
+
+
+def test_the_page_has_the_podcast_panel_and_the_script_builds_it_without_innerhtml():
+    for element_id in ("mode-podcast", "podcast-fields", "pc-status", "f-podcast", "pc-episode",
+                       "pc-subscribe", "pc-backfill"):  # fmt: skip
+        assert f'id="{element_id}"' in HTML
+    for route in ("/api/podcasts/probe", "/api/podcasts/episode", "/api/podcasts"):
+        assert f'"{route}"' in APP_JS
+    assert "innerHTML" not in APP_JS
+    assert "textContent" in APP_JS
+
+
+def test_episode_titles_from_a_feed_are_only_ever_set_as_text():
+    """A feed controls the titles: they must reach the page through textContent, never as HTML."""
+    block = APP_JS[APP_JS.index("function fillEpisodes") : APP_JS.index("function runFeedProbe")]
+    assert "option.textContent" in block
+    assert "innerHTML" not in block
+    assert "outerHTML" not in APP_JS
+    assert "insertAdjacentHTML" not in APP_JS
+
+
+def test_the_subscription_view_lists_channels_and_podcasts():
+    assert '"/api/podcasts"' in APP_JS
+    assert 'sub.kind === "podcast"' in APP_JS
+
+
+@needs_node
+def test_feed_addresses_trigger_the_feed_lookup_not_the_video_lookup():
+    assert run_node("L.looksLikeFeedUrl('https://feeds.example/show.xml')") is True
+    assert run_node("L.looksLikeFeedUrl('https://youtu.be/dQw4w9WgXcQ')") is False
+    assert run_node("L.looksLikeFeedUrl('magnet:?xt=urn:btih:abc')") is False
+    assert run_node("L.looksLikeVideoUrl('https://feeds.example/show.xml')") is False
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("values", "episode", "subscribe"),
+    [
+        ({"name": " My Cast ", "episode": "k" * 40, "subscribe": False, "backfill": "0"},
+         {"feed": "https://p.example/f", "key": "k" * 40, "name": "My Cast"}, None),
+        ({"name": "", "episode": "", "subscribe": True, "backfill": "3"},
+         None, {"feed": "https://p.example/f", "backfill": 3}),
+        ({"name": "X", "episode": "k" * 40, "subscribe": True, "backfill": ""},
+         {"feed": "https://p.example/f", "key": "k" * 40, "name": "X"},
+         {"feed": "https://p.example/f", "backfill": 0, "name": "X"}),
+        ({"name": "X", "episode": "", "subscribe": False, "backfill": "0"}, None, None),
+    ],
+)  # fmt: skip
+def test_podcast_payloads_match_what_the_server_expects(client, values, episode, subscribe):
+    got = run_node(f"L.podcastPayloads(' https://p.example/f ', {json.dumps(values)})")
+    assert got == {"episode": episode, "subscribe": subscribe}
+    # and the server accepts exactly these shapes (field names, no extras): 422 only for content
+    for body, path in (
+        (got["episode"], "/api/podcasts/episode"),
+        (got["subscribe"], "/api/podcasts"),
+    ):
+        if body is not None:
+            response = client.post(path, json=body)
+            assert response.status_code != 422 or response.json()["detail"][0]["loc"][1] != "extra"
+            assert not any(
+                e["type"] == "extra_forbidden"
+                for e in response.json().get("detail", [])
+                if isinstance(response.json().get("detail"), list)
+            )
+
+
+@needs_node
+def test_the_first_look_for_a_podcast_wants_a_folder_and_something_to_do():
+    run = "L.clientErrors('podcast', null, %s, %s, 2026)"
+    ok = {"name": "X", "episode": "k", "subscribe": False, "backfill": "0"}
+    assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(ok))) == {}
+    nothing = {"name": "X", "episode": "", "subscribe": False, "backfill": "0"}
+    assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(nothing))) == {
+        "episode": "pc.nothing"
+    }
+    nameless = {"name": " ", "episode": "k", "subscribe": False, "backfill": "0"}
+    assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(nameless))) == {
+        "name": "err.required"
+    }
+    assert run_node(run % (json.dumps(""), json.dumps(ok))) == {"link": "err.required"}
+    for bad in ("21", "x", "-1"):
+        wrong = {**ok, "subscribe": True, "backfill": bad}
+        assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(wrong))) == {
+            "backfill": "err.int_out_of_range_20"
+        }
+
+
+@needs_node
+def test_server_422s_for_a_feed_land_on_the_right_fields():
+    detail = [
+        {"loc": ["body", "feed"], "type": "feed_invalid", "msg": "no"},
+        {"loc": ["body", "key"], "type": "string_pattern_mismatch", "msg": "bad"},
+        {"loc": ["body", "backfill"], "type": "less_than_equal", "msg": "big"},
+    ]
+    got = run_node(f"L.serverErrors({json.dumps(detail)})")
+    assert set(got) == {"link", "key", "backfill"}

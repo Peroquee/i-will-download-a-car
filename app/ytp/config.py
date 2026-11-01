@@ -27,6 +27,7 @@ LIBRARY_VARS = {
     "series": "MEDIA_DIR_SERIES",
     "audiobooks": "MEDIA_DIR_AUDIOBOOKS",
     "music": "MEDIA_DIR_MUSIC",
+    "podcasts": "MEDIA_DIR_PODCASTS",
     "youtube": "MEDIA_DIR_YOUTUBE",
 }
 
@@ -69,6 +70,12 @@ class Settings:
     youtube_max_height: int = 1080
     # How often a subscribed channel's feed is looked at, in minutes (0 = never; see #20).
     subscription_poll_minutes: int = 60
+    # Where podcast feeds and episodes are fetched through (#34): gluetun's HTTP proxy by default,
+    # so the VPN carries them too. EMPTY = fetch directly. Only http:// proxies are supported.
+    podcast_proxy: str = "http://gluetun:8888"
+    # How often a subscribed podcast's feed is looked at, in minutes (0 = never). Slower than the
+    # YouTube channels: a podcast publishes a few times a week at most.
+    podcast_poll_minutes: int = 240
 
     @property
     def qbit_configured(self) -> bool:
@@ -203,6 +210,24 @@ class Settings:
         else:
             problems.append("SUBSCRIPTION_POLL_MINUTES must be 0 (off) or between 15 and 1440")
 
+        raw_podcast_proxy = env.get("PODCAST_PROXY")  # unset = default, set but empty = direct
+        podcast_proxy = (
+            "http://gluetun:8888" if raw_podcast_proxy is None else raw_podcast_proxy.strip()
+        )
+        if podcast_proxy:
+            parsed_proxy = urlparse(podcast_proxy)
+            if parsed_proxy.scheme != "http" or not parsed_proxy.hostname:
+                problems.append("PODCAST_PROXY must be an http:// address (host:port), or empty")
+
+        raw_podcast_poll = text("PODCAST_POLL_MINUTES", "240")
+        podcast_poll = 240
+        if raw_podcast_poll.isdigit() and (
+            int(raw_podcast_poll) == 0 or 30 <= int(raw_podcast_poll) <= 1440
+        ):
+            podcast_poll = int(raw_podcast_poll)
+        else:
+            problems.append("PODCAST_POLL_MINUTES must be 0 (off) or between 30 and 1440")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -223,6 +248,8 @@ class Settings:
             youtube_probe_timeout=probe_timeout,
             youtube_max_height=max_height,
             subscription_poll_minutes=poll_minutes,
+            podcast_proxy=podcast_proxy,
+            podcast_poll_minutes=podcast_poll,
         )
 
 

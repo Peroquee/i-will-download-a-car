@@ -56,6 +56,7 @@ can read the VPN.
 | Web page and API | `web.py`, `static/`, `api.py`, `jobs_api.py`, `subscriptions_api.py` | the form, job list, subscriptions, VPN bar; same-origin check on every state-changing request |
 | Job queue | `db.py`, `jobs.py`, `migrations/` | SQLite in WAL mode; the table `jobs` is the queue and the record of what was ever downloaded |
 | Torrents | `magnet.py`, `clients/qbittorrent.py`, `reconciler.py`, `organizer.py` | add a magnet in the right category; when qBittorrent finishes, **hardlink** the files into the library folder and refresh Jellyfin |
+| Podcasts | `podcasts.py`, `podcast_subscriptions.py`, `podcast_jobs.py`, `podcasts_api.py`, `safefetch.py` | RSS feeds and episodes from arbitrary hosts through the VPN proxy, public addresses only ([podcasts.md](podcasts.md)); files into `Podcasts/<podcast>/` |
 | YouTube | `youtube.py`, `youtube_download.py`, `youtube_jobs.py` | probe (title, channel), download with yt-dlp through gluetun's proxy, file into `Youtube/<channel>/` |
 | Subscriptions | `channels.py`, `subscriptions.py`, `feeds.py`, `subscription_poller.py` | resolve a channel once, poll its RSS feed slowly, queue only videos published after subscribing |
 | Jellyfin | `clients/jellyfin.py` | debounced library refresh |

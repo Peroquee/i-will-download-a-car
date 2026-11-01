@@ -57,6 +57,8 @@
           <label for="mode-youtube" data-i18n="mode.youtube"></label>
           <input type="radio" name="mode" id="mode-magnet" value="magnet">
           <label for="mode-magnet" data-i18n="mode.magnet"></label>
+          <input type="radio" name="mode" id="mode-podcast" value="podcast">
+          <label for="mode-podcast" data-i18n="mode.podcast"></label>
         </div>
       </fieldset>
 
@@ -78,6 +80,32 @@
           <span data-i18n="yt.subscribe"></span>
         </label>
         <p class="note" data-i18n="yt.subscribe_note"></p>
+      </section>
+
+      <section id="podcast-fields" class="panel" aria-live="polite" hidden>
+        <p id="pc-status" class="note"></p>
+        <div class="row">
+          <label class="field" for="f-podcast" data-i18n="pc.folder"></label>
+          <input id="f-podcast" name="podcast" type="text" maxlength="200" aria-describedby="f-podcast-error">
+          <p id="f-podcast-error" class="error" role="alert"></p>
+        </div>
+        <div class="row">
+          <label class="field" for="pc-episode" data-i18n="pc.episode"></label>
+          <select id="pc-episode" name="episode" aria-describedby="pc-episode-error">
+            <option value="" data-i18n="pc.none"></option>
+          </select>
+          <p id="pc-episode-error" class="error" role="alert"></p>
+        </div>
+        <label class="checkbox" for="pc-subscribe">
+          <input id="pc-subscribe" type="checkbox">
+          <span data-i18n="pc.subscribe"></span>
+        </label>
+        <p class="note" data-i18n="pc.subscribe_note"></p>
+        <div class="row">
+          <label class="field" for="pc-backfill" data-i18n="pc.backfill"></label>
+          <input id="pc-backfill" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="pc-backfill-error">
+          <p id="pc-backfill-error" class="error" role="alert"></p>
+        </div>
       </section>
 
       <section id="magnet-fields" class="panel" hidden>
@@ -208,13 +236,42 @@
 <script type="application/json" id="i18n">
 {
   "de": {
-    "subtitle": "Einen YouTube-Link oder Magnet-Link einfügen und ablegen lassen",
+    "subtitle": "Einen YouTube-Link, Magnet-Link oder Podcast-Feed einfügen und ablegen lassen",
     "link.label": "Link",
-    "link.placeholder": "YouTube-Link oder magnet:?xt=…",
+    "link.placeholder": "YouTube-Link, Podcast-Feed oder magnet:?xt=…",
     "link.note": "Der Link wird automatisch erkannt. Mit „Typ“ kann man das ändern.",
     "mode.label": "Typ",
     "mode.youtube": "YouTube",
     "mode.magnet": "Magnet",
+    "mode.podcast": "Podcast",
+    "type.podcast": "Podcast",
+    "pc.looking": "Der Podcast-Feed wird gelesen …",
+    "pc.found": "„{title}“ gefunden: {n} Folgen. Eine Folge wählen und/oder den Podcast abonnieren.",
+    "pc.found_none": "„{title}“ gefunden, aber noch ohne Folgen. Abonnieren geht trotzdem.",
+    "pc.manual": "Das Lesen des Feeds hat nicht geklappt. Die Adresse prüfen.",
+    "pc.folder": "Podcast (Ordnername)",
+    "pc.episode": "Einzelne Folge",
+    "pc.none": "– keine einzelne Folge –",
+    "pc.subscribe": "Podcast abonnieren",
+    "pc.subscribe_note": "Neue Folgen werden dann automatisch geladen (alle paar Stunden geprüft). Es zählen nur Folgen, die nach dem Abonnieren erscheinen.",
+    "pc.backfill": "Ältere Folgen mitnehmen",
+    "pc.queued": "Folge als Auftrag #{id} angelegt (Status: {status}).",
+    "pc.queued_again": "Die Folge ist schon im System: Auftrag #{id} (Status: {status}).",
+    "pc.subscribed": "Podcast „{name}“ abonniert.",
+    "pc.already": "Der Podcast „{name}“ war schon abonniert.",
+    "pc.sub_failed": "Das Abonnieren hat nicht geklappt.",
+    "pc.nothing": "Bitte eine Folge wählen oder den Podcast abonnieren.",
+    "kind.feed_invalid": "Das ist keine gültige Feed-Adresse.",
+    "kind.feed_blocked": "Diese Adresse führt in ein privates Netz und wird nicht abgerufen.",
+    "kind.feed_not_found": "Unter dieser Adresse gibt es keinen Feed.",
+    "kind.feed_network": "Der Feed ist nicht erreichbar (läuft das VPN?).",
+    "kind.feed_temporary": "Der Server des Feeds hat gerade ein Problem. Später noch einmal versuchen.",
+    "kind.feed_bad": "Das ist kein lesbarer Podcast-Feed (RSS).",
+    "kind.feed_bad_response": "Der Server hat etwas Unerwartetes geantwortet.",
+    "kind.feed_too_large": "Der Feed ist zu groß.",
+    "err.feed_invalid": "Das ist keine gültige Feed-Adresse (https://…).",
+    "subs.podcast": "Podcast",
+    "subs.channel_tag": "Kanal",
     "yt.channel": "Kanal",
     "yt.title": "Titel",
     "yt.subscribe": "Kanal abonnieren",
@@ -316,15 +373,15 @@
     "sub.duplicate": "Der Kanal „{name}“ war schon abonniert.",
     "sub.failed": "Das Abonnieren hat nicht geklappt.",
     "err.channel_invalid": "Das ist keine Kanal-Adresse.",
-    "subs.title": "Abonnierte Kanäle",
+    "subs.title": "Abonnements",
     "subs.channel": "Kanal hinzufügen",
     "subs.placeholder": "@name, Kanal-Link oder Link eines Videos",
     "subs.note": "Neue Videos eines Kanals werden automatisch geladen, etwa stündlich geprüft.",
     "subs.backfill": "Ältere Videos mitnehmen",
     "subs.backfill_note": "0 = nur Videos, die nach dem Abonnieren erscheinen. Höchstens 15 (so viele zeigt YouTube).",
     "subs.add": "Abonnieren",
-    "subs.empty": "Noch keine Kanäle abonniert.",
-    "subs.load_error": "Die Kanalliste lässt sich gerade nicht laden.",
+    "subs.empty": "Noch nichts abonniert.",
+    "subs.load_error": "Die Abonnements lassen sich gerade nicht laden.",
     "subs.added": "Kanal „{name}“ abonniert.",
     "subs.already": "Der Kanal „{name}“ war schon abonniert.",
     "subs.add_failed": "Das Abonnieren hat nicht geklappt.",
@@ -333,25 +390,55 @@
     "subs.ok": "in Ordnung",
     "subs.poll": "Jetzt prüfen",
     "subs.polling": "Wird geprüft …",
-    "subs.polled_none": "Geprüft: keine neuen Videos.",
-    "subs.polled": "Geprüft: {n} neue Videos in die Warteschlange gestellt.",
+    "subs.polled_none": "Geprüft: nichts Neues.",
+    "subs.polled": "Geprüft: {n} Neues in die Warteschlange gestellt.",
     "subs.poll_failed": "Das Prüfen hat nicht geklappt.",
     "subs.remove": "Entfernen",
     "subs.confirm": "Wirklich entfernen?",
     "subs.remove_failed": "Das Entfernen hat nicht geklappt.",
-    "subs.removed_note": "Bereits geladene Videos bleiben erhalten.",
+    "subs.removed_note": "Bereits geladene Dateien bleiben erhalten.",
     "err.int_out_of_range": "Eine Zahl von 0 bis 15.",
+    "err.int_out_of_range_20": "Eine Zahl von 0 bis 20.",
     "help.title": "Hilfe",
-    "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Das Ergebnis erscheint später in Jellyfin."
+    "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Die Adresse eines Podcast-Feeds einfügen: eine einzelne Folge wählen oder den Podcast abonnieren. Das Ergebnis erscheint später in Jellyfin."
   },
   "en": {
-    "subtitle": "Paste a YouTube link or a magnet link and have it filed",
+    "subtitle": "Paste a YouTube link, a magnet link or a podcast feed and have it filed",
     "link.label": "Link",
-    "link.placeholder": "YouTube link or magnet:?xt=…",
+    "link.placeholder": "YouTube link, podcast feed or magnet:?xt=…",
     "link.note": "The link type is detected automatically. Use \"Type\" to change it.",
     "mode.label": "Type",
     "mode.youtube": "YouTube",
     "mode.magnet": "Magnet",
+    "mode.podcast": "Podcast",
+    "type.podcast": "Podcast",
+    "pc.looking": "Reading the podcast feed …",
+    "pc.found": "Found \"{title}\": {n} episodes. Choose an episode and/or subscribe to the podcast.",
+    "pc.found_none": "Found \"{title}\", but it has no episodes yet. You can still subscribe.",
+    "pc.manual": "Reading the feed did not work. Check the address.",
+    "pc.folder": "Podcast (folder name)",
+    "pc.episode": "Single episode",
+    "pc.none": "- no single episode -",
+    "pc.subscribe": "Subscribe to the podcast",
+    "pc.subscribe_note": "New episodes are then downloaded automatically (checked every few hours). Only episodes published after subscribing count.",
+    "pc.backfill": "Also take older episodes",
+    "pc.queued": "Episode queued as job #{id} (status: {status}).",
+    "pc.queued_again": "The episode is already in the system: job #{id} (status: {status}).",
+    "pc.subscribed": "Subscribed to the podcast \"{name}\".",
+    "pc.already": "The podcast \"{name}\" was already subscribed.",
+    "pc.sub_failed": "Subscribing did not work.",
+    "pc.nothing": "Please choose an episode or subscribe to the podcast.",
+    "kind.feed_invalid": "This is not a valid feed address.",
+    "kind.feed_blocked": "This address leads into a private network and is not fetched.",
+    "kind.feed_not_found": "There is no feed at this address.",
+    "kind.feed_network": "The feed could not be reached (is the VPN up?).",
+    "kind.feed_temporary": "The feed's server has a problem right now. Try again later.",
+    "kind.feed_bad": "This is not a readable podcast feed (RSS).",
+    "kind.feed_bad_response": "The server answered something unexpected.",
+    "kind.feed_too_large": "The feed is too large.",
+    "err.feed_invalid": "This is not a valid feed address (https://…).",
+    "subs.podcast": "Podcast",
+    "subs.channel_tag": "Channel",
     "yt.channel": "Channel",
     "yt.title": "Title",
     "yt.subscribe": "Subscribe to the channel",
@@ -453,15 +540,15 @@
     "sub.duplicate": "The channel \"{name}\" was already subscribed.",
     "sub.failed": "Subscribing did not work.",
     "err.channel_invalid": "This is not a channel address.",
-    "subs.title": "Subscribed channels",
+    "subs.title": "Subscriptions",
     "subs.channel": "Add a channel",
     "subs.placeholder": "@name, channel link or the link of a video",
     "subs.note": "New videos of a channel are downloaded automatically; it is checked about hourly.",
     "subs.backfill": "Also take older videos",
     "subs.backfill_note": "0 = only videos published after subscribing. At most 15 (that is all YouTube shows).",
     "subs.add": "Subscribe",
-    "subs.empty": "No channels subscribed yet.",
-    "subs.load_error": "The channel list cannot be loaded right now.",
+    "subs.empty": "Nothing subscribed yet.",
+    "subs.load_error": "The subscriptions cannot be loaded right now.",
     "subs.added": "Subscribed to the channel \"{name}\".",
     "subs.already": "The channel \"{name}\" was already subscribed.",
     "subs.add_failed": "Subscribing did not work.",
@@ -470,16 +557,17 @@
     "subs.ok": "fine",
     "subs.poll": "Check now",
     "subs.polling": "Checking ...",
-    "subs.polled_none": "Checked: no new videos.",
-    "subs.polled": "Checked: {n} new videos queued.",
+    "subs.polled_none": "Checked: nothing new.",
+    "subs.polled": "Checked: {n} new item(s) queued.",
     "subs.poll_failed": "Checking did not work.",
     "subs.remove": "Remove",
     "subs.confirm": "Really remove?",
     "subs.remove_failed": "Removing did not work.",
-    "subs.removed_note": "Videos that were already downloaded stay.",
+    "subs.removed_note": "Files that were already downloaded stay.",
     "err.int_out_of_range": "A number from 0 to 15.",
+    "err.int_out_of_range_20": "A number from 0 to 20.",
     "help.title": "Help",
-    "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. The result appears in Jellyfin later."
+    "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. Paste the address of a podcast feed: choose a single episode or subscribe to the podcast. The result appears in Jellyfin later."
   }
 }
 </script>

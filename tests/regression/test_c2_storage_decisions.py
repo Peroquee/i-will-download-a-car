@@ -25,6 +25,7 @@ def test_c2_library_folders_are_the_owners_existing_german_ones():
     assert env["MEDIA_DIR_SERIES"] == "Serien"
     assert env["MEDIA_DIR_AUDIOBOOKS"] == "Hörbücher"
     assert env["MEDIA_DIR_MUSIC"] == "Musik"
+    assert env["MEDIA_DIR_PODCASTS"] == "Podcasts"
     assert env["MEDIA_DIR_YOUTUBE"] == "Youtube"
 
 

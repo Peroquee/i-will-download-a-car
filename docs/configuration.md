@@ -24,7 +24,7 @@ in a log.
 | Variable | Default | Required | Meaning |
 |---|---|---|---|
 | `DATA_ROOT` | `/data` | yes | Mount point of the media volume. `downloads/` and all library folders must be on **one filesystem** so hardlinks work ([host-setup.md](host-setup.md)). |
-| `MEDIA_DIR_MOVIES`, `MEDIA_DIR_SERIES`, `MEDIA_DIR_AUDIOBOOKS`, `MEDIA_DIR_MUSIC`, `MEDIA_DIR_YOUTUBE` | `Filme`, `Serien`, `Hörbücher`, `Musik`, `Youtube` | yes | Library folder per type, relative to `DATA_ROOT`: the folders Jellyfin's libraries point at. Must be distinct and match the folders on disk exactly (umlauts included). Downloads go to `downloads/<type>` first and are hardlinked here when finished. |
+| `MEDIA_DIR_MOVIES`, `MEDIA_DIR_SERIES`, `MEDIA_DIR_AUDIOBOOKS`, `MEDIA_DIR_MUSIC`, `MEDIA_DIR_PODCASTS`, `MEDIA_DIR_YOUTUBE` | `Filme`, `Serien`, `Hörbücher`, `Musik`, `Podcasts`, `Youtube` | yes | Library folder per type, relative to `DATA_ROOT`: the folders Jellyfin's libraries point at. Must be distinct and match the folders on disk exactly (umlauts included). Downloads go to `downloads/<type>` first and are hardlinked here when finished. |
 
 ## Network and the login
 
@@ -84,6 +84,13 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | `YTDLP_PROXY` | `http://gluetun:8888` | no | Where yt-dlp and the channel feeds go out: gluetun's HTTP proxy, i.e. through the VPN. **Set but empty** = ask YouTube directly from the home line (the owner's decision; unset = the default). |
 | `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels (144 to 4320); `0` = no limit. A disk-space knob. |
 | `SUBSCRIPTION_POLL_MINUTES` | `60` | no | How often each subscribed channel is checked (15 to 1440; each channel gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
+
+## Podcasts ([podcasts.md](podcasts.md))
+
+| Variable | Default | Required | Meaning |
+|---|---|---|---|
+| `PODCAST_PROXY` | `http://gluetun:8888` | no | Where podcast feeds and episodes go out: gluetun's HTTP proxy, i.e. through the VPN. **Set but empty** = fetch directly from the home line (some podcast hosts block VPN addresses). Only `http://` proxies. |
+| `PODCAST_POLL_MINUTES` | `240` | no | How often each subscribed podcast's feed is checked (30 to 1440; each feed gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
 
 ## Image tags (pinned; [operations.md](operations.md))
 
