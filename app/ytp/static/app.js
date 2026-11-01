@@ -32,6 +32,7 @@
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
     $("lang").textContent = lang === "de" ? "EN" : "DE";
+    applyTarget();
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
     refreshVpnText();
     renderJobs();
@@ -209,12 +210,30 @@
     });
   }
 
+  /* ---------------------------------------------------------------- YouTube target (#35) */
+
+  function ytTarget() { return $("yt-target").value; }
+  function ytAudioOnly() { return ytTarget() === "podcast" && $("yt-audio").checked; }
+
+  /* The same two fields mean channel/title for a video and podcast/episode for an episode. */
+  function applyTarget() {
+    var podcast = ytTarget() === "podcast";
+    $("yt-audio-row").hidden = !podcast;
+    if (!podcast) $("yt-audio").checked = false;
+    var labels = [["yt-channel-label", podcast ? "yt.podcast" : "yt.channel"],
+                  ["yt-title-label", podcast ? "yt.episode" : "yt.title"],
+                  ["yt-subscribe-note", podcast ? "yt.subscribe_note_podcast" : "yt.subscribe_note"]];
+    labels.forEach(function (pair) {
+      $(pair[0]).dataset.i18n = pair[1];
+      $(pair[0]).textContent = t(pair[1]);
+    });
+  }
+
   /* ---------------------------------------------------------------- subscribe (#19) */
 
   /* Ticked "subscribe" next to a YouTube download: the video's address names the channel. */
   function subscribeToChannel(link, name, downloadText) {
-    var body = { channel: link.trim() };
-    if (name && name.trim()) body.name = name.trim();
+    var body = L.subscribePayload(link, name, null, ytTarget(), ytAudioOnly());
     post("/api/subscriptions", body).then(function (reply) {
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? "sub.duplicate" : "sub.created";
@@ -254,7 +273,7 @@
     }
     var path = current === "youtube" ? "/api/youtube/download" : "/api/magnet";
     var body = current === "youtube"
-      ? L.youtubePayload(link, data.channel, data.title)
+      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly())
       : L.magnetPayload(link, mediaType(), data);
     $("submit").disabled = true;
     post(path, body).then(function (reply) {
@@ -351,6 +370,8 @@
     document.querySelectorAll("#form input[type=text]").forEach(function (input) { input.value = ""; });
     $("pack").checked = false;
     $("subscribe").checked = false;
+    $("yt-target").value = "video";
+    applyTarget();
     $("pc-subscribe").checked = false;
     $("pc-backfill").value = "0";
     fillEpisodes([]);
@@ -614,7 +635,9 @@
 
     var meta = document.createElement("div");
     meta.className = "job-meta";
-    meta.textContent = t(sub.kind === "podcast" ? "subs.podcast" : "subs.channel_tag") + " \u00b7 " + (sub.last_checked
+    var tag = sub.kind === "podcast" ? t("subs.podcast") : t("subs.channel_tag");
+    if (sub.target === "podcast") tag += " \u2192 " + t(sub.audio_only ? "subs.target_audio" : "subs.target_podcast");
+    meta.textContent = tag + " \u00b7 " + (sub.last_checked
       ? t("subs.checked", { when: timeText(sub.last_checked) })
       : t("subs.never"));
     li.appendChild(meta);
@@ -736,7 +759,9 @@
       return;
     }
     $("subs-add").disabled = true;
-    post("/api/subscriptions", { channel: channel, backfill: +backfillText }).then(function (reply) {
+    var target = $("subs-target").value;
+    var body = L.subscribePayload(channel, null, +backfillText, target, target === "podcast" && $("subs-audio").checked);
+    post("/api/subscriptions", body).then(function (reply) {
       $("subs-add").disabled = false;
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? "subs.already" : "subs.added";
@@ -784,6 +809,12 @@
       radio.addEventListener("change", function () { setMode(radio.value); scheduleProbe(); });
     });
     $("media-type").addEventListener("change", showType);
+    $("yt-target").addEventListener("change", applyTarget);
+    $("subs-target").addEventListener("change", function () {
+      var podcast = $("subs-target").value === "podcast";
+      $("subs-audio").disabled = !podcast;
+      if (!podcast) $("subs-audio").checked = false;
+    });
     $("pack").addEventListener("change", function () {
       $("f-episode").disabled = $("pack").checked;
       if ($("pack").checked) $("f-episode").value = "";

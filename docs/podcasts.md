@@ -43,7 +43,7 @@ Podcasts/<podcast>/folder.jpg            the cover, once per podcast (or folder.
   Jellyfin) and moved in when complete; a failed or interrupted download leaves nothing in the
   library. The folder name of a podcast is fixed by the **subscription**: a single episode picked
   later from a subscribed feed goes into the same folder (YouTube videos filed as podcast episodes,
-  issue #35, share it too).
+  [youtube.md](youtube.md#as-a-podcast-episode-optionally-audio-only-issue-35), share it too).
 * Episodes are identified by the feed's **GUID** (the enclosure address if a feed has none),
   together with the feed address. The same episode is therefore downloaded once, whether it was
   picked by hand or found by the poller, and a failed one is *not* queued again by every poll

@@ -39,7 +39,7 @@ from .db import Database
 from .feeds import FeedClient, FeedEntry, FeedError, parse_feed, parse_time
 from .metadata import sanitize_name
 from .subscriptions import Subscription
-from .youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker
+from .youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker, job_external_id
 
 logger = logging.getLogger(__name__)
 
@@ -156,12 +156,15 @@ class SubscriptionPoller:
                 video_id=entry.video_id,
                 channel=sub.channel_name,
                 title=sanitize_name(entry.title, entry.video_id),
+                target=sub.target,
+                audio_only=sub.audio_only,
+                published=(entry.published.date().isoformat() if sub.target == "podcast" else None),
             )
             _, outcome = jobs.submit_job(
                 self.db,
                 JOB_TYPE,
-                entry.video_id,
-                metadata.model_dump_json(),
+                job_external_id(entry.video_id, sub.target),
+                metadata.to_json(),
                 retry_failed=False,
             )
             queued += outcome == "created"

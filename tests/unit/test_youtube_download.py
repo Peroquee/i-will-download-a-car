@@ -525,6 +525,7 @@ def test_the_endpoint_queues_a_job_and_the_background_worker_finishes_it(client,
         "id": 1,
         "video_id": ID,
         "type": "youtube",
+        "target": "video",
         "status": "queued",
         "duplicate": False,
     }

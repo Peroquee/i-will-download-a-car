@@ -38,7 +38,7 @@ ENV = {
 class AlwaysFails:
     """A downloader that never reaches the network: every video fails, quickly."""
 
-    def download(self, ref, workdir, progress=None):
+    def download(self, ref, workdir, progress=None, *, audio_only=False):
         raise DownloadFailed("still not available")
 
 
