@@ -23,7 +23,9 @@ help:
 	@echo "vpn-abuse-test  on the VM: drop the VPN CYCLES times (default 5), check the watchdog, leaks and recovery"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
-$(VENV)/.installed: requirements-test.txt requirements-lint.txt requirements-app.txt
+# Every file requirements-dev.txt pulls in (with -r, also nested) must be listed, or a venv made before
+# a dependency was added keeps missing it. tests/unit/test_makefile.py checks that.
+$(VENV)/.installed: requirements-dev.txt requirements-test.txt requirements-lint.txt requirements-app.txt app/requirements.txt
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -q -r requirements-dev.txt
 	touch $@
