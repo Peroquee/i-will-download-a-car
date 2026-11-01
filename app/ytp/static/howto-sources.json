@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "about": "Legal places to find things to download, shown in the How to guide. One entry per place. Edit this file to change the list; each text needs de and en. magnet: 'direct' = the page shows magnet links, 'torrent-file' = only .torrent files (this app takes magnet links only). Only add places whose content is free to download: public domain, Creative Commons, free software.",
+  "sources": [
+    {
+      "id": "webtorrent",
+      "name": "WebTorrent: Free Torrents",
+      "url": "https://webtorrent.io/free-torrents",
+      "magnet": "direct",
+      "text": {
+        "de": "Freie Filme (zum Beispiel „Big Buck Bunny“, „Sintel“) und freie Musik. Die Seite zeigt fertige Magnet-Links. Gut zum Ausprobieren.",
+        "en": "Free films (for example \"Big Buck Bunny\", \"Sintel\") and free music. The page shows ready-made magnet links. Good for a first try."
+      }
+    },
+    {
+      "id": "archlinux",
+      "name": "Arch Linux: Download",
+      "url": "https://archlinux.org/download/",
+      "magnet": "direct",
+      "text": {
+        "de": "Ein Linux-Programm (ISO-Abbild), nur zum Ausprobieren. Der Magnet-Link steht auf der Download-Seite.",
+        "en": "A Linux program (ISO image), just for trying things out. The magnet link is on the download page."
+      }
+    },
+    {
+      "id": "internet-archive",
+      "name": "Internet Archive",
+      "url": "https://archive.org/",
+      "magnet": "torrent-file",
+      "text": {
+        "de": "Sehr viele freie Filme, Hörbücher (zum Beispiel von LibriVox) und Musik, die niemandem mehr gehören oder frei lizenziert sind. Die Seiten bieten meist nur eine .torrent-Datei an, keinen Magnet-Link.",
+        "en": "A huge collection of free films, audiobooks (for example from LibriVox) and music that are in the public domain or freely licensed. The item pages usually offer a .torrent file only, not a magnet link."
+      }
+    },
+    {
+      "id": "ubuntu",
+      "name": "Ubuntu: alternative downloads",
+      "url": "https://ubuntu.com/download/alternative-downloads",
+      "magnet": "torrent-file",
+      "text": {
+        "de": "Linux-Programme als .torrent-Datei, kein Magnet-Link.",
+        "en": "Linux programs as .torrent files, not magnet links."
+      }
+    }
+  ]
+}

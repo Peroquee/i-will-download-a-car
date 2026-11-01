@@ -75,7 +75,7 @@ html, body {
 .titles { flex: 1 1 200px; min-width: 0; }
 .title { font-family: Georgia, "Times New Roman", serif; font-size: 22px; margin: 0; font-weight: normal; }
 .subtitle { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
-.tools { display: flex; gap: 10px; align-items: center; }
+.tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 form { display: grid; gap: 14px; }
 .row { display: block; }
 label.field, legend.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
@@ -170,6 +170,70 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 button.danger { border-color: var(--bad); color: var(--bad); }
 #subs-empty[hidden] { display: none; }
+.howto-button {
+  font: inherit;
+  min-height: 36px;
+  padding: 4px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--gold);
+  background: var(--gold-soft);
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+.howto-button:hover { background: rgba(201, 162, 39, 0.28); }
+.howto-button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--gold-soft); }
+dialog.howto {
+  width: min(720px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  overflow-y: auto;
+}
+dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
+.howto-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; position: sticky; top: -20px; background: var(--panel); padding: 8px 0; }
+.howto h3 { font-size: 16px; margin: 0 0 8px; }
+.howto h4 { font-size: 14px; margin: 16px 0 6px; }
+.howto p, .howto li { font-size: 15px; line-height: 1.5; }
+.howto-steps { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 22px; }
+.howto-part { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+.howto-code { display: inline-block; padding: 8px 12px; border-radius: 8px; background: rgba(233, 228, 216, 0.06); overflow-wrap: anywhere; font-size: 14px; }
+.howto-legal { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--gold); background: var(--gold-soft); }
+.howto-sources { list-style: none; padding: 0; display: grid; gap: 12px; }
+.howto-sources li { padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.howto-sources p { margin: 4px 0 6px; }
+.howto-tag { margin-left: 8px; font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.howto-tag-direct { border-color: var(--good); color: var(--good); }
+.ill { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 0 8px; }
+.ill-win { fill: #0d1620; stroke: rgba(233, 228, 216, 0.25); stroke-width: 1.5; }
+.ill-bar { fill: #1a2735; }
+.ill-line { fill: rgba(233, 228, 216, 0.22); }
+.ill-btn { fill: rgba(233, 228, 216, 0.12); stroke: rgba(233, 228, 216, 0.3); }
+.ill-hi { fill: rgba(201, 162, 39, 0.2); stroke: var(--gold); stroke-width: 2; }
+.ill-magnet { fill: #c9a227; }
+.ill-red { fill: #e4806f; }
+.ill-text, .ill-text-on, .ill-small, .ill-mono, .ill-bad { fill: #e9e4d8; font: 12px system-ui, sans-serif; }
+.ill-small { font-size: 10px; fill: #b4bcc8; }
+.ill-mono { font-family: ui-monospace, monospace; font-size: 11px; }
+.ill-bad { fill: #e4806f; font-weight: 600; }
+.ill-menu { fill: #16222e; stroke: rgba(233, 228, 216, 0.3); }
+.ill-pick { fill: var(--gold); }
+.ill-text-on { fill: #1a1305; font-weight: 600; }
+.ill-cursor { fill: #fff; stroke: #000; stroke-width: 0.8; }
+.ill-field { fill: rgba(233, 228, 216, 0.05); stroke: rgba(233, 228, 216, 0.3); }
+.ill-primary { fill: var(--gold); }
+.ill-row { fill: rgba(233, 228, 216, 0.05); stroke: rgba(233, 228, 216, 0.18); }
+.ill-rowbad { stroke: #e4806f; fill: rgba(228, 128, 111, 0.1); }
+.ill-track { fill: rgba(233, 228, 216, 0.14); }
+.ill-fill { fill: var(--gold); }
+.ill-tile { fill: #1a2735; stroke: rgba(233, 228, 216, 0.2); }
+.ill-new { stroke: var(--gold); stroke-width: 2; }
+.ill-play { fill: var(--gold); }
+.ill-check { fill: var(--gold); }
+.ill-tick { fill: none; stroke: #1a1305; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 520px) {
   .card { padding: 16px; }
   .pair { grid-template-columns: 1fr; }

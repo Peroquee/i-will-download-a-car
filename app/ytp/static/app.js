@@ -27,6 +27,9 @@
   function applyLanguage() {
     document.documentElement.lang = lang === "de" ? "de" : "en-GB";
     document.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-label]").forEach(function (el) {
+      el.setAttribute("aria-label", t(el.dataset.i18nLabel));
+    });
     document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
@@ -35,6 +38,7 @@
     refreshVpnText();
     renderJobs();
     renderSubs();
+    renderHowtoSources();
   }
 
   /* ---------------------------------------------------------------- state */
@@ -632,6 +636,82 @@
     });
   }
 
+  /* ---------------------------------------------------------------- How to guide (#33) */
+
+  var howtoSources = null;     // from /static/howto-sources.json, loaded when first opened
+  var howtoSourcesFailed = false;
+
+  function renderHowtoSources() {
+    var list = $("howto-sources");
+    if (!list) return;
+    list.textContent = "";
+    $("howto-sources-error").textContent = howtoSourcesFailed ? t("howto.sources_error") : "";
+    (howtoSources || []).forEach(function (source) {
+      var li = document.createElement("li");
+      var name = document.createElement("strong");
+      name.textContent = source.name;
+      li.appendChild(name);
+      var tag = document.createElement("span");
+      tag.className = "howto-tag howto-tag-" + (source.magnet === "direct" ? "direct" : "file");
+      tag.textContent = t("howto.source." + (source.magnet === "direct" ? "direct" : "torrent-file"));
+      li.appendChild(tag);
+      var text = document.createElement("p");
+      text.textContent = (source.text && (source.text[lang] || source.text.en)) || "";
+      li.appendChild(text);
+      // Only plain https addresses become links (the file is editable by the owner, but a
+      // javascript: or http: address must never turn into one).
+      if (typeof source.url === "string" && /^https:\/\/[^\s]+$/.test(source.url)) {
+        var link = document.createElement("a");
+        link.href = source.url;
+        link.rel = "noopener noreferrer";
+        link.target = "_blank";
+        link.textContent = t("howto.source.open");
+        li.appendChild(link);
+      }
+      list.appendChild(li);
+    });
+  }
+
+  function loadHowtoSources() {
+    if (howtoSources) return;
+    fetch("/static/howto-sources.json", { credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("status " + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        howtoSources = Array.isArray(data.sources) ? data.sources : [];
+        howtoSourcesFailed = false;
+      })
+      .catch(function () { howtoSourcesFailed = true; })
+      .then(renderHowtoSources);
+  }
+
+  function openHowto() {
+    var dialog = $("howto");
+    loadHowtoSources();
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();   // Esc closes it, focus stays inside, then returns here
+    } else {
+      dialog.setAttribute("open", "");
+    }
+  }
+
+  function closeHowto() {
+    var dialog = $("howto");
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+
+  function startHowto() {
+    $("howto-open").addEventListener("click", openHowto);
+    $("howto-close").addEventListener("click", closeHowto);
+    // A click on the dark area around the guide (the dialog element itself) closes it.
+    $("howto").addEventListener("click", function (event) {
+      if (event.target === $("howto")) closeHowto();
+    });
+  }
+
   /* ---------------------------------------------------------------- wiring */
 
   function onLinkChanged() {
@@ -670,6 +750,7 @@
     });
     startJobPolling();
     startSubs();
+    startHowto();
   }
 
   init();

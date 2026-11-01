@@ -376,6 +376,31 @@ a warning sign and the icon turns red (`favicon-alert.svg`), so it is visible fr
 and the bar gets `role="alert"` for screen readers. No sound or animation. The exit country is the
 only detail from the egress check shown; addresses are never sent to the page.
 
+## The "How to" guide (issue #33, draft)
+
+A button **"So geht's" / "How to"** at the top right of the page (next to the language switch)
+opens a guide for the household: five illustrated steps (find a magnet link, copy it, paste it and
+fill in the fields, watch the job list, find the result in Jellyfin), a part on YouTube videos and
+channel subscriptions, and "Where do you find magnet links?" with what such a link looks like, a
+notice that only things you are allowed to download belong here, and a list of legal sources.
+
+- It is a native `<dialog>` opened with `showModal()`: **Esc** and the **Close** button close it
+  (so does a click on the dark area), the keyboard focus stays inside while it is open and returns
+  to the button afterwards. Each illustration is an inline SVG with a text alternative
+  (`aria-label`) in both languages; the words inside the pictures follow the language switch.
+- **No external requests:** the pictures are inline, the page loads nothing from other sites.
+  The guide's links to the legal sources are plain links that only do something when clicked
+  (they open the other website in a new tab, without a referrer).
+- **The wording** is in `index.html` with the other texts (keys `howto.*`, German first, simple
+  words, English next to it).
+- **The list of sources is data, not code:** `app/ytp/static/howto-sources.json`. One entry per
+  place with `id`, `name`, `url` (https only), `magnet` (`direct` = the page shows magnet links,
+  `torrent-file` = only .torrent files) and a `text` in `de` and `en`. Edit the file to change the
+  list; a unit test checks its shape. Only plain `https://` addresses become links.
+- The app takes **magnet links only**, not .torrent files. Sources that only offer .torrent files
+  (the Internet Archive, Ubuntu) are listed with a note that this does not work here yet; whether
+  to support .torrent files, or to drop such sources from the list, is the owner's decision.
+
 ## Subscription view (issue #27)
 
 Below the job list: **Subscribed channels**.

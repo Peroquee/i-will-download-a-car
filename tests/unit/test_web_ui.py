@@ -329,7 +329,7 @@ def test_no_translation_is_empty_and_german_differs_from_english():
 
 def test_every_key_used_in_the_page_and_the_script_exists():
     t = translations()["en"]
-    used = set(re.findall(r'data-i18n(?:-placeholder)?="([\w.]+)"', HTML))
+    used = set(re.findall(r'data-i18n(?:-placeholder|-label)?="([\w.-]+)"', HTML))
     used |= {k for k in re.findall(r'\bt\("([\w.]+)"', APP_JS) if not k.endswith(".")}
     used |= {
         f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch", "stale")
@@ -337,6 +337,7 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
     used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
+    used |= {"howto.source.direct", "howto.source.torrent-file", "howto.source.open"}
     used |= {"subs.polling", "subs.poll", "subs.confirm", "subs.remove", "subs.ok"}
     missing = {k for k in used if k not in t}
     assert not missing, sorted(missing)
@@ -596,3 +597,78 @@ def test_the_page_has_the_subscription_view_built_without_innerhtml():
     assert "innerHTML" not in APP_JS
     assert 'method: "DELETE"' in APP_JS or '"DELETE"' in APP_JS
     assert "window.confirm" not in APP_JS, "the two-step button is used instead of a dialog"
+
+
+# --- the How to guide (#33) ----------------------
+
+
+SOURCES_FILE = STATIC_DIR / "howto-sources.json"
+
+
+def test_the_guide_is_a_dialog_with_a_close_button_and_a_visible_opener():
+    assert re.search(r'<dialog id="howto"[^>]*aria-labelledby="howto-title"', HTML)
+    assert 'id="howto-title"' in HTML
+    assert re.search(r'<button type="button" id="howto-open"[^>]*aria-haspopup="dialog"', HTML)
+    assert 'id="howto-close"' in HTML
+    assert HTML.index('id="howto-open"') < HTML.index('id="lang"'), "next to the language button"
+    assert "showModal" in APP_JS, "the native dialog gives Esc and a focus trap"
+
+
+def test_every_illustration_has_a_text_alternative_in_both_languages():
+    illustrations = re.findall(r"<svg class=\"ill\"[^>]*>", HTML)
+    assert len(illustrations) == 6, "five steps and the YouTube part"
+    translations_ = translations()
+    for tag in illustrations:
+        assert 'role="img"' in tag
+        key = re.search(r'data-i18n-label="([\w.]+)"', tag).group(1)
+        for lang in ("de", "en"):
+            assert len(translations_[lang][key]) > 20, (lang, key)
+
+
+def test_the_guide_covers_the_five_steps_and_youtube_and_magnet_links():
+    t = translations()["en"]
+    for key in ("howto.s1.title", "howto.s2.title", "howto.s3.title", "howto.s4.title",
+                "howto.s5.title", "howto.yt.title", "howto.find.title", "howto.find.legal"):  # fmt: skip
+        assert key in t
+    assert "magnet:?xt=urn:btih:" in HTML, "an example of what a magnet link looks like"
+    assert "allowed to download" in t["howto.find.legal"]
+
+
+def test_the_guide_loads_nothing_from_another_site():
+    start = HTML.index('<dialog id="howto"')
+    dialog = HTML[start : HTML.index("</dialog>", start)]
+    assert not re.search(r"(?:src|href|xlink:href)\s*=", dialog), (
+        "no links, images or scripts inside"
+    )
+    assert "http://" not in dialog.replace("http://www.w3.org/2000/svg", "")
+    assert "https://" not in dialog
+
+
+def test_the_sources_file_is_valid_editable_data():
+    data = json.loads(SOURCES_FILE.read_text(encoding="utf-8"))
+    sources = data["sources"]
+    assert 2 <= len(sources) <= 20
+    assert len({s["id"] for s in sources}) == len(sources)
+    for source in sources:
+        assert set(source) == {"id", "name", "url", "magnet", "text"}, source["id"]
+        assert re.fullmatch(r"https://[a-z0-9.-]+\.[a-z]{2,}(/[^\s]*)?", source["url"]), source[
+            "url"
+        ]
+        assert source["magnet"] in {"direct", "torrent-file"}
+        assert 3 <= len(source["name"]) <= 80
+        for lang in ("de", "en"):
+            assert 20 <= len(source["text"][lang]) <= 400, (source["id"], lang)
+    assert any(s["magnet"] == "direct" for s in sources), "at least one the app can use"
+
+
+def test_the_sources_file_is_served_to_the_page(client):
+    response = client.get("/static/howto-sources.json")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["sources"]
+
+
+def test_only_plain_https_addresses_become_links_in_the_guide():
+    assert "/^https:" in APP_JS
+    assert 'link.rel = "noopener noreferrer"' in APP_JS
+    assert "innerHTML" not in APP_JS
