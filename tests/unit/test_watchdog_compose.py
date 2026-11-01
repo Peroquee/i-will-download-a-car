@@ -152,6 +152,8 @@ def test_the_egress_check_settings_reach_only_the_watchdog_and_the_home_address_
     assert ENV_EXAMPLE["HOME_PUBLIC_IP"] == "", "the owner's own line is never in Git"
     assert int(ENV_EXAMPLE["EGRESS_CHECK_INTERVAL"]) >= 30
     assert int(ENV_EXAMPLE["EGRESS_CONFIRM"]) >= 2
+    # The app reads it too since #34's follow-up: podcast fetches must never go to the home line's
+    # own global addresses (DS-Lite). It never logs or shows it (tests/unit/test_app_config.py).
     for name, svc in services(COMPOSE).items():
-        if name != "watchdog":
+        if name not in {"watchdog", "app"}:
             assert "HOME_PUBLIC_IP" not in environment_as_dict(svc), name

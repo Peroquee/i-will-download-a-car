@@ -152,6 +152,11 @@ services:
       # .env to fetch directly. (No colon: unset = default.) How often feeds are checked, in minutes.
       PODCAST_PROXY: ${PODCAST_PROXY-http://gluetun:8888}
       PODCAST_POLL_MINUTES: ${PODCAST_POLL_MINUTES:-240}
+      # Networks podcast fetches never go to, besides the private ones: the home line's own global
+      # addresses (DS-Lite: the LAN has native global IPv6), see docs/podcasts.md. HOME_PUBLIC_IP is
+      # the same setting the watchdog's egress check uses (#23).
+      HOME_PUBLIC_IP: ${HOME_PUBLIC_IP:-}
+      FETCH_BLOCKED_NETWORKS: ${FETCH_BLOCKED_NETWORKS:-}
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.
