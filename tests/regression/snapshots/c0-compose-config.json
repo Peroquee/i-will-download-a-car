@@ -6,6 +6,7 @@
     "environment": {
       "JELLYFIN_API_KEY": "",
       "JELLYFIN_URL": "http://192.168.178.108:8096",
+      "LOG_LEVEL": "INFO",
       "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
       "MEDIA_DIR_MOVIES": "Filme",
       "MEDIA_DIR_MUSIC": "Musik",
@@ -27,11 +28,9 @@
     },
     "network_mode": null,
     "ports": [],
-    "profiles": [
-      "planned"
-    ],
+    "profiles": [],
     "restart": "unless-stopped",
-    "user": null,
+    "user": "1000:1000",
     "volumes": [
       "/data:/data",
       "<repo>/config/app:/config"
