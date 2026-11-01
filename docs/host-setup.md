@@ -107,7 +107,7 @@ Create what is missing (needs `sudo`, see below) and prove it works:
 ```bash
 sudo scripts/host/create-layout.sh --dry-run   # shows what it would create
 sudo scripts/host/create-layout.sh             # creates only MISSING folders: owner PUID:PGID, mode 2775
-scripts/host/check-host.sh --only layout       # hardlink test between downloads/ and every library folder
+sudo scripts/host/check-host.sh --only layout  # hardlink test between downloads/ and every library folder
 ```
 
 - **Existing folders are never touched**: no chmod, no chown, no recursion, contents
@@ -122,6 +122,13 @@ scripts/host/check-host.sh --only layout       # hardlink test between downloads
   hardlinks it into the matching library folder, reads the link count (must be 2) and removes
   both. It also fails if the folders are on different filesystems, and says what to fix.
   This is the only check that writes anything; it leaves nothing behind.
+- **Run it with `sudo`, or as a user in the media group.** The folders belong to `PUID:PGID` with
+  mode 2775, so a login user outside that group cannot write the test file. Without write
+  access the check still verifies that the folders exist and share a filesystem, then reports
+  `SKIP ... hardlinks were NOT tested` with this hint instead of failing. If the user may run
+  `sudo -n` without a password, the test runs automatically as `PUID:PGID` through it.
+  Join the group with `sudo usermod -aG media <user>` (log in again afterwards) if you want the
+  check, and manual work in `/data`, without `sudo`.
 - Folder names are compared byte for byte: if the folder on disk is spelled differently
   (for example another Unicode form of `ö`), the script would create a second folder. Check
   with `ls /data` first.
@@ -264,12 +271,12 @@ It does exactly this, and prints only the verdicts `VPN IP`, `no connection` and
 2. `docker stop gluetun`, then the same request again must give **no connection**. If it
    answers with the home address, that is a **HOME IP LEAK** and the setup is wrong.
 3. `docker start gluetun`: qbittorrent must have a connection again, with a VPN address,
-   **without anyone restarting it**.
+   **automatically** (netwatch restarts the container; nobody has to).
 
 Step 3 is the recovery path. qBittorrent shares gluetun's network namespace; when gluetun
 restarts as the same container it gets a new namespace and qBittorrent keeps the dead
 one (no network at all) until it is restarted. A small watcher inside the qBittorrent
-container (`scripts/qbittorrent/netwatch.sh`, an s6 service of the linuxserver image) notices
+container (`scripts/qbittorrent/services/netwatch`, an s6 service of the linuxserver image) notices
 that the container has no network interface left for about 30 seconds and stops the
 container; `restart: unless-stopped` starts it again inside the new namespace. It needs no
 Docker socket. A tunnel that is merely down does not trigger it: gluetun's own interface is

@@ -65,9 +65,10 @@ def prepare_workdir(env_file: Path, workdir: Path) -> None:
     )
     (workdir / ".env").chmod(0o600)
 
-    watcher = workdir / "scripts" / "qbittorrent" / "netwatch.sh"
-    watcher.parent.mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "scripts" / "qbittorrent" / "netwatch.sh", watcher)
+    shutil.copytree(
+        REPO_ROOT / "scripts" / "qbittorrent" / "services",
+        workdir / "scripts" / "qbittorrent" / "services",
+    )
 
     if values.get("VPN_SERVICE_PROVIDER") == "custom":
         source = Path(os.environ.get("YTP_OVPN_SOURCE", REPO_ROOT / "config" / "expressvpn.ovpn"))

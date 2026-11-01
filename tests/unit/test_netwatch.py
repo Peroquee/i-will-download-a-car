@@ -1,4 +1,4 @@
-"""scripts/qbittorrent/netwatch.sh: detect qbittorrent's dead network namespace."""
+"""scripts/qbittorrent/services/netwatch: detect qbittorrent's dead network namespace."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 
 from tests.helpers.shell import ScriptResult, run_script
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "qbittorrent" / "netwatch.sh"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "qbittorrent" / "services" / "netwatch"
 
 HEADER = (
     "Inter-|   Receive                            |  Transmit\n"

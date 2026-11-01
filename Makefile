@@ -30,7 +30,7 @@ lint: venv
 	$(VENV)/bin/ruff check .
 	$(VENV)/bin/ruff format --check .
 	$(VENV)/bin/yamllint --strict .
-	find scripts -name '*.sh' -print0 | xargs -0 $(VENV)/bin/shellcheck --external-sources
+	find scripts -type f \( -name '*.sh' -o -path '*/services/*' \) -print0 | xargs -0 $(VENV)/bin/shellcheck --external-sources
 
 test: venv
 	$(PYTEST) tests
@@ -55,7 +55,7 @@ killswitch-test:
 
 layout:
 	sudo scripts/host/create-layout.sh
-	scripts/host/check-host.sh --only layout
+	sudo scripts/host/check-host.sh --only layout
 
 categories:
 	scripts/qbittorrent/setup_categories.py
