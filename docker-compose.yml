@@ -114,6 +114,11 @@ services:
       MEDIA_DIR_AUDIOBOOKS: ${MEDIA_DIR_AUDIOBOOKS:?MEDIA_DIR_AUDIOBOOKS must be set in .env}
       MEDIA_DIR_MUSIC: ${MEDIA_DIR_MUSIC:?MEDIA_DIR_MUSIC must be set in .env}
       MEDIA_DIR_YOUTUBE: ${MEDIA_DIR_YOUTUBE:?MEDIA_DIR_YOUTUBE must be set in .env}
+      # Jellyfin runs outside this stack (own LXC); the app only calls its API to refresh
+      # libraries. Optional in compose: the app is still a placeholder, and the key is a
+      # secret the owner creates in Jellyfin (docs/jellyfin.md). The app checks them itself.
+      JELLYFIN_URL: ${JELLYFIN_URL:-}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
     volumes:
       - ./config/app:/config
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
@@ -133,14 +138,3 @@ services:
     image: caddy:${CADDY_TAG:?CADDY_TAG must be set in .env}
     volumes:
       - ./config/caddy:/data
-
-  # Jellyfin already runs elsewhere. This entry only matters if it is ever
-  # moved into this stack, so it sits behind its own profile.
-  jellyfin:
-    <<: *service-defaults
-    profiles: [jellyfin]
-    image: jellyfin/jellyfin:${JELLYFIN_TAG:?JELLYFIN_TAG must be set in .env}
-    user: "${PUID:?PUID must be set in .env}:${PGID:?PGID must be set in .env}"
-    volumes:
-      - ./config/jellyfin:/config
-      - ${DATA_ROOT:?DATA_ROOT must be set in .env}/media:/data/media:ro

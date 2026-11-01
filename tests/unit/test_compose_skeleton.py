@@ -69,7 +69,6 @@ def test_only_built_services_start_by_default():
         ("app", "planned"),
         ("watchdog", "planned"),
         ("proxy", "planned"),
-        ("jellyfin", "jellyfin"),
     ],
 )
 def test_placeholder_services_are_behind_profiles(name, profile):
@@ -194,9 +193,22 @@ def test_media_writers_mount_the_same_data_root():
         assert any(v.endswith(":/data") and v.startswith("${DATA_ROOT:?") for v in volumes), name
 
 
-def test_jellyfin_reads_media_read_only():
-    volumes = services(COMPOSE)["jellyfin"]["volumes"]
-    assert any(v.endswith(":/data/media:ro") for v in volumes)
+def test_jellyfin_is_external_not_a_compose_service():
+    """Jellyfin runs in its own LXC. Nothing in this stack starts, mounts or pins it."""
+    assert "jellyfin" not in services(COMPOSE)
+    assert "JELLYFIN_TAG" not in parse_env_file(REPO_ROOT / ".env.example")
+
+
+def test_the_app_gets_the_jellyfin_address_and_key_from_env():
+    env = environment_as_dict(services(COMPOSE)["app"])
+    assert env["JELLYFIN_URL"] == "${JELLYFIN_URL:-}"
+    assert env["JELLYFIN_API_KEY"] == "${JELLYFIN_API_KEY:-}"
+
+
+def test_only_the_app_knows_the_jellyfin_key():
+    for name, svc in services(COMPOSE).items():
+        if name != "app":
+            assert "JELLYFIN_API_KEY" not in environment_as_dict(svc), name
 
 
 def test_gluetun_persists_its_state_and_sees_the_rendered_ovpn():
