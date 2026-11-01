@@ -117,6 +117,7 @@ All optional; they only change how the scripts behave, never the stack.
 |---|---|---|
 | `KS_COMPOSE`, `KS_IP_URL`, `KS_POLL_SECONDS`, `KS_HEALTHY_TIMEOUT`, `KS_RECOVERY_TIMEOUT` | `make killswitch-test` | Compose command, the "what is my IP" URL, poll pause and timeouts ([killswitch.md](killswitch.md)). |
 | `AB_COMPOSE`, `AB_PROBE_URL`, `AB_PROBE_INTERVAL`, `AB_POLL_SECONDS`, `AB_DETECT_TIMEOUT`, `AB_HEALTHY_TIMEOUT`, `AB_RECOVERY_TIMEOUT` | `make vpn-abuse-test` | The same for the abuse test. |
+| `RT_COMPOSE`, `RT_IP_URL` | `make recovery-prepare` / `recovery-verify` | The compose command (default `docker compose`) and the "what is my IP" URL asked from the host for the home address (default `https://api.ipify.org`; never printed). |
 | `YTP_BACKUP_DIR` | `make backup` | Folder for the archives (default `backups/`). |
 | `YTP_PYPI_JSON` | `make update-check` | Another JSON source than PyPI (tests). |
 | `YTP_NETWORK_TESTS` | `make test-system` | `1` = also run the tests that need the real internet (YouTube). |

@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -24,6 +24,8 @@ help:
 	@echo "backup           back up the database, config/ and .env to backups/ (mode 600; DRY=1 to only show)"
 	@echo "backup-list      list the backups"
 	@echo "update-check     is the pinned yt-dlp the newest release? (exit 10 = newer exists); lists the pinned image tags"
+	@echo "recovery-prepare  before a reboot of the VM or the Proxmox host: record what runs and which jobs are in progress"
+	@echo "recovery-verify   after the reboot: all containers back, in order, VPN before traffic, jobs recovered or failed cleanly"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
 # Every file requirements-dev.txt pulls in (with -r, also nested) must be listed, or a venv made before
@@ -93,6 +95,12 @@ update-check:
 	-scripts/ops/update_ytdlp.py
 	@echo "image tags in use:"
 	@grep -hE '^[A-Z]+_TAG=' $$(test -f .env && echo .env || echo .env.example) | sed 's/^/  /'
+
+recovery-prepare:
+	scripts/ops/recovery_test.py prepare
+
+recovery-verify:
+	scripts/ops/recovery_test.py verify
 
 snapshot: venv
 	UPDATE_SNAPSHOTS=1 $(PYTEST) tests/regression -k snapshot
