@@ -94,6 +94,37 @@ Failure handling, all as typed exceptions (never a `ConnectionError`):
 The client sends `Origin`/`Referer` equal to its base URL and a matching `Host`, which is what
 qBittorrent's CSRF and host checks need. The password and the session cookie are never logged.
 
+## Magnet endpoint (issue #13)
+
+`POST /api/magnet` (through the proxy, so behind its login):
+
+```bash
+curl -u admin http://<vm>/api/magnet -H 'Content-Type: application/json' -d '{
+  "magnet": "magnet:?xt=urn:btih:<40 hex or 32 base32>&dn=...",
+  "metadata": {"type": "movies", "title": "Big Buck Bunny", "year": 2008}
+}'
+```
+
+`metadata` is the per-type object of [Job metadata](#job-metadata-issue-14); its `type`
+(movies, series, audiobooks, music) is the media type and picks the qBittorrent category. The
+link is stripped and validated (`ytp.magnet`); errors are field-level 422s
+(`loc: ["body","magnet"]`, `["body","metadata","movies","year"]`, ...).
+
+| Answer | Meaning |
+|---|---|
+| `201 {"id", "infohash", "type", "status": "queued", "duplicate": false}` | new job, handed to qBittorrent |
+| `200 {... "duplicate": true}` | the infohash is already in the system (any status except `failed`): the existing job is returned, nothing is added again, its metadata is not changed |
+| `422` | invalid link or metadata |
+| `503 {"detail", "job_id"}` | qBittorrent unreachable or its login refused (or the database / qBittorrent is not configured; then no job is created) |
+| `502 {"detail", "job_id"}` | qBittorrent answered but would not take the torrent |
+
+The job row is written first, keyed by the infohash (the unique index decides duplicates, so two
+simultaneous submissions create one job), then qBittorrent is asked. If that fails the job is
+marked `failed` with the reason, and **sending the same magnet again retries it** (same job id,
+status `queued` again, new metadata, answered `201`). A hex, an upper-case or a base32 form of
+the same infohash is the same torrent. The log has the job id and infohash, never the link
+(trackers can carry a private passkey).
+
 ## Database (issue #9)
 
 The app keeps its jobs and YouTube subscriptions in one SQLite file, `/config/app.db`
