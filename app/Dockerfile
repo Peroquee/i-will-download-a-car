@@ -10,6 +10,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# ffmpeg: yt-dlp needs it to merge YouTube's separate video and audio streams into one mp4 and
+# to convert thumbnails (#18). Without recommends, no apt lists left behind.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /srv
 
 # Copied on its own so a code change does not re-run the install layer.
