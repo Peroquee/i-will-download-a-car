@@ -17,7 +17,8 @@
 # working. Only a namespace with nothing in it counts as dead.
 #
 # Usage:
-#   netwatch.sh            watch forever (what s6 runs)
+#   netwatch.sh [ARG]      watch forever (what s6 runs; s6 passes the service name,
+#                          e.g. `custom-svc-netwatch`, as the first argument: ignored)
 #   netwatch.sh --check    exit 0 if the namespace has an interface, 1 if it is dead
 #                          (used as the container's health check)
 #
@@ -65,8 +66,9 @@ watch_loop() {
   done
 }
 
+# Only --check is special. Any other argument, or none, means watch mode: s6 starts
+# custom services as `run custom-svc-<name>`, and exiting on that would restart us every second.
 case "${1:-}" in
   --check) has_interface ;;
-  "") watch_loop ;;
-  *) echo "usage: netwatch.sh [--check]" >&2; exit 2 ;;
+  *) watch_loop ;;
 esac
