@@ -19,13 +19,17 @@ scripts/vpn/           render ExpressVPN's .ovpn for gluetun; the killswitch tes
 scripts/proxy/         set the proxy login; verify the proxy from the LAN
 scripts/watchdog/      create the watchdog's read-only gluetun key
 tests/<level>/         unit, integration, smoke, system, regression
+docs/architecture.md   overview: services, flows, data, security model
+docs/configuration.md  every setting (.env) and what it does
 docs/host-setup.md     step-by-step host setup (issue #1)
+docs/killswitch.md     how the VPN promise is proven: tests, expected output, failures
 docs/app.md            the app: configuration, /health, database and migrations
 docs/watchdog.md       the VPN watchdog: second layer that pauses torrents when the VPN drops
 docs/proxy.md          reverse proxy and login: setup, design, what is tested
 docs/jellyfin.md       the external Jellyfin: API key, libraries, audiobooks question
 docs/testing.md        test levels, markers and rules
 docs/operations.md     backups and restore, updates (pinned versions), log rotation
+scripts/ops/           backup/restore and the yt-dlp update check
 docs/youtube.md        YouTube probe and download, the VPN route, yt-dlp upkeep
 ```
 
@@ -58,7 +62,7 @@ Passes when the output ends with `OK: the killswitch holds and qbittorrent recov
 qBittorrent exits through a VPN address (`VPN IP`), has `no connection` while gluetun is
 stopped (never a `HOME IP LEAK`), and gets its connection back automatically (netwatch restarts the container) after gluetun
 is started again. Only verdicts are printed, never an address. Details, and what to do when
-it fails: [docs/host-setup.md](docs/host-setup.md#5c-prove-the-killswitch-issue-4).
+it fails: [docs/killswitch.md](docs/killswitch.md).
 
 Host setup: [docs/host-setup.md](docs/host-setup.md). Testing: [docs/testing.md](docs/testing.md).
 

@@ -274,30 +274,10 @@ started again, even if the test fails.
 make killswitch-test        # = scripts/vpn/killswitch-test.sh   (--dry-run shows the steps)
 ```
 
-It does exactly this, and prints only the verdicts `VPN IP`, `no connection` and
-`HOME IP LEAK` (never an address, so the output can be shared):
-
-1. `docker exec qbittorrent curl ...` asks a "what is my IP" service. The answer must differ
-   from the home address (the host's own): **VPN IP**.
-2. `docker stop gluetun`, then the same request again must give **no connection**. If it
-   answers with the home address, that is a **HOME IP LEAK** and the setup is wrong.
-3. `docker start gluetun`: qbittorrent must have a connection again, with a VPN address,
-   **automatically** (netwatch restarts the container; nobody has to).
-
-Step 3 is the recovery path. qBittorrent shares gluetun's network namespace; when gluetun
-restarts as the same container it gets a new namespace and qBittorrent keeps the dead
-one (no network at all) until it is restarted. A small watcher inside the qBittorrent
-container (`scripts/qbittorrent/services/netwatch`, an s6 service of the linuxserver image) notices
-that the container has no network interface left for about 30 seconds and stops the
-container; `restart: unless-stopped` starts it again inside the new namespace. It needs no
-Docker socket. A tunnel that is merely down does not trigger it: gluetun's own interface is
-still there and its firewall blocks everything. If recovery ever fails, restart by hand:
-`docker restart qbittorrent`. After a `git pull` that changes the watcher, run `docker restart
-qbittorrent` too: the linuxserver image copies `/custom-services.d` into s6 when the container
-starts, so a running container keeps using the version it started with (the folder mount only
-avoids the stale single-file inode, it does not reload the service). The qBittorrent container also reports `unhealthy` in
-`docker compose ps` while the namespace is dead. The planned watchdog (#21) is the second
-layer on top of this.
+It prints only the verdicts `VPN IP`, `no connection` and `HOME IP LEAK` (never an address, so the
+output can be shared), and passes when it ends with `OK: the killswitch holds and qbittorrent
+recovers`. What each step proves, the recovery mechanism (netwatch), the heavier abuse test and
+what to do when something fails: **[killswitch.md](killswitch.md)**.
 
 ## 5d. qBittorrent categories (issue #6)
 
