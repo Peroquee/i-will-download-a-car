@@ -60,7 +60,9 @@ def prepare_workdir(env_file: Path, workdir: Path) -> None:
     values = parse_env_file(env_file)
     values["DATA_ROOT"] = str(workdir / "data")  # keep the real media volume out of it
     (workdir / "data").mkdir()
-    (workdir / ".env").write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+    (workdir / ".env").write_text(
+        "".join(f"{k}={v}\n" for k, v in values.items()), encoding="utf-8"
+    )
     (workdir / ".env").chmod(0o600)
 
     watcher = workdir / "scripts" / "qbittorrent" / "netwatch.sh"

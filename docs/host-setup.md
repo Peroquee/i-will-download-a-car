@@ -76,6 +76,56 @@ Jellyfin can all work on them. Use the same PUID/PGID Jellyfin reads as.
 
 **Verify:** `scripts/host/check-host.sh --only media` (mounted, owner, group-writable, sane values in `.env`).
 
+## 4b. Download and library folders, proven hardlinks (issue #5)
+
+Downloads and finished media stay in separate trees, so a half-finished file can never
+show up in Jellyfin. When a torrent finishes, the app **hardlinks** it into the library
+folder (the torrent keeps seeding from `downloads/`; the file exists once on disk). That
+only works when both trees are on one filesystem.
+
+The real layout (the owner's existing German folders sit directly under `/data`, there is
+no `/data/media/` level; Jellyfin runs in its own LXC and its libraries point at the
+library folders):
+
+```
+/data/
+  downloads/            <- qBittorrent only; Jellyfin never sees it
+    movies/ series/ audiobooks/ music/
+    incomplete/         <- unfinished torrents, moved to the category folder when done
+  Filme/ Serien/ Hörbücher/ Musik/ Youtube/    <- the library folders
+```
+
+The library folder names are settings in `.env` (relative to `DATA_ROOT`), so another setup
+can use other names; the defaults are the owner's: `MEDIA_DIR_MOVIES=Filme`,
+`MEDIA_DIR_SERIES=Serien`, `MEDIA_DIR_AUDIOBOOKS=Hörbücher`, `MEDIA_DIR_MUSIC=Musik`,
+`MEDIA_DIR_YOUTUBE=Youtube`. Spell them exactly as on disk (`ö`, `ü` included). **An `.env`
+made before this step lacks these lines:** copy them from `.env.example`, otherwise
+`docker compose` stops and names the missing one.
+
+Create what is missing (needs `sudo`, see below) and prove it works:
+
+```bash
+sudo scripts/host/create-layout.sh --dry-run   # shows what it would create
+sudo scripts/host/create-layout.sh             # creates only MISSING folders: owner PUID:PGID, mode 2775
+scripts/host/check-host.sh --only layout       # hardlink test between downloads/ and every library folder
+```
+
+- **Existing folders are never touched**: no chmod, no chown, no recursion, contents
+  untouched. Only missing folders are created (`downloads/...`, and a library folder if its
+  name does not exist yet).
+- **Why `sudo`:** `/data` is owned by `PUID:PGID` (1001:1001 here) and the login user is not in
+  that group, so creating folders owned by 1001:1001 needs root. (Alternative: add your
+  login user to the media group with `sudo usermod -aG media <user>` and log in again; the
+  script then also works without `sudo` if your own ids equal PUID:PGID, which they usually
+  do not. We keep `sudo`; it is needed only for this one-time step.)
+- **`check-host.sh --only layout`** creates a small hidden temp file in each download folder,
+  hardlinks it into the matching library folder, reads the link count (must be 2) and removes
+  both. It also fails if the folders are on different filesystems, and says what to fix.
+  This is the only check that writes anything; it leaves nothing behind.
+- Folder names are compared byte for byte: if the folder on disk is spelled differently
+  (for example another Unicode form of `ö`), the script would create a second folder. Check
+  with `ls /data` first.
+
 ## 5. docker-compose.yml skeleton and .env with VPN credentials
 
 Create `.env` on the VM (never on your PC, never in chat, never on a command line):
@@ -228,6 +278,41 @@ still there and its firewall blocks everything. If recovery ever fails, restart 
 `docker compose ps` while the namespace is dead. The planned watchdog (#21) is the second
 layer on top of this.
 
+## 5d. qBittorrent categories (issue #6)
+
+Four categories decide where a finished download is kept: `movies`, `series`, `audiobooks`
+and `music`, each with the save path `/data/downloads/<category>` (as the container sees it).
+The default save path is `/data/downloads`, unfinished torrents go to
+`/data/downloads/incomplete`, and Automatic Torrent Management is on for new torrents (that
+is what makes a torrent with a category land in the category's folder). It is code, not
+clicking: the script talks to the running qBittorrent's Web API, so qBittorrent itself stores
+and validates everything.
+
+```bash
+docker compose ps                              # qbittorrent must be running and healthy
+scripts/qbittorrent/setup_categories.py --dry-run   # shows the plan, contacts nothing
+scripts/qbittorrent/setup_categories.py        # asks for the Web UI password (admin)
+```
+
+It only creates or corrects those four categories and the settings above. Other categories
+and settings are left alone, and re-running it changes nothing once everything is set. The
+password is asked for on the terminal (or `--password-stdin`); it is never on a command line,
+in a file or in the output. If the Web UI port is not 8080 on localhost, pass `--url`.
+
+**Verify with a real torrent (manual, once):** use a legal test torrent such as a Debian
+installer ISO from debian.org (torrent link under "Download"). In the Web UI (SSH tunnel as in
+step 5b): *Add Torrent File/Link*, set *Category* to `movies`, leave *Torrent Management Mode*
+on **Automatic**, add it. While it downloads the file is in `/data/downloads/incomplete/`;
+when it finishes it moves to `/data/downloads/movies/`. Check on the VM:
+
+```bash
+ls -la /data/downloads/movies/    # the ISO is here, owned by PUID:PGID
+ls /data/Filme/                   # unchanged: nothing from the download appears in the library
+```
+
+Then remove the torrent **with its data** in the Web UI. Repeat with category `series` if you
+like; the folders `audiobooks` and `music` work the same.
+
 ## 6. restart: unless-stopped on all services
 
 Set once in the `x-service-defaults` anchor and merged into every service.
@@ -247,6 +332,6 @@ git push -u origin 1-c0-provision-host   # then open the MR against main
 On the VM, with `.env` filled in:
 
 ```bash
-make host-check     # all five checks PASS
+make host-check     # all six checks PASS (virt, docker, compose, tun, media, layout)
 make smoke-host     # smoke tests incl. the full host check
 ```

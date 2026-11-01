@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # check-host.sh: verify the Docker host meets the base requirements (issue #1, C0).
 #
-# Read-only; changes nothing. Run it on the Debian VM after bootstrap.sh, and
-# after any host change. CI runs a subset of it as a smoke test.
+# Read-only, with one exception: the `layout` check creates and removes a small hidden
+# temp file in each download and library folder to prove hardlinks work. Run it on the
+# Debian VM after bootstrap.sh, and after any host change. CI runs a subset as a smoke test.
 #
 # Usage:
-#   scripts/host/check-host.sh [--only virt,docker,compose,tun,media] [--env-file PATH]
+#   scripts/host/check-host.sh [--only virt,docker,compose,tun,media,layout] [--env-file PATH]
 #
 # Output: one line per check, "PASS|FAIL|SKIP <check> <detail>", then a summary.
 # Exit:   0 all selected checks passed (SKIP counts as pass), 1 any FAIL, 2 bad usage.
@@ -15,7 +16,7 @@
 
 set -uo pipefail
 
-readonly ALL_CHECKS="virt docker compose tun media"
+readonly ALL_CHECKS="virt docker compose tun media layout"
 readonly MIN_COMPOSE="2.17"   # depends_on.restart needs 2.17+
 readonly TUN_DEVNUM="a:c8"    # /dev/net/tun is char device 10:200 (hex a:c8)
 
@@ -25,7 +26,7 @@ SELECTED="$ALL_CHECKS"
 FAILURES=0
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 pass() { printf 'PASS %-8s %s\n' "$1" "$2"; }
@@ -181,6 +182,74 @@ check_media() {
   pass media "$path mounted, owner $owner, mode $mode, umask $umask_value"
 }
 
+# Download and library folders exist, share one filesystem, and a hardlink between them
+# works (link count 2). Fails with a hint if folders are missing (create-layout.sh).
+check_layout() {
+  if [ ! -f "$ENV_FILE" ]; then
+    fail layout "env file $ENV_FILE not found (copy .env.example to .env)"
+    return
+  fi
+  local data_root var name missing=""
+  data_root="$(env_value DATA_ROOT || true)"
+  if [ -z "$data_root" ]; then
+    fail layout "DATA_ROOT missing in $ENV_FILE"
+    return
+  fi
+  local -a types=(movies series audiobooks music) names=()
+  for var in MEDIA_DIR_MOVIES MEDIA_DIR_SERIES MEDIA_DIR_AUDIOBOOKS MEDIA_DIR_MUSIC MEDIA_DIR_YOUTUBE; do
+    name="$(env_value "$var" || true)"
+    if [ -n "$name" ]; then names+=("$name"); else missing="$missing $var"; fi
+  done
+  if [ -n "$missing" ]; then
+    fail layout "missing in $ENV_FILE:$missing (see .env.example)"
+    return
+  fi
+
+  local root="${CHECK_ROOT}${data_root}" absent="" i
+  [ -d "$root/downloads" ] || absent="$absent downloads"
+  for i in "${!types[@]}"; do
+    [ -d "$root/downloads/${types[$i]}" ] || absent="$absent downloads/${types[$i]}"
+  done
+  for name in "${names[@]}"; do
+    [ -d "$root/$name" ] || absent="$absent $name"
+  done
+  if [ -n "$absent" ]; then
+    fail layout "missing folders under $root:$absent (run: sudo scripts/host/create-layout.sh)"
+    return
+  fi
+
+  local device
+  device="$(stat -c '%d' "$root/downloads")"
+  for name in "${names[@]}"; do
+    if [ "$(stat -c '%d' "$root/$name")" != "$device" ]; then
+      fail layout "$root/$name is on a different filesystem than $root/downloads: hardlinks cannot work"
+      return
+    fi
+  done
+
+  local src dst links err
+  for i in "${!types[@]}"; do
+    src="$root/downloads/${types[$i]}/.ytp-linktest.$$"
+    dst="$root/${names[$i]}/.ytp-linktest.$$"
+    if ! : >"$src" 2>/dev/null; then
+      fail layout "cannot write to $root/downloads/${types[$i]} (owner and mode: sudo scripts/host/create-layout.sh)"
+      return
+    fi
+    if ! err="$(ln "$src" "$dst" 2>&1)"; then
+      rm -f "$src" "$dst"
+      fail layout "hardlink downloads/${types[$i]} -> ${names[$i]} failed: $err"
+      return
+    fi
+    links="$(stat -c '%h' "$src")"
+    rm -f "$src" "$dst"
+    if [ "$links" != "2" ]; then
+      fail layout "hardlink downloads/${types[$i]} -> ${names[$i]} has link count $links, expected 2"
+      return
+    fi
+  done
+  pass layout "hardlinks work from downloads/ into ${names[0]}, ${names[1]}, ${names[2]}, ${names[3]} (link count 2); ${names[4]} is on the same filesystem"
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -212,6 +281,7 @@ main() {
       compose) check_compose ;;
       tun) check_tun ;;
       media) check_media ;;
+      layout) check_layout ;;
       *) echo "no dispatch for check: $check" >&2; exit 2 ;;
     esac
   done

@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -15,6 +15,8 @@ help:
 	@echo "vpn-config        render config/expressvpn.ovpn for gluetun (resolves the server name to an IP)"
 	@echo "up                vpn-config, then docker compose up -d"
 	@echo "killswitch-test   on the media VM: stop gluetun, prove qbittorrent has no network, check recovery"
+	@echo "layout            on the media VM: create missing download/library folders and prove hardlinks"
+	@echo "categories        set up the qBittorrent categories and save paths (asks for the Web UI password)"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
 $(VENV)/.installed: requirements-test.txt requirements-lint.txt
@@ -50,6 +52,13 @@ up: vpn-config
 
 killswitch-test:
 	scripts/vpn/killswitch-test.sh
+
+layout:
+	sudo scripts/host/create-layout.sh
+	scripts/host/check-host.sh --only layout
+
+categories:
+	scripts/qbittorrent/setup_categories.py
 
 snapshot: venv
 	UPDATE_SNAPSHOTS=1 $(PYTEST) tests/regression -k snapshot
