@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -17,6 +17,8 @@ help:
 	@echo "killswitch-test   on the media VM: stop gluetun, prove qbittorrent has no network, check recovery"
 	@echo "layout            on the media VM: create missing download/library folders and prove hardlinks"
 	@echo "categories        set up the qBittorrent categories and save paths (asks for the Web UI password)"
+	@echo "proxy-password  set the proxy login in .env (asks for the password, hashes it with Caddy)"
+	@echo "proxy-check     from a LAN machine: 401 without login, 200 with it, backend ports closed"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
 $(VENV)/.installed: requirements-test.txt requirements-lint.txt requirements-app.txt
@@ -59,6 +61,12 @@ layout:
 
 categories:
 	scripts/qbittorrent/setup_categories.py
+
+proxy-password:
+	scripts/proxy/set_password.py
+
+proxy-check:
+	scripts/proxy/verify_proxy.py
 
 snapshot: venv
 	UPDATE_SNAPSHOTS=1 $(PYTEST) tests/regression -k snapshot

@@ -67,8 +67,8 @@ services:
       - ./config/gluetun:/gluetun
     ports:
       # qBittorrent's Web UI lives in gluetun's network namespace, so its
-      # port is published here and ONLY here. Bound to localhost until the
-      # reverse proxy (#9) exists; never 0.0.0.0 without a login in front.
+      # port is published here and ONLY here. Bound to localhost: the LAN reaches the
+      # Web UI through the proxy (#29), which adds the LAN check and a login.
       - "${QBIT_WEBUI_BIND:?QBIT_WEBUI_BIND must be set in .env}:${QBIT_WEBUI_PORT:?QBIT_WEBUI_PORT must be set in .env}:8080"
 
   # Torrent client with no network of its own (#3): it shares gluetun's network
@@ -105,8 +105,8 @@ services:
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
 
   # The app (#8): FastAPI. It is on the default bridge network and publishes NO port, so
-  # nothing outside this host can reach it until the reverse proxy with login exists (#29);
-  # the proxy will reach it as http://app:8000 over the bridge. It runs as PUID:PGID.
+  # nothing outside this host can reach it except through the reverse proxy with login (#29),
+  # which reaches it as http://app:8000 over the bridge. It runs as PUID:PGID.
   # Docker builds the image from app/ (no daemon is available in CI: see docs/testing.md).
   app:
     <<: *service-defaults
@@ -139,10 +139,45 @@ services:
     environment:
       TZ: ${TZ:?TZ must be set in .env}
 
-  # Reverse proxy with login, LAN only. Placeholder until #9.
+  # Reverse proxy with login, LAN only (#29): the ONLY way in from the LAN. Caddy checks that the
+  # client is inside LAN_SUBNET and asks for a login (proxy/Caddyfile, docs/proxy.md), then passes
+  # on to the app (:8080 inside, PROXY_PORT outside) or to qBittorrent's Web UI (:8081, PROXY_QBT_PORT).
+  # It starts only with a user and a password hash in .env (scripts/proxy/set_password.py). Runs
+  # as PUID:PGID with a read-only root and no capabilities except the one its binary needs to
+  # start (NET_BIND_SERVICE is a file capability of the official image; it listens on ports > 1024).
   proxy:
     <<: *service-defaults
-    profiles: [planned]
     image: caddy:${CADDY_TAG:?CADDY_TAG must be set in .env}
+    user: "${PUID:?PUID must be set in .env}:${PGID:?PGID must be set in .env}"
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      LAN_SUBNET: ${LAN_SUBNET:?LAN_SUBNET must be set in .env}
+      PROXY_USER: ${PROXY_USER:?PROXY_USER must be set in .env (make proxy-password)}
+      # A bcrypt hash, single-quoted in .env because it contains "$" (make proxy-password does that).
+      PROXY_PASSWORD_HASH: ${PROXY_PASSWORD_HASH:?PROXY_PASSWORD_HASH must be set in .env (make proxy-password)}
+    ports:
+      # HOST_IP:HOST_PORT:CONTAINER_PORT. Bind the VM's LAN address, never a public one.
+      - "${PROXY_BIND:?PROXY_BIND must be set in .env}:${PROXY_PORT:?PROXY_PORT must be set in .env}:8080"
+      - "${PROXY_BIND}:${PROXY_QBT_PORT:?PROXY_QBT_PORT must be set in .env}:8081"
     volumes:
-      - ./config/caddy:/data
+      # The whole folder, read-only (a single bind-mounted file keeps its old inode after git pull).
+      - ./proxy:/etc/caddy:ro
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

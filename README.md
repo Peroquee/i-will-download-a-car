@@ -7,7 +7,8 @@ the VPN) and files the result into the right library.
 ## Layout
 
 ```
-docker-compose.yml     the stack (gluetun, qbittorrent, app; watchdog/proxy planned; Jellyfin is external)
+docker-compose.yml     the stack (gluetun, qbittorrent, app, proxy; watchdog planned; Jellyfin is external)
+proxy/                 the Caddyfile of the reverse proxy (LAN check + login)
 app/                   the FastAPI app (package ytp) and its Dockerfile
 compose/               per-VPN-type gluetun settings (vpn-openvpn.yml, vpn-wireguard.yml)
 .env.example           every setting; copy to .env on the host
@@ -15,8 +16,10 @@ scripts/proxmox/       create the VM on the Proxmox node
 scripts/host/          bootstrap, check and lay out folders on the Debian Docker host
 scripts/qbittorrent/   seed qBittorrent's login and VPN binding; categories; netwatch (dead-namespace restart)
 scripts/vpn/           render ExpressVPN's .ovpn for gluetun; the killswitch test
+scripts/proxy/         set the proxy login; verify the proxy from the LAN
 tests/<level>/         unit, integration, smoke, system, regression
 docs/host-setup.md     step-by-step host setup (issue #1)
+docs/proxy.md          reverse proxy and login: setup, design, what is tested
 docs/jellyfin.md       the external Jellyfin: API key, libraries, audiobooks question
 docs/testing.md        test levels, markers and rules
 index.html             first draft of the submission form (moves into app/ with #8)
@@ -28,6 +31,17 @@ index.html             first draft of the submission form (moves into app/ with 
 make venv && make test-unit      # no Docker needed
 make test                        # everything this machine supports
 ```
+
+## Reverse proxy and login (issue #29)
+
+```bash
+make proxy-password      # once: asks for the password, writes PROXY_USER / PROXY_PASSWORD_HASH to .env
+docker compose up -d     # the proxy listens on PROXY_BIND:80 (app) and :8081 (qBittorrent)
+make proxy-check         # from a LAN machine: 401 without login, 200 with it, backend ports closed
+```
+
+The app and qBittorrent's Web UI are reachable only through Caddy, only from `LAN_SUBNET`, only
+with the login. Design and troubleshooting: [docs/proxy.md](docs/proxy.md).
 
 ## Killswitch test (on the media VM, stack running)
 
