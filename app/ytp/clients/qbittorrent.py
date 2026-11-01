@@ -335,6 +335,19 @@ class QbitClient:
             raise QbitRequestError(f"app/version answered {status}", status)
         return body.strip()
 
+    def preferences(self) -> dict[str, Any]:
+        """qBittorrent's settings (`app/preferences`), for read-only checks."""
+        status, body = self._request("GET", "app/preferences")
+        if status != 200:
+            raise QbitRequestError(f"app/preferences answered {status}", status)
+        try:
+            data = json.loads(body)
+        except ValueError as exc:
+            raise QbitUnavailable("qBittorrent returned unreadable settings") from exc
+        if not isinstance(data, dict):
+            raise QbitUnavailable("qBittorrent returned unexpected settings")
+        return data
+
     def add_magnet(self, magnet: str, category: str) -> str:
         """Queue a magnet link in `category`; returns its infohash (lower-case hex).
 

@@ -43,5 +43,8 @@ class WatchdogStatusClient:
         if not isinstance(data, dict) or data.get("state") not in KNOWN_STATES:
             return {"state": "unknown", "reason": "the watchdog returned an unreadable status"}
         # Pass on only what the badge needs, whatever else the watchdog may send.
-        keys = ("state", "since", "reason", "paused", "last_poll", "auto_resume")
+        keys = (
+            "state", "since", "reason", "paused", "last_poll", "auto_resume",
+            "egress", "egress_checked", "egress_country",
+        )  # fmt: skip
         return {key: data[key] for key in keys if key in data}

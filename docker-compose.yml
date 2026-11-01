@@ -186,6 +186,11 @@ services:
       # A tiny read-only status page for the app's badge, inside the bridge network only (no
       # published port): http://watchdog:8090/status
       WATCHDOG_STATUS_PORT: "8090"
+      # The slow egress sanity check (#23), every EGRESS_CHECK_INTERVAL seconds (0 = off).
+      EGRESS_CHECK_INTERVAL: ${EGRESS_CHECK_INTERVAL:-300}
+      EGRESS_CONFIRM: ${EGRESS_CONFIRM:-2}
+      HOME_PUBLIC_IP: ${HOME_PUBLIC_IP:-}
+      EGRESS_EXPECTED_COUNTRY: ${EGRESS_EXPECTED_COUNTRY:-}
     # Unhealthy when the poll loop stopped, or when it cannot read the VPN status (the key or
     # gluetun's auth file is wrong): then it protects nothing, and docker compose ps says so.
     healthcheck:

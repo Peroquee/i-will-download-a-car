@@ -2,8 +2,8 @@
 """setup_key.py: give the VPN watchdog its own read-only key for gluetun's control server (#21).
 
 Gluetun keeps every route of its control server private. The watchdog only needs
-`GET /v1/vpn/status`, so this script creates a role that may do exactly that and nothing else
-(not stop the VPN, not change the server):
+`GET /v1/vpn/status` and, for the egress check, `GET /v1/publicip/ip`, so this script creates a role
+that may do exactly those two reads and nothing else (not stop the VPN, not change the server):
 
 * writes `config/gluetun/auth/config.toml` (mode 600), which gluetun reads at start as
   `/gluetun/auth/config.toml` (the folder is already mounted at /gluetun);
@@ -13,8 +13,8 @@ Usage:
     scripts/watchdog/setup_key.py [--env-file PATH] [--auth-file PATH] [--rotate] [--dry-run]
 
 Safe to re-run: an existing key in .env is kept (the TOML file is rewritten from it, so they
-cannot drift apart); --rotate makes a new one. The key is never printed. Gluetun reads the
-file only at start: run `docker compose up -d --force-recreate gluetun watchdog` afterwards.
+cannot drift apart, and a file written by an older version gains new routes); --rotate
+makes a new one. The key is never printed. Gluetun reads the file only at start: run `docker compose up -d --force-recreate gluetun watchdog` afterwards.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ PLACEHOLDER = "changeme"
 KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{20,}")
 
 TOML = """# Written by scripts/watchdog/setup_key.py: do not edit, do not commit.
-# One role for the VPN watchdog, allowed to read the VPN status and nothing else.
+# One role for the VPN watchdog, allowed to read the VPN status and the public address only.
 [[roles]]
 name = "watchdog"
-routes = ["GET /v1/vpn/status"]
+routes = ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
 auth = "apikey"
 apikey = "{key}"
 """
