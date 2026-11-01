@@ -108,6 +108,12 @@ services:
     image: youtube-premium/app:dev
     environment:
       <<: *media-env
+      # Library folder per media type, relative to /data (same names as in .env.example).
+      MEDIA_DIR_MOVIES: ${MEDIA_DIR_MOVIES:?MEDIA_DIR_MOVIES must be set in .env}
+      MEDIA_DIR_SERIES: ${MEDIA_DIR_SERIES:?MEDIA_DIR_SERIES must be set in .env}
+      MEDIA_DIR_AUDIOBOOKS: ${MEDIA_DIR_AUDIOBOOKS:?MEDIA_DIR_AUDIOBOOKS must be set in .env}
+      MEDIA_DIR_MUSIC: ${MEDIA_DIR_MUSIC:?MEDIA_DIR_MUSIC must be set in .env}
+      MEDIA_DIR_YOUTUBE: ${MEDIA_DIR_YOUTUBE:?MEDIA_DIR_YOUTUBE must be set in .env}
     volumes:
       - ./config/app:/config
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data

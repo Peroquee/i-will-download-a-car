@@ -110,8 +110,11 @@ def test_c0_rendered_compose_config_matches_snapshot():
     actual = normalized_config(rendered_config(profiles=("*",)))
     if os.environ.get("UPDATE_SNAPSHOTS") == "1":
         SNAPSHOT.parent.mkdir(exist_ok=True)
-        SNAPSHOT.write_text(json.dumps(actual, indent=2, sort_keys=True) + "\n")
+        SNAPSHOT.write_text(
+            json.dumps(actual, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         pytest.skip("snapshot updated")
     assert SNAPSHOT.exists(), "no snapshot yet: run with UPDATE_SNAPSHOTS=1"
-    expected = json.loads(SNAPSHOT.read_text())
+    expected = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     assert actual == expected

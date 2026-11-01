@@ -69,7 +69,13 @@ def compose(
     for profile in profiles:
         cmd += ["--profile", profile]
     return subprocess.run(
-        [*cmd, *args], capture_output=True, text=True, env=clean_env(), timeout=60, check=False
+        [*cmd, *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=clean_env(),
+        timeout=60,
+        check=False,
     )
 
 

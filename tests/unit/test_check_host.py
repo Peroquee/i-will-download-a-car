@@ -77,12 +77,35 @@ else echo "{vm}"; [ "{vm}" != none ] || exit 1; fi""",
             os.chown(path, *owner)
         return path
 
+    def layout(self, *, skip: tuple[str, ...] = ()) -> None:
+        """The download and library folders under the fake /data (minus the ones in skip)."""
+        data = self.root / "data"
+        data.mkdir(exist_ok=True)
+        for rel in (
+            "downloads/movies",
+            "downloads/series",
+            "downloads/audiobooks",
+            "downloads/music",
+            "Filme",
+            "Serien",
+            "Hörbücher",
+            "Musik",
+            "Youtube",
+        ):
+            if rel not in skip:
+                (data / rel).mkdir(parents=True, exist_ok=True)
+
     def write_env(self, **overrides: str | None) -> None:
         values: dict[str, str | None] = {
             "DATA_ROOT": "/data",
             "PUID": str(self.puid),
             "PGID": str(self.pgid),
             "UMASK": "002",
+            "MEDIA_DIR_MOVIES": "Filme",
+            "MEDIA_DIR_SERIES": "Serien",
+            "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
+            "MEDIA_DIR_MUSIC": "Musik",
+            "MEDIA_DIR_YOUTUBE": "Youtube",
         }
         values.update(overrides)
         self.env_file.write_text(
@@ -146,11 +169,11 @@ def test_healthy_host_passes_everything(host):
     host.mounted()
     host.tun("real")
     host.data_dir(owner=owner_of(host))
+    host.layout()
     result = host.run()
     assert result.returncode == 0, result.stdout + result.stderr
-    assert [status(result, c) for c in ("virt", "docker", "compose", "tun", "media")] == [
-        "PASS"
-    ] * 5
+    checks = ("virt", "docker", "compose", "tun", "media", "layout")
+    assert [status(result, c) for c in checks] == ["PASS"] * 6
     assert result.stdout.rstrip().endswith("OK: all checks passed")
 
 
@@ -182,8 +205,8 @@ def test_a_check_without_a_dispatch_arm_fails_loudly(host):
     """A check added to ALL_CHECKS but not to main()'s case must not be skipped silently."""
     source = SCRIPT.read_text(encoding="utf-8")
     patched = source.replace(
-        'readonly ALL_CHECKS="virt docker compose tun media"',
-        'readonly ALL_CHECKS="virt docker compose tun media orphan"',
+        'readonly ALL_CHECKS="virt docker compose tun media layout"',
+        'readonly ALL_CHECKS="virt docker compose tun media layout orphan"',
     )
     assert patched != source, "ALL_CHECKS line changed; update this test"
     script = host.tmp / "check-host-orphan.sh"
@@ -197,7 +220,7 @@ def test_a_check_without_a_dispatch_arm_fails_loudly(host):
 def test_help_exits_0_and_documents_the_checks(host):
     result = run_script(SCRIPT, ["--help"], isolate_path=host.base)
     assert result.returncode == 0
-    assert "virt,docker,compose,tun,media" in result.stdout
+    assert "virt,docker,compose,tun,media,layout" in result.stdout
 
 
 # --------------------------------------------------------------------------- virt
@@ -387,3 +410,93 @@ def test_media_not_group_writable(host):
     result = _media(host)
     assert status(result, "media") == "FAIL"
     assert "not group-writable" in result.stdout
+
+
+# --------------------------------------------------------------------------- layout
+
+
+def _layout(host: Host) -> ScriptResult:
+    return host.run("--only", "layout")
+
+
+def test_layout_passes_and_proves_a_hardlink(host):
+    host.layout()
+    result = _layout(host)
+    assert status(result, "layout") == "PASS", result.stdout
+    assert "link count 2" in result.stdout
+    assert "Hörbücher" in result.stdout  # non-ASCII folder names work end to end
+
+
+def test_layout_leaves_no_temp_files_behind(host):
+    host.layout()
+    _layout(host)
+    assert not list((host.root / "data").rglob(".ytp-linktest*"))
+
+
+def test_layout_never_touches_existing_files(host):
+    host.layout()
+    movie = host.root / "data" / "Filme" / "Film (2020)" / "film.mkv"
+    movie.parent.mkdir()
+    movie.write_text("x")
+    _layout(host)
+    assert movie.read_text() == "x"
+    assert os.stat(movie).st_nlink == 1
+
+
+def test_layout_fails_with_a_hint_when_folders_are_missing(host):
+    host.layout(skip=("downloads/music", "Youtube"))
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert "downloads/music" in result.stdout
+    assert "Youtube" in result.stdout
+    assert "create-layout.sh" in result.stdout
+    assert result.returncode == 1
+
+
+@pytest.mark.parametrize("missing", ["MEDIA_DIR_MOVIES", "MEDIA_DIR_YOUTUBE", "DATA_ROOT"])
+def test_layout_fails_when_the_env_file_lacks_a_setting(host, missing):
+    host.layout()
+    host.write_env(**{missing: None})
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert missing in result.stdout
+
+
+def test_layout_fails_without_an_env_file(host):
+    host.env_file.unlink()
+    assert status(_layout(host), "layout") == "FAIL"
+
+
+def test_layout_fails_on_different_filesystems(host):
+    host.layout()
+    # Pretend the library folder Filme sits on another device than downloads/.
+    host.stubs.add(
+        "stat",
+        'case "$*" in *"-c %d"*Filme*) echo 99 ;; *) exec /usr/bin/stat "$@" ;; esac',
+    )
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert "different filesystem" in result.stdout
+
+
+def test_layout_reports_a_failing_hardlink_and_cleans_up(host):
+    host.layout()
+    host.stubs.add("ln", 'echo "Operation not permitted" >&2; exit 1')
+    result = _layout(host)
+    assert status(result, "layout") == "FAIL"
+    assert "hardlink downloads/movies -> Filme failed" in result.stdout
+    assert "Operation not permitted" in result.stdout
+    assert not list((host.root / "data").rglob(".ytp-linktest*"))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_layout_reports_an_unwritable_download_folder(host):
+    host.layout()
+    folder = host.root / "data" / "downloads" / "movies"
+    folder.chmod(0o555)
+    try:
+        result = _layout(host)
+    finally:
+        folder.chmod(0o755)
+    assert status(result, "layout") == "FAIL"
+    assert "cannot write to" in result.stdout

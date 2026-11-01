@@ -104,6 +104,8 @@ def test_shell_environment_does_not_leak_into_tests(tmp_path: Path, monkeypatch)
         "DATA_ROOT",
         "TZ",
         "QBIT_WEBUI_BIND",
+        "MEDIA_DIR_MOVIES",
+        "MEDIA_DIR_YOUTUBE",
     ],
 )
 def test_missing_required_variable_stops_compose(tmp_path: Path, missing):
@@ -131,7 +133,9 @@ def test_the_actual_rendered_config_is_written_for_review():
     actual = normalized_config(rendered_config(profiles=("*",)))
     out = REPO_ROOT / "reports" / "c0-compose-config.actual.json"
     out.parent.mkdir(exist_ok=True)
-    out.write_text(json.dumps(actual, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out.write_text(
+        json.dumps(actual, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 # --- VPN type: only the active type's secrets are required (#2) ---
@@ -206,3 +210,12 @@ def test_gluetun_renders_its_health_check_and_the_lan_bypass():
     gluetun = rendered_config()["services"]["gluetun"]
     assert gluetun["healthcheck"]["test"] == ["CMD", "/gluetun-entrypoint", "healthcheck"]
     assert gluetun["environment"]["FIREWALL_OUTBOUND_SUBNETS"] == "192.168.178.0/24"
+
+
+def test_library_folder_names_reach_the_app_with_their_umlauts(tmp_path: Path):
+    env_file = write_env(
+        tmp_path / ".env", MEDIA_DIR_AUDIOBOOKS="Hörbücher", MEDIA_DIR_MOVIES="Filme"
+    )
+    app = rendered_config(env_file, profiles=("planned",))["services"]["app"]["environment"]
+    assert app["MEDIA_DIR_AUDIOBOOKS"] == "Hörbücher"
+    assert app["MEDIA_DIR_MOVIES"] == "Filme"

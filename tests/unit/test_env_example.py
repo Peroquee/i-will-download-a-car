@@ -93,6 +93,30 @@ def test_umask_is_group_writable_octal():
     assert int(umask, 8) & 0o020 == 0, "UMASK must keep group write so services can share files"
 
 
+MEDIA_DIRS = (
+    "MEDIA_DIR_MOVIES",
+    "MEDIA_DIR_SERIES",
+    "MEDIA_DIR_AUDIOBOOKS",
+    "MEDIA_DIR_MUSIC",
+    "MEDIA_DIR_YOUTUBE",
+)
+
+
+@pytest.mark.parametrize("name", MEDIA_DIRS)
+def test_media_dirs_are_single_folder_names_relative_to_data_root(name):
+    value = ENV_EXAMPLE[name]
+    assert value
+    assert "/" not in value
+    assert value not in {".", ".."}
+    assert not value.startswith("-")
+    assert value.isprintable()
+
+
+def test_media_dirs_are_distinct():
+    values = [ENV_EXAMPLE[name] for name in MEDIA_DIRS]
+    assert len(set(values)) == len(values)
+
+
 def test_data_root_is_absolute():
     assert ENV_EXAMPLE["DATA_ROOT"].startswith("/")
 

@@ -59,6 +59,8 @@ _BASE_TOOLS = (
     "sh",
     "touch",
     "mkdir",
+    "ln",
+    "rm",
 )
 
 
@@ -109,6 +111,7 @@ def run_script(
         ["bash", str(script), *(args or [])],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=full_env,
         cwd=cwd,
         timeout=timeout,
