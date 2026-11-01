@@ -82,6 +82,17 @@ fetching of podcast feeds, episodes and covers therefore goes through one module
   documentation ranges are refused, and so are IPv6 forms that wrap an IPv4 address. One private
   address among public ones refuses the whole name. IP literals in any spelling (`127.1`,
   `2130706433`, `0x7f.1`, `[::1]`) are judged by what they resolve to.
+* **The home network's own global addresses are refused too.** The home line is DS-Lite: the LAN
+  has native global IPv6 addresses (the router and the devices behind it), and "global" alone
+  would let a feed point at one of them. Refused as well: every prefix in `HOME_PUBLIC_IP` (the
+  same setting as the watchdog's egress check), every network in `FETCH_BLOCKED_NETWORKS`, and the
+  global IPv6 networks of this machine's own interfaces (at least a /64 each, read from
+  `/proc/net/if_inet6` and re-read every 5 minutes, so a new prefix from the provider is noticed).
+  This matters for direct mode (`PODCAST_PROXY=` empty); through the VPN proxy a home address
+  cannot be reached anyway. **Set `HOME_PUBLIC_IP` or `FETCH_BLOCKED_NETWORKS` to the home IPv6
+  prefix if you fetch directly**: inside the Docker bridge the app cannot see the VM's own
+  interfaces, only the settings carry them. Find the prefix with `ip -6 addr show scope global`
+  on the VM or on the router's Online-Monitor page ([watchdog.md](watchdog.md#finding-home_public_ip)).
 * **The address that was checked is the address connected to.** The app connects to the IP it
   checked and uses the real name only for the TLS handshake and the `Host` header, so a DNS answer
   that changes between the check and the connection (DNS rebinding) changes nothing.

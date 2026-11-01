@@ -74,7 +74,7 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | `ALERT_FORMAT` | `ntfy` | no | `ntfy` or `webhook`. |
 | `EGRESS_CHECK_INTERVAL` | `300` | no | Seconds between exit-address checks; `0` = off. |
 | `EGRESS_CONFIRM` | `2` | no | Mismatches in a row before it counts (1 to 10). |
-| `HOME_PUBLIC_IP` | empty | no | Your home line's public address(es) or IPv6 prefix, comma-separated; never logged in full. [How to find it](watchdog.md#finding-home_public_ip) |
+| `HOME_PUBLIC_IP` | empty | no | Your home line's public address(es) or IPv6 prefix, comma-separated; never logged in full. Also read by the app: podcast fetches never go there (see `FETCH_BLOCKED_NETWORKS`). [How to find it](watchdog.md#finding-home_public_ip) |
 | `EGRESS_EXPECTED_COUNTRY` | empty | no | If set, the VPN exit must be in this country. |
 
 ## YouTube and subscriptions ([youtube.md](youtube.md))
@@ -90,6 +90,7 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | Variable | Default | Required | Meaning |
 |---|---|---|---|
 | `PODCAST_PROXY` | `http://gluetun:8888` | no | Where podcast feeds and episodes go out: gluetun's HTTP proxy, i.e. through the VPN. **Set but empty** = fetch directly from the home line (some podcast hosts block VPN addresses). Only `http://` proxies. |
+| `FETCH_BLOCKED_NETWORKS` | empty | no | Networks podcast fetches must never go to, comma-separated, **in addition to** the private ranges, `HOME_PUBLIC_IP` and this host's own global IPv6 networks (found automatically). Put the home line's global IPv6 prefix here (DS-Lite gives the LAN native global IPv6): on the VM `ip -6 addr show scope global`. Matters when `PODCAST_PROXY` is empty (direct). Never logged in full. |
 | `PODCAST_POLL_MINUTES` | `240` | no | How often each subscribed podcast's feed is checked (30 to 1440; each feed gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
 
 ## Image tags (pinned; [operations.md](operations.md))

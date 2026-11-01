@@ -472,3 +472,29 @@ def test_the_settings_for_podcasts_are_validated():
     ):
         with pytest.raises(ConfigError):
             Settings.from_env({**ENV, **bad})
+
+
+@pytest.mark.security
+def test_the_api_refuses_a_feed_in_the_home_ipv6_prefix(tmp_path):
+    """HOME_PUBLIC_IP reaches the real fetcher the app builds; a feed on the home /56 is a 403."""
+    config = tmp_path / "config"
+    config.mkdir()
+    settings = Settings.from_env(
+        {
+            **ENV,
+            "DATA_ROOT": str(tmp_path),
+            "CONFIG_DIR": str(config),
+            "PODCAST_PROXY": "",
+            "HOME_PUBLIC_IP": "2003:abcd:1200::/56",
+        }
+    )
+    with TestClient(create_app(settings), base_url="http://nas.lan") as test_client:
+        fetcher = test_client.app.state.podcast_feeds.fetcher
+        assert fetcher.proxy == ""
+        fetcher._resolver = lambda host, port: ["2003:abcd:1200::7"]
+        fetcher._dial = lambda target, ip: pytest.fail("must not connect")
+        response = test_client.post(
+            "/api/podcasts/probe", json={"feed": "http://home-nas.example/feed.xml"}
+        )
+        assert (response.status_code, response.json()["kind"]) == (403, "feed_blocked")
+        assert "2003" not in response.text

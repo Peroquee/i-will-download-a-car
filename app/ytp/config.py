@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .egress import parse_networks
+
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
 # Media type -> the environment variable naming its library folder (relative to DATA_ROOT).
@@ -76,6 +78,10 @@ class Settings:
     # How often a subscribed podcast's feed is looked at, in minutes (0 = never). Slower than the
     # YouTube channels: a podcast publishes a few times a week at most.
     podcast_poll_minutes: int = 240
+    # Networks the app never fetches from (podcasts): HOME_PUBLIC_IP plus FETCH_BLOCKED_NETWORKS,
+    # i.e. the home network's own global IPv6 prefixes. Semi-secret like HOME_PUBLIC_IP: never in
+    # repr/str or a log line, only the count (see `summary`).
+    fetch_blocked_networks: tuple = field(default=(), repr=False)
 
     @property
     def qbit_configured(self) -> bool:
@@ -108,6 +114,7 @@ class Settings:
             "qbit_url": self.qbit_url,
             "qbit_user": self.qbit_user,
             "qbit_configured": self.qbit_configured,
+            "fetch_blocked_networks": len(self.fetch_blocked_networks),
         }
 
     @classmethod
@@ -228,6 +235,13 @@ class Settings:
         else:
             problems.append("PODCAST_POLL_MINUTES must be 0 (off) or between 30 and 1440")
 
+        blocked: list = []
+        for name in ("HOME_PUBLIC_IP", "FETCH_BLOCKED_NETWORKS"):
+            try:
+                blocked.extend(parse_networks(env.get(name, "")))
+            except ValueError as exc:  # names the entry's position, never its value
+                problems.append(f"{name}: {exc}")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -250,6 +264,7 @@ class Settings:
             subscription_poll_minutes=poll_minutes,
             podcast_proxy=podcast_proxy,
             podcast_poll_minutes=podcast_poll,
+            fetch_blocked_networks=tuple(blocked),
         )
 
 
