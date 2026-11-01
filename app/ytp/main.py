@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response, status
 
 from . import __version__, api
+from .channels import ChannelResolver
 from .clients.jellyfin import JellyfinClient, LibraryRefresher
 from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.youtube = YoutubeProbe(
         proxy=settings.ytdlp_proxy, timeout=settings.youtube_probe_timeout
     )
+    app.state.channels = ChannelResolver(app.state.youtube)
     # Jellyfin: with no URL or key the refresher does nothing (the warning above says so).
     app.state.jellyfin = LibraryRefresher(
         JellyfinClient.from_settings(settings) if settings.jellyfin_configured else None
@@ -133,6 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.reconciler = None
     app.state.watchdog_status = None
     app.state.youtube = None
+    app.state.channels = None
     app.state.youtube_worker = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     api.register(app)

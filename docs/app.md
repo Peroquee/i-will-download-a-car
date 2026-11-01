@@ -328,8 +328,10 @@ scripts and styles.
 - **YouTube branch:** on paste the page asks `POST /api/youtube/probe` and fills **channel** and
   **title** (editable; if the lookup fails, they can be typed). Submit sends the confirmed names to
   `POST /api/youtube/download`. The thumbnail is deliberately **not shown**: it would be loaded from
-  YouTube by the browser on the home connection. "Subscribe to the channel" is present but
-  disabled until subscriptions exist.
+  YouTube by the browser on the home connection. Ticking **Subscribe to the channel** also calls
+  `POST /api/subscriptions` with the video's address and the confirmed channel name once the
+  download is queued (see youtube.md, "Subscriptions"); the result line says whether it worked,
+  and a failed subscription never undoes the download.
 - **Magnet branch:** a media type (movie, series, audiobook, music) swaps the fields: movie title +
   year; series title + season + episode, or "whole season" (no episode); audiobook author + title;
   music artist + album. Submit sends `POST /api/magnet`.

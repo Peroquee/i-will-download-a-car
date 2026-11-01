@@ -163,6 +163,8 @@ def test_requests_from_other_sites_are_refused_before_anything_happens(client, h
         ("POST", "/api/magnet", {"magnet": MAGNET, "metadata": {"type": "music", "artist": "a", "album": "b"}}),
         ("POST", "/api/youtube/download", {"url": "https://youtu.be/dQw4w9WgXcQ", "channel": "c", "title": "t"}),
         ("POST", "/api/youtube/probe", {"url": "https://youtu.be/dQw4w9WgXcQ"}),
+        ("POST", "/api/subscriptions", {"channel": "@kurzgesagt"}),
+        ("DELETE", "/api/subscriptions/1", None),
     ],
 )  # fmt: skip
 def test_every_state_changing_route_is_protected_and_nothing_is_created(client, method, path, body):
@@ -348,7 +350,7 @@ def test_every_server_error_and_probe_kind_has_a_text():
         for error_type in (
             "missing", "name_empty", "name_too_long", "name_path_separator", "name_control_character",
             "name_dots_only", "year_out_of_range", "int_parsing", "greater_than_equal",
-            "less_than_equal", "magnet_invalid", "video_url_invalid", "extra_forbidden",
+            "less_than_equal", "magnet_invalid", "video_url_invalid", "channel_invalid", "extra_forbidden",
         ):  # fmt: skip
             assert f"err.{error_type}" in t[lang], (lang, error_type)
 
@@ -575,3 +577,9 @@ def test_the_vpn_bar_is_part_of_the_page_before_the_content_and_marks_alerts():
         assert f".vpn-{view}" in CSS
     assert "favicon-alert.svg" in APP_JS
     assert "visibilityState" in APP_JS
+
+
+def test_the_subscribe_checkbox_is_enabled_and_explains_what_it_does():
+    assert re.search(r'<input id="subscribe" type="checkbox">', HTML)
+    assert "yt.subscribe_soon" not in HTML
+    assert "/api/subscriptions" in APP_JS

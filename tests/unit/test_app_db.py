@@ -167,6 +167,7 @@ def test_a_new_database_gets_the_initial_schema(database):
         "last_error",
         "enabled",
         "created_at",
+        "backfill",
     ]
 
 

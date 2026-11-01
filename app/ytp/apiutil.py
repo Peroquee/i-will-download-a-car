@@ -16,6 +16,15 @@ from .jobs import Job
 logger = logging.getLogger(__name__)
 
 
+# HTTP status per probe failure kind: the video itself (404), a restriction on it (403), the
+# upstream or the VPN path (502/504), our own limit (429).
+PROBE_STATUS = {
+    "private": 404, "unavailable": 404, "not_found": 404, "unsupported": 422,
+    "region": 403, "age": 403, "members": 403, "live": 409,
+    "bot_check": 502, "network": 502, "unknown": 502, "timeout": 504, "busy": 429,
+}  # fmt: skip
+
+
 def problem(status: int, detail: str, job_id: int | None = None) -> JSONResponse:
     body: dict[str, Any] = {"detail": detail}
     if job_id is not None:
