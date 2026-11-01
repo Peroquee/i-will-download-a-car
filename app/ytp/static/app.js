@@ -70,7 +70,9 @@
 
   function fieldElement(field) {
     if (field === "link") return $("link");
-    if (mode() === "youtube") return field === "channel" ? $("f-channel") : field === "title" ? $("f-yt-title") : null;
+    if (mode() === "youtube") {
+      return { channel: $("f-channel"), title: $("f-yt-title"), album: $("f-yt-album") }[field] || null;
+    }
     if (mode() === "podcast") {
       return { name: $("f-podcast"), episode: $("pc-episode"), key: $("pc-episode"), backfill: $("pc-backfill") }[field] || null;
     }
@@ -213,16 +215,29 @@
   /* ---------------------------------------------------------------- YouTube target (#35) */
 
   function ytTarget() { return $("yt-target").value; }
-  function ytAudioOnly() { return ytTarget() === "podcast" && $("yt-audio").checked; }
+  function ytAudioOnly() { return ytTarget() !== "video" && $("yt-audio").checked; }
 
   /* The same two fields mean channel/title for a video and podcast/episode for an episode. */
+  var shownTarget = "video";
+  var TARGET_TEXT = {
+    video: ["yt.channel", "yt.title", "yt.subscribe_note"],
+    podcast: ["yt.podcast", "yt.episode", "yt.subscribe_note_podcast"],
+    music: ["yt.artist", "yt.track", "yt.subscribe_note"],
+  };
+
   function applyTarget() {
-    var podcast = ytTarget() === "podcast";
-    $("yt-audio-row").hidden = !podcast;
-    if (!podcast) $("yt-audio").checked = false;
-    var labels = [["yt-channel-label", podcast ? "yt.podcast" : "yt.channel"],
-                  ["yt-title-label", podcast ? "yt.episode" : "yt.title"],
-                  ["yt-subscribe-note", podcast ? "yt.subscribe_note_podcast" : "yt.subscribe_note"]];
+    var target = ytTarget();
+    $("yt-audio-row").hidden = target === "video";
+    $("yt-album-row").hidden = target !== "music";
+    $("yt-subscribe-row").hidden = target === "music";   // channels are not subscribed as music
+    if (target === "video") $("yt-audio").checked = false;
+    if (target === "music") $("subscribe").checked = false;
+    // A music track is audio by default (a video file does not belong in a music library).
+    if (target === "music" && shownTarget !== "music") $("yt-audio").checked = true;
+    if (target === "podcast" && shownTarget === "music") $("yt-audio").checked = false;
+    shownTarget = target;
+    var text = TARGET_TEXT[target];
+    var labels = [["yt-channel-label", text[0]], ["yt-title-label", text[1]], ["yt-subscribe-note", text[2]]];
     labels.forEach(function (pair) {
       $(pair[0]).dataset.i18n = pair[1];
       $(pair[0]).textContent = t(pair[1]);
@@ -263,7 +278,7 @@
     var link = $("link").value;
     if (current === "podcast") { submitPodcast(link); return; }
     var data = current === "youtube"
-      ? { channel: $("f-channel").value, title: $("f-yt-title").value }
+      ? { channel: $("f-channel").value, title: $("f-yt-title").value, album: $("f-yt-album").value }
       : values();
     var problems = L.clientErrors(current, mediaType(), link, data, new Date().getFullYear());
     if (Object.keys(problems).length) {
@@ -273,7 +288,7 @@
     }
     var path = current === "youtube" ? "/api/youtube/download" : "/api/magnet";
     var body = current === "youtube"
-      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly())
+      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly(), data.album)
       : L.magnetPayload(link, mediaType(), data);
     $("submit").disabled = true;
     post(path, body).then(function (reply) {
@@ -371,6 +386,7 @@
     $("pack").checked = false;
     $("subscribe").checked = false;
     $("yt-target").value = "video";
+    shownTarget = "video";
     applyTarget();
     $("pc-subscribe").checked = false;
     $("pc-backfill").value = "0";

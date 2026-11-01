@@ -250,22 +250,27 @@ def _unique_target(folder: Path, name: str, size: int) -> tuple[Path, bool]:
     return target, False
 
 
-def place_episode(
-    source: Path, library: Path, podcast: str, published: date, title: str, extension: str
-) -> Path:
-    """Move a finished download into `<library>/<podcast>/` and return the final path.
+def file_into(source: Path, library: Path, parts: tuple[str, ...], name: str) -> Path:
+    """Move a finished download to `<library>/<parts...>/<name>` and return the final path.
 
-    Never overwrites: a different file with the same name gets ` (2)`. The folder must stay inside
-    the library. `source` and the library are on one file system (a rename); a copy is the
-    fallback.
+    The one place that files an audio or video download into a library (podcast episodes here,
+    tracks in `ytp.music`). Never overwrites: a different file with the same name gets ` (2)`, an
+    identical one (same name and size: a job interrupted right after filing) is recognised and not
+    copied again. The folder must stay inside the library (a symlink cannot lead out of it).
+    `source` and the library are on one file system (a rename); a copy is the fallback.
     """
-    folder = library / podcast
-    folder.mkdir(parents=True, exist_ok=True)
-    if not folder.resolve().is_relative_to(library.resolve()):
-        raise PodcastError("bad_feed", "the podcast folder would be outside the library")
-    target, already = _unique_target(
-        folder, episode_filename(published, title, extension), source.stat().st_size
-    )
+    # One level at a time, checking before creating: a symlink anywhere on the way (an artist
+    # folder pointing out of the library) must not get a new folder made behind it.
+    root = library.resolve()
+    folder = library
+    for part in parts:
+        folder = folder / part
+        if folder.exists() or folder.is_symlink():
+            if not folder.resolve().is_relative_to(root) or not folder.is_dir():
+                raise PodcastError("bad_feed", "the target folder would be outside the library")
+        else:
+            folder.mkdir()
+    target, already = _unique_target(folder, name, source.stat().st_size)
     if already:
         source.unlink(missing_ok=True)
         return target
@@ -276,6 +281,13 @@ def place_episode(
             raise
         shutil.move(str(source), str(target))
     return target
+
+
+def place_episode(
+    source: Path, library: Path, podcast: str, published: date, title: str, extension: str
+) -> Path:
+    """Move a finished download into `<library>/<podcast>/` as `<date> - <title>.<ext>`."""
+    return file_into(source, library, (podcast,), episode_filename(published, title, extension))
 
 
 def has_cover(folder: Path) -> bool:
