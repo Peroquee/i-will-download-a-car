@@ -20,11 +20,11 @@ from ytp_install.system import Lan, LoginUser  # noqa: E402
 NOW = datetime(2026, 11, 2, 9, 30, 0)
 DEBIAN = 'ID=debian\nVERSION_CODENAME=bookworm\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n'
 SECRETS = {
-    "vpn_password": "vpn-pass-SECRET-1",
-    "web_password": "web-pass-SECRET-2",
-    "qbit": "qbit-token-SECRET-3",
-    "jellyfin_key": "0123456789abcdef0123456789abcdef",
-    "alert_url": "http://ntfy.lan/topic-SECRET-4",
+    "vpn_password": "vpn-vpn-vpn-1",
+    "web_password": "web-web-web-2x",
+    "qbit": "qbit-qbit-qbit-3",
+    "jellyfin_key": "abababababababababababababababab",
+    "alert_url": "http://ntfy.lan/nnnn-4",
 }
 
 

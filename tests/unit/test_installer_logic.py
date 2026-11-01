@@ -134,7 +134,7 @@ def test_urls(value, ok):
 @pytest.mark.parametrize(
     ("value", "ok"),
     [
-        ("0123456789abcdef0123456789abcdef", True),
+        ("abababababababababababababababab", True),
         ("0123456789ABCDEF0123456789abcdef", True),
         ("0123", False),
         ("g" * 32, False),
@@ -199,7 +199,7 @@ def complete(**overrides) -> Answers:
         lan_subnet="192.168.178.0/24",
         vpn_user="u",
         vpn_password="p-secret-1",
-        qbit_password="q-secret-12345",
+        qbit_password="qbit-secret-qbit",
     )
     values.update(overrides)
     return Answers(**values)

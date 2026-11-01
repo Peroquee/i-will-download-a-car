@@ -166,7 +166,7 @@ def test_a_builtin_wireguard_provider(repo, tmp_path):
         ("How do you get your details", "2"),
         ("Provider name in lower case", "mullvad"),
         ("Connection type", "2"),
-        ("private key", "wg-private-key-SECRET-9"),
+        ("private key", "wgwg-wgwg-wgwg"),
         ("your address in the VPN", "10.64.222.21/32"),
         ("Country of the VPN server", "Germany"),
         ("Password for the web page", SECRETS["web_password"]),
@@ -180,10 +180,10 @@ def test_a_builtin_wireguard_provider(repo, tmp_path):
         "wireguard",
         "Germany",
     )
-    assert env["WIREGUARD_PRIVATE_KEY"] == "wg-private-key-SECRET-9"
+    assert env["WIREGUARD_PRIVATE_KEY"] == "wgwg-wgwg-wgwg"
     assert env["OPENVPN_CUSTOM_CONFIG"] == ""
     assert not runner.ran("render_ovpn.py"), "a built-in provider needs no file"
-    assert "wg-private-key-SECRET-9" not in whole_output(term, runner)
+    assert "wgwg-wgwg-wgwg" not in whole_output(term, runner)
 
 
 def test_a_wrong_answer_is_explained_and_asked_again(repo, tmp_path, ovpn):

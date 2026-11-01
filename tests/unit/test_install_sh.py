@@ -136,10 +136,14 @@ def test_python_is_installed_when_it_is_missing(sandbox, tmp_path):
     if os.geteuid() != 0:
         pytest.skip("needs root to reach the apt step")
     project, env, calls, _ = sandbox
-    # no python3 and an apt-get that records
-    (Path(env["PATH"].split(":")[0]) / "python3").unlink()
-    fake(Path(env["PATH"].split(":")[0]), "apt-get", f'echo "apt-get $*" >> {calls}')
-    result = run(project, env)
+    bin_dir = Path(env["PATH"].split(":")[0])
+    (bin_dir / "python3").unlink()
+    fake(bin_dir, "apt-get", f'echo "apt-get $*" >> {calls}')
+    tools = tmp_path / "tools"  # only what the script needs, so no real python3 is found
+    tools.mkdir()
+    for name in ("bash", "dirname", "id"):
+        (tools / name).symlink_to(shutil.which(name) or f"/usr/bin/{name}")
+    result = run(project, {**env, "PATH": f"{bin_dir}:{tools}"})
     assert "apt-get install -y python3" in calls.read_text(), result.stderr
 
 

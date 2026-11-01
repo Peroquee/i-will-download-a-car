@@ -31,8 +31,8 @@ pytestmark = [
     ),
 ]
 
-VPN_PASSWORD = "vpn-pass-SECRET-1"
-WEB_PASSWORD = "web-pass-SECRET-2"
+VPN_PASSWORD = "vpn-vpn-vpn-1"
+WEB_PASSWORD = "web-web-web-2x"
 
 
 def answers(tmp_path: Path) -> Path:
