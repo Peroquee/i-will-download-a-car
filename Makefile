@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key vpn-abuse-test
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -20,6 +20,7 @@ help:
 	@echo "proxy-password  set the proxy login in .env (asks for the password, hashes it with Caddy)"
 	@echo "proxy-check     from a LAN machine: 401 without login, 200 with it, backend ports closed"
 	@echo "watchdog-key    create the VPN watchdog's read-only gluetun key (.env and gluetun's auth file)"
+	@echo "vpn-abuse-test  on the VM: drop the VPN CYCLES times (default 5), check the watchdog, leaks and recovery"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
 $(VENV)/.installed: requirements-test.txt requirements-lint.txt requirements-app.txt
@@ -71,6 +72,10 @@ proxy-check:
 
 watchdog-key:
 	scripts/watchdog/setup_key.py
+
+CYCLES ?= 5
+vpn-abuse-test:
+	scripts/vpn/vpn-abuse-test.sh --cycles $(CYCLES)
 
 snapshot: venv
 	UPDATE_SNAPSHOTS=1 $(PYTEST) tests/regression -k snapshot

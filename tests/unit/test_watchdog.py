@@ -619,3 +619,79 @@ def test_the_module_needs_nothing_but_the_standard_library_and_our_clients():
     assert "fastapi" not in source
     assert "sqlite" not in source
     assert "ytp.db" not in source
+
+
+# --- the probe helpers used by the abuse test script ----------------------
+
+
+def probe_env(qbit_server: FakeQbittorrent, port: int = 0) -> dict[str, str]:
+    return {
+        "GLUETUN_CONTROL_APIKEY": "k" * 22,
+        "QBIT_PASSWORD": PASSWORD,
+        "QBIT_USER": USER,
+        "QBIT_URL": qbit_server.url,
+        "WATCHDOG_STATUS_PORT": str(port),
+    }
+
+
+def test_probe_counts_and_hashes_read_the_torrents(qbit_server):
+    env = probe_env(qbit_server)
+    assert wd.probe("counts", env=env) == (0, "running=2 paused=1")
+    assert wd.probe("hashes", env=env) == (0, f"{A},{C}")
+
+
+def test_probe_resume_resumes_exactly_the_given_torrents(qbit_server):
+    env = probe_env(qbit_server)
+    assert wd.probe("resume", f"{A},{C}", env=env) == (0, "ok")
+    assert qbit_server.calls("torrents/start")[0].form == {"hashes": [f"{A}|{C}"]}
+    assert wd.probe("resume", "", env=env) == (0, "ok"), "nothing to resume is fine"
+    assert len(qbit_server.calls("torrents/start")) == 1
+
+
+def test_probe_resume_refuses_anything_that_is_not_an_infohash(qbit_server):
+    code, text = wd.probe("resume", "all", env=probe_env(qbit_server))
+    assert code == 2
+    assert "infohashes" in text
+    assert qbit_server.calls("torrents/start") == []
+
+
+def test_probe_state_reads_the_watchdogs_own_status_page(gluetun, qbit_server):
+    dog, clock = make(gluetun, qbit_server)
+    steps(dog, clock, 1)
+    server = wd.StatusServer(dog, 0)
+    server.start()
+    try:
+        assert wd.probe("state", env=probe_env(qbit_server, server.port)) == (0, "ok")
+        gluetun.status = "stopped"
+        steps(dog, clock, 3)
+        assert wd.probe("state", env=probe_env(qbit_server, server.port)) == (0, "down")
+    finally:
+        server.stop()
+
+
+def test_probes_say_unreachable_instead_of_raising(qbit_server):
+    env = probe_env(qbit_server, free_port())
+    assert wd.probe("state", env=env) == (1, "unreachable")
+    qbit_server.stop()
+    assert wd.probe("counts", env=env) == (1, "unreachable")
+
+
+def test_an_unknown_probe_and_a_bad_configuration_are_exit_2(qbit_server):
+    assert wd.probe("nonsense", env=probe_env(qbit_server))[0] == 2
+    assert wd.probe("counts", env={})[0] == 2
+
+
+def test_main_probe_prints_the_text_and_returns_the_code(qbit_server, monkeypatch, capsys):
+    for name, value in probe_env(qbit_server).items():
+        monkeypatch.setenv(name, value)
+    assert wd.main(["--probe", "counts"]) == 0
+    assert capsys.readouterr().out.strip() == "running=2 paused=1"
+
+
+@pytest.mark.security
+def test_probe_output_holds_no_names_keys_or_addresses(qbit_server):
+    for what in ("counts", "hashes"):
+        _, text = wd.probe(what, env=probe_env(qbit_server))
+        assert PASSWORD not in text
+        assert "127.0.0.1" not in text
+        assert "name" not in text

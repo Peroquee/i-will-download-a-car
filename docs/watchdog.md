@@ -89,6 +89,44 @@ service; the stack never asks one). Put what you find in `.env`, for example
 `HOME_PUBLIC_IP=84.150.20.30, 2003:abcd:1200::/56`. Prefixes survive provider re-assignments of
 the exact address better than single addresses; update it if your provider renumbers you.
 
+## Abuse test (issue #24)
+
+`make vpn-abuse-test CYCLES=20` (script: `scripts/vpn/vpn-abuse-test.sh`, `--dry-run` shows the
+plan) drops the VPN again and again on the real stack and checks that the second layer works
+every single time. Needs the stack up and healthy (including the watchdog: `make watchdog-key`
+done) and **one torrent running** in qBittorrent (a small legal test torrent). It REALLY drops
+the VPN, so downloads stop for a minute per cycle; it refuses to start unless everything is healthy
+right now, always starts gluetun again and resumes the torrents it paused.
+
+Four failure modes rotate through the cycles (`--modes stop,vpn` to choose):
+
+| mode | what happens | why it matters |
+|---|---|---|
+| `stop` | `docker stop gluetun` | the container goes away |
+| `kill` | `docker kill gluetun` (SIGKILL) | no clean shutdown, the firewall rules may be left half-way |
+| `restart` | `docker restart gluetun` | down and up again by itself |
+| `vpn` | `kill -9` of openvpn inside gluetun | the container stays up, only the tunnel dies, so qBittorrent is reachable and **the pause can be sent** |
+
+Per cycle it checks, and prints one `PASS`/`FAIL` line each:
+
+1. the watchdog turns `down` within `AB_DETECT_TIMEOUT` seconds (default 20);
+2. **no leak**: from the moment the VPN is broken until it is back, a probe inside qBittorrent's
+   network asks the internet every 0.5 s. It must never see the **home** address (it compares
+   against what this host sees, and never prints either) and must see "no connection" at least
+   once, so the window was real;
+3. `vpn` mode: all torrents are paused within 20 s of the watchdog noticing. In the other modes
+   qBittorrent is unreachable together with gluetun (it shares its network), so no pause can be
+   sent, and nothing can leak either: that case is covered by check 2;
+4. recovery: gluetun healthy, the watchdog `ok`, qBittorrent has a VPN address again;
+5. resume behaviour follows `WATCHDOG_RESUME_AFTER`: `0` = the torrents **stay paused** (the test
+   resumes them itself), N = they are running again N seconds after the VPN is stable.
+
+It ends with a table (cycle, mode, detection time, paused, leaks, recovery, resume, result) and
+exits 0 only if every check of every cycle passed (1 on a failure, 2 when the stack was not ready).
+The helper the script uses inside the watchdog container, `python -m ytp.watchdog --probe
+state|counts|hashes|resume`, prints plain words only (no names, keys or addresses). The script and
+the helper are unit-tested with a stub docker (no VPN needed in CI); the real run is yours on the VM.
+
 ## Alerts (issue #22)
 
 Off by default. Set `ALERT_URL` in `.env` to get a message when the VPN goes down **and** when
