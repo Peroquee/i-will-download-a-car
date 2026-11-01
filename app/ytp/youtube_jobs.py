@@ -20,6 +20,10 @@ submitted and stored in the job's metadata:
   the audio stream (m4a/opus, no re-encode) with tags and cover; without it the video goes into the
   podcast folder with its thumbnail beside it.
 
+* `music`: `<Musik>/<artist>/<album>/<title>.<ext>` like a torrent album (`channel` is the
+  artist, `album` the album, `title` the track); audio only is optional here too, and the file gets
+  the artist/album/title tags Jellyfin's music library reads.
+
 The job's `external_id` is the video id for the `video` target (unchanged) and `<id>@<target>` for
 the others, so the same video can be a video AND a podcast episode, but is queued once per target.
 """
@@ -44,6 +48,7 @@ from .config import Settings
 from .db import Database
 from .jobs import Job
 from .metadata import Name
+from .music import place_track
 from .podcasts import PodcastError, place_episode
 from .youtube import ProbeError, VideoRef, parse_video_url
 from .youtube_download import (
@@ -57,7 +62,8 @@ from .youtube_download import (
 logger = logging.getLogger(__name__)
 
 JOB_TYPE = "youtube"
-TARGETS = ("video", "podcast")
+LIBRARY_KEYS = {"video": "youtube", "podcast": "podcasts", "music": "music"}
+TARGETS = ("video", "podcast", "music")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -75,8 +81,9 @@ class YoutubeJobMetadata(BaseModel):
     video_id: str
     channel: Name
     title: Name
-    target: Literal["video", "podcast"] = "video"
+    target: Literal["video", "podcast", "music"] = "video"
     audio_only: bool = False
+    album: Name | None = None  # music only (issue #36)
     # YYYY-MM-DD, when the feed told us (the poller); the download's own upload date wins.
     published: str | None = None
 
@@ -103,6 +110,10 @@ class YoutubeJobMetadata(BaseModel):
     def _audio_needs_a_target(self) -> YoutubeJobMetadata:
         if self.audio_only and self.target == "video":
             raise ValueError("audio_only needs a target other than video")
+        if self.target == "music" and self.album is None:
+            raise ValueError("a music track needs an album")
+        if self.target != "music" and self.album is not None:
+            raise ValueError("an album is for music only")
         return self
 
 
@@ -182,7 +193,7 @@ class YoutubeWorker:
         ):
             self._fail(job, "the stored job data does not match its video; submit it again")
             return
-        library_key = "podcasts" if meta.target == "podcast" else "youtube"
+        library_key = LIBRARY_KEYS[meta.target]
         library = self.settings.library_path(library_key)
         if not library.is_dir():
             self._fail(job, f"the library folder {library.name} does not exist (run make layout)")
@@ -213,6 +224,8 @@ class YoutubeWorker:
         try:
             if meta.target == "podcast":
                 self._file_podcast(ref, meta, downloaded, library)
+            elif meta.target == "music":
+                self._file_music(ref, meta, downloaded, library)
             else:
                 place(downloaded, library, meta.channel, meta.title, ref.video_id)
         except (DownloadFailed, PodcastError, OSError) as exc:
@@ -220,8 +233,36 @@ class YoutubeWorker:
             return
         if jobs.transition(self.db, job.id, "done", expected=("organizing",)):
             logger.info("job done", extra={"job_id": job.id, "video_id": ref.video_id})
-            folder_key = "podcasts" if meta.target == "podcast" else "youtube"
-            self.refresher.request_refresh(self.settings.library_dirs[folder_key])
+            self.refresher.request_refresh(self.settings.library_dirs[LIBRARY_KEYS[meta.target]])
+
+    def _file_music(
+        self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path
+    ) -> None:
+        """A video as a track: `<artist>/<album>/<title>.<ext>`, tagged when it is audio only."""
+        published = upload_date(downloaded.info)
+        if downloaded.audio_only:
+            tagged = embed_tags(
+                downloaded.video,
+                Tags(
+                    title=meta.title,
+                    artist=meta.channel,
+                    album=meta.album or "",
+                    album_artist=meta.channel,
+                    published=published,
+                    comment=ref.url,
+                ),
+                downloaded.thumbnail,
+            )
+            if not tagged:
+                logger.warning("track filed without tags", extra={"video_id": ref.video_id})
+        target = place_track(
+            downloaded.video, library, meta.channel, meta.album or "", meta.title,
+            downloaded.video.suffix.lower(),
+        )  # fmt: skip
+        if downloaded.thumbnail is not None and not downloaded.audio_only:
+            sidecar = target.with_suffix(".jpg")
+            if not sidecar.exists() and not sidecar.is_symlink():
+                shutil.move(str(downloaded.thumbnail), str(sidecar))
 
     def _file_podcast(
         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path

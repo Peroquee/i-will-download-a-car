@@ -337,6 +337,7 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "subs.podcast",
         "subs.target_podcast",
         "yt.podcast",
+        "yt.album",
     }, same
 
 
@@ -734,7 +735,7 @@ def test_the_page_has_the_target_choice_and_the_audio_checkbox():
         assert f'id="{element_id}"' in HTML
     target = re.search(r'<select id="yt-target".*?</select>', HTML, re.S)
     assert target
-    assert re.findall(r'<option value="(\w+)"', target.group(0)) == ["video", "podcast"]
+    assert re.findall(r'<option value="(\w+)"', target.group(0)) == ["video", "podcast", "music"]
     assert 'id="yt-audio-row" hidden' in HTML, "audio only is offered only for podcast episodes"
 
 
@@ -785,3 +786,52 @@ def test_what_the_page_sends_is_accepted_by_the_server(client):
     ):
         response = client.post("/api/youtube/download", json=run_node(call))
         assert response.status_code in {200, 201}, (call, response.text)
+
+
+# --- YouTube as music (#36) ---------------------------------------------------------------------
+
+
+def test_the_page_has_the_music_fields():
+    for element_id in ("yt-album-row", "f-yt-album", "f-yt-album-error", "yt-subscribe-row"):
+        assert f'id="{element_id}"' in HTML
+    assert 'id="yt-album-row" class="row" hidden' in HTML, (
+        "the album field shows for the music target only"
+    )
+    assert 'for="f-yt-album"' in HTML
+
+
+@needs_node
+def test_the_music_payload_carries_the_album_only_when_given():
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    single = run_node(f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', true, '  ')")
+    assert single == {
+        "url": url,
+        "channel": "Kraftwerk",
+        "title": "Autobahn",
+        "target": "music",
+        "audio_only": True,
+    }
+    album = run_node(
+        f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', true, ' YouTube ')"
+    )
+    assert album["album"] == "YouTube"
+    video = run_node(f"L.youtubePayload('{url}', 'K', 'A', 'video', true, 'X')")
+    assert "album" not in video
+    assert "target" not in video
+    podcast = run_node(f"L.youtubePayload('{url}', 'K', 'A', 'podcast', false, 'X')")
+    assert "album" not in podcast
+
+
+@needs_node
+def test_what_the_page_sends_for_music_is_accepted_by_the_server(client):
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    for call in (
+        f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', true, '')",
+        f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', false, 'Album')",
+    ):
+        response = client.post("/api/youtube/download", json=run_node(call))
+        assert response.status_code in {200, 201}, (call, response.text)
+
+
+def test_a_422_on_the_album_lands_on_the_album_field():
+    assert '{ channel: $("f-channel"), title: $("f-yt-title"), album: $("f-yt-album") }' in APP_JS

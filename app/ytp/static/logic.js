@@ -60,13 +60,15 @@
     return { magnet: String(link).trim(), metadata: magnetMetadata(type, values) };
   }
 
-  /* target: "video" (the default) or "podcast"; audioOnly only means something for a podcast. */
-  function youtubePayload(link, channel, title, target, audioOnly) {
+  /* target: "video" (the default), "podcast" or "music"; audioOnly means nothing for a video. */
+  function youtubePayload(link, channel, title, target, audioOnly, album) {
     var body = { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
-    if (target === "podcast") {
-      body.target = "podcast";
+    if (target === "podcast" || target === "music") {
+      body.target = target;
       if (audioOnly) body.audio_only = true;
     }
+    /* Music: channel is the artist, title the track; an empty album means a single (the server names it). */
+    if (target === "music" && album != null && String(album).trim()) body.album = String(album).trim();
     return body;
   }
 
