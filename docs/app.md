@@ -125,6 +125,34 @@ status `queued` again, new metadata, answered `201`). A hex, an upper-case or a 
 the same infohash is the same torrent. The log has the job id and infohash, never the link
 (trackers can carry a private passkey).
 
+## Scheduler (issue #12)
+
+APScheduler 3 (`AsyncIOScheduler`) runs inside the app's event loop; `ytp.scheduler.AppScheduler`
+starts with the app (once the database is open) and stops with it. Later jobs (the reconciler
+#15, the YouTube poller #20, the VPN watchdog #21) are registered through
+`AppScheduler.add_interval_job(func, job_id=..., seconds=...)`, which gives every job:
+
+- **no overlap**: `max_instances=1` and `coalesce=True`. A run that is still going when the next
+  one is due makes that one be skipped (a warning `job skipped: the previous run is still going`
+  is logged) and a backlog of missed runs collapses into one;
+- **failure containment**: an exception is logged (`job failed`, with the traceback) and the job
+  stays scheduled; other jobs are unaffected;
+- **no blocking**: plain functions run in worker threads, coroutine functions on the loop.
+
+Jobs are registered **by the code at every start** (`replace_existing`), not stored in a job
+store, so after a restart or an update the schedule is exactly what the code says. State that a
+job must keep between runs lives in the database (`app_state`, `jobs`, `subscriptions`). I chose
+this over APScheduler's SQLAlchemy job store, which would add SQLAlchemy to the image to store
+schedules that the code already defines. "Survives a restart" is shown by the placeholder job:
+the **heartbeat** (every 30 s, first run at once) writes `scheduler.last_heartbeat` to
+`app_state`; at start the app logs `scheduler started` with the `previous_heartbeat` the last run
+left behind.
+
+`/health` has `checks.scheduler`: `ok`, `stalled: no heartbeat for N s` (after three missed
+heartbeats, which also catches a stuck event loop; the app turns unhealthy), or
+`disabled: no database`. APScheduler's own per-run INFO lines are silenced (a heartbeat would be
+5,760 lines a day).
+
 ## Database (issue #9)
 
 The app keeps its jobs and YouTube subscriptions in one SQLite file, `/config/app.db`
