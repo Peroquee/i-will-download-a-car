@@ -82,6 +82,7 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/jobs/{job_id}/retry",
         "/api/subscriptions",  # channel subscriptions (#19)
         "/api/subscriptions/{subscription_id}",
+        "/api/subscriptions/{subscription_id}/poll",  # check now (#27)
         "/",
         "/static",  # the form's files (#25)
     }

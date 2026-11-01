@@ -118,6 +118,8 @@ the id is looked up **once**, when subscribing, and stored.
   until the poller of #20 has run; it records them with `subscriptions.record_poll`).
 - `DELETE /api/subscriptions/{id}` unsubscribes (204; 404 if unknown). Videos already downloaded
   stay where they are.
+- `POST /api/subscriptions/{id}/poll` is the "check now" button of the page (#27): it polls that
+  channel at once (see Channel polling below) and answers with the subscription and `queued`.
 
 ## Channel polling (issue #20)
 

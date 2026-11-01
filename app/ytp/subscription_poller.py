@@ -50,6 +50,10 @@ MAX_CHANNELS_PER_RUN = 20
 PAUSE_SECONDS = (3.0, 8.0)  # between two channels of one run
 
 
+class PollBusy(Exception):
+    """A manual poll is already running."""
+
+
 @dataclass
 class RunResult:
     polled: int = 0
@@ -100,6 +104,7 @@ class SubscriptionPoller:
         self._rng = rng or random.Random()
         self._pause = pause
         self.stop = threading.Event()  # set at shutdown: a run in progress ends early
+        self._manual = threading.Lock()
 
     # -- which channels ----------------------------------------------------------------------
 
@@ -146,6 +151,21 @@ class SubscriptionPoller:
             "channel polled",
             extra={"subscription_id": sub.id, "entries": len(entries), "queued": queued},
         )
+        return queued
+
+    def poll_now(self, sub: Subscription) -> int:
+        """The "check now" button (#27): poll one channel at once, whatever its interval.
+
+        One manual poll at a time (PollBusy otherwise). Raises FeedError like `poll`; the worker
+        is woken if something was queued."""
+        if not self._manual.acquire(blocking=False):
+            raise PollBusy
+        try:
+            queued = self.poll(sub)
+        finally:
+            self._manual.release()
+        if queued and self.worker is not None:
+            self.worker.wake()
         return queued
 
     def run_once(self) -> RunResult:

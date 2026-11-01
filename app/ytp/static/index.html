@@ -173,6 +173,31 @@
       <p id="jobs-empty" class="note" data-i18n="jobs.empty" hidden></p>
     </section>
 
+    <section class="subs" aria-labelledby="subs-title">
+      <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
+      <form id="subs-form" autocomplete="off" novalidate>
+        <div class="row">
+          <label class="field" for="subs-channel" data-i18n="subs.channel"></label>
+          <input id="subs-channel" type="text" inputmode="url" spellcheck="false" autocapitalize="off"
+                 autocorrect="off" data-i18n-placeholder="subs.placeholder" aria-describedby="subs-note subs-error">
+          <p id="subs-note" class="note" data-i18n="subs.note"></p>
+        </div>
+        <div class="row">
+          <label class="field" for="subs-backfill" data-i18n="subs.backfill"></label>
+          <input id="subs-backfill" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="subs-backfill-note">
+          <p id="subs-backfill-note" class="note" data-i18n="subs.backfill_note"></p>
+        </div>
+        <p id="subs-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="submit" class="primary" id="subs-add" data-i18n="subs.add"></button>
+        </div>
+        <p id="subs-result" class="result" role="status" aria-live="polite"></p>
+      </form>
+      <p id="subs-load-error" class="error" role="status"></p>
+      <ul id="subs-list" class="job-list"></ul>
+      <p id="subs-empty" class="note" data-i18n="subs.empty" hidden></p>
+    </section>
+
     <details class="help">
       <summary data-i18n="help.title"></summary>
       <p data-i18n="help.body"></p>
@@ -291,6 +316,31 @@
     "sub.duplicate": "Der Kanal „{name}“ war schon abonniert.",
     "sub.failed": "Das Abonnieren hat nicht geklappt.",
     "err.channel_invalid": "Das ist keine Kanal-Adresse.",
+    "subs.title": "Abonnierte Kanäle",
+    "subs.channel": "Kanal hinzufügen",
+    "subs.placeholder": "@name, Kanal-Link oder Link eines Videos",
+    "subs.note": "Neue Videos eines Kanals werden automatisch geladen, etwa stündlich geprüft.",
+    "subs.backfill": "Ältere Videos mitnehmen",
+    "subs.backfill_note": "0 = nur Videos, die nach dem Abonnieren erscheinen. Höchstens 15 (so viele zeigt YouTube).",
+    "subs.add": "Abonnieren",
+    "subs.empty": "Noch keine Kanäle abonniert.",
+    "subs.load_error": "Die Kanalliste lässt sich gerade nicht laden.",
+    "subs.added": "Kanal „{name}“ abonniert.",
+    "subs.already": "Der Kanal „{name}“ war schon abonniert.",
+    "subs.add_failed": "Das Abonnieren hat nicht geklappt.",
+    "subs.never": "noch nie geprüft",
+    "subs.checked": "geprüft {when}",
+    "subs.ok": "in Ordnung",
+    "subs.poll": "Jetzt prüfen",
+    "subs.polling": "Wird geprüft …",
+    "subs.polled_none": "Geprüft: keine neuen Videos.",
+    "subs.polled": "Geprüft: {n} neue Videos in die Warteschlange gestellt.",
+    "subs.poll_failed": "Das Prüfen hat nicht geklappt.",
+    "subs.remove": "Entfernen",
+    "subs.confirm": "Wirklich entfernen?",
+    "subs.remove_failed": "Das Entfernen hat nicht geklappt.",
+    "subs.removed_note": "Bereits geladene Videos bleiben erhalten.",
+    "err.int_out_of_range": "Eine Zahl von 0 bis 15.",
     "help.title": "Hilfe",
     "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Das Ergebnis erscheint später in Jellyfin."
   },
@@ -403,6 +453,31 @@
     "sub.duplicate": "The channel \"{name}\" was already subscribed.",
     "sub.failed": "Subscribing did not work.",
     "err.channel_invalid": "This is not a channel address.",
+    "subs.title": "Subscribed channels",
+    "subs.channel": "Add a channel",
+    "subs.placeholder": "@name, channel link or the link of a video",
+    "subs.note": "New videos of a channel are downloaded automatically; it is checked about hourly.",
+    "subs.backfill": "Also take older videos",
+    "subs.backfill_note": "0 = only videos published after subscribing. At most 15 (that is all YouTube shows).",
+    "subs.add": "Subscribe",
+    "subs.empty": "No channels subscribed yet.",
+    "subs.load_error": "The channel list cannot be loaded right now.",
+    "subs.added": "Subscribed to the channel \"{name}\".",
+    "subs.already": "The channel \"{name}\" was already subscribed.",
+    "subs.add_failed": "Subscribing did not work.",
+    "subs.never": "never checked",
+    "subs.checked": "checked {when}",
+    "subs.ok": "fine",
+    "subs.poll": "Check now",
+    "subs.polling": "Checking ...",
+    "subs.polled_none": "Checked: no new videos.",
+    "subs.polled": "Checked: {n} new videos queued.",
+    "subs.poll_failed": "Checking did not work.",
+    "subs.remove": "Remove",
+    "subs.confirm": "Really remove?",
+    "subs.remove_failed": "Removing did not work.",
+    "subs.removed_note": "Videos that were already downloaded stay.",
+    "err.int_out_of_range": "A number from 0 to 15.",
     "help.title": "Help",
     "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. The result appears in Jellyfin later."
   }

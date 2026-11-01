@@ -115,6 +115,28 @@ def test_any_doctype_or_entity_declaration_is_refused(payload):
     assert caught.value.kind == "bad_feed"
 
 
+@pytest.mark.security
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-32"])
+def test_a_feed_in_another_encoding_cannot_hide_a_doctype(encoding):
+    xml = (
+        '<?xml version="1.0"?><!DOCTYPE feed [<!ENTITY a "b">]>'
+        '<feed xmlns="http://www.w3.org/2005/Atom"/>'
+    )
+    with pytest.raises(FeedError) as caught:
+        parse_feed(xml.encode(encoding), CID)
+    assert "UTF-8" in caught.value.message
+
+
+@pytest.mark.security
+def test_invalid_utf8_is_refused():
+    with pytest.raises(FeedError):
+        parse_feed(b"<feed xmlns='http://www.w3.org/2005/Atom'><title>\xff\xfe</title></feed>", CID)
+
+
+def test_a_utf8_byte_order_mark_is_fine():
+    assert parse_feed(b"\xef\xbb\xbf" + feed(NEWER), CID)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
