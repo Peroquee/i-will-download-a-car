@@ -81,5 +81,5 @@ def test_c4_qbittorrent_recovers_from_a_restarted_gluetun_without_a_manual_step(
     brings it back into gluetun's new namespace."""
     qbit = services(load_compose(COMPOSE))["qbittorrent"]
     assert qbit["restart"] == "unless-stopped"
-    assert any(v.endswith(":/custom-services.d/netwatch:ro") for v in qbit["volumes"])
+    assert "./scripts/qbittorrent/services:/custom-services.d:ro" in qbit["volumes"]
     assert qbit["healthcheck"]["test"] == ["CMD", "/custom-services.d/netwatch", "--check"]

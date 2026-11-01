@@ -490,7 +490,9 @@ def test_layout_reports_a_failing_hardlink_and_cleans_up(host):
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
-def test_layout_reports_an_unwritable_download_folder(host):
+def test_layout_without_write_access_is_skipped_with_a_hint_not_failed(host):
+    """The login user is not in the media group, so it cannot write the link-test file.
+    The folders are fine, so this must not be a FAIL; it says what to do instead."""
     host.layout()
     folder = host.root / "data" / "downloads" / "movies"
     folder.chmod(0o555)
@@ -498,5 +500,62 @@ def test_layout_reports_an_unwritable_download_folder(host):
         result = _layout(host)
     finally:
         folder.chmod(0o755)
+    assert status(result, "layout") == "SKIP"
+    assert result.returncode == 0
+    assert "NOT tested" in result.stdout
+    assert "sudo scripts/host/check-host.sh --only layout" in result.stdout
+    assert "usermod -aG media" in result.stdout
+    assert not list((host.root / "data").rglob(".ytp-linktest*"))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_layout_without_write_access_still_fails_when_folders_are_missing(host):
+    host.layout(skip=("Youtube",))
+    (host.root / "data" / "downloads" / "movies").chmod(0o555)
+    try:
+        result = _layout(host)
+    finally:
+        (host.root / "data" / "downloads" / "movies").chmod(0o755)
     assert status(result, "layout") == "FAIL"
-    assert "cannot write to" in result.stdout
+    assert "Youtube" in result.stdout
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_layout_runs_the_link_test_as_the_media_owner_when_sudo_allows_it(host):
+    host.layout()
+    folder = host.root / "data" / "downloads" / "movies"
+    # A stand-in for `sudo -n -u '#UID' -g '#GID' CMD...` that is allowed to write.
+    host.stubs.add(
+        "sudo",
+        f"""
+echo "sudo $*" >> "{host.tmp}/sudo.log"
+[ "$1" = "-n" ] && shift
+[ "$1" = "-u" ] && shift 2
+[ "$1" = "-g" ] && shift 2
+chmod 755 "{folder}"
+exec "$@"
+""",
+    )
+    folder.chmod(0o555)
+    try:
+        result = _layout(host)
+    finally:
+        folder.chmod(0o755)
+    assert status(result, "layout") == "PASS", result.stdout
+    assert f"run as {host.puid}:{host.pgid} via sudo" in result.stdout
+    log = (host.tmp / "sudo.log").read_text()
+    assert f"-u #{host.puid} -g #{host.pgid}" in log
+    assert not list((host.root / "data").rglob(".ytp-linktest*"))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_layout_skips_when_sudo_would_need_a_password(host):
+    host.layout()
+    host.stubs.add("sudo", "exit 1")  # `sudo -n` refuses: a password would be needed
+    folder = host.root / "data" / "downloads" / "movies"
+    folder.chmod(0o555)
+    try:
+        result = _layout(host)
+    finally:
+        folder.chmod(0o755)
+    assert status(result, "layout") == "SKIP"

@@ -111,7 +111,14 @@ def test_missing_recovery_fails_and_names_the_manual_fix(run):
     assert "no connection" in result.stdout
 
 
-def test_recovery_needs_no_restart_of_qbittorrent(run):
+def test_recovery_is_reported_as_automatic_not_as_a_missing_restart(run):
+    """netwatch restarts the container by design, so the output must not claim otherwise."""
+    result = run()
+    assert "recovered automatically (netwatch restarted the container)" in result.stdout
+    assert "without restarting" not in result.stdout
+
+
+def test_the_script_does_not_restart_qbittorrent_itself(run):
     run()
     assert not [line for line in run.log() if line.startswith(("restart", "stop id-qbittorrent"))]
 

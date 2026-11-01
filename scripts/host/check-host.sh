@@ -227,27 +227,49 @@ check_layout() {
     fi
   done
 
+  # The link test writes into the download and library folders. They belong to PUID:PGID with
+  # mode 2775, so a login user outside that group cannot write there. Then the test runs as
+  # PUID:PGID through `sudo -n` when that works without a password; otherwise it is skipped
+  # (not failed) with a hint, because the folders and filesystems were checked already.
+  local -a as_owner=()
+  local note="" puid pgid
+  for i in "${!types[@]}"; do
+    if [ ! -w "$root/downloads/${types[$i]}" ] || [ ! -w "$root/${names[$i]}" ]; then
+      puid="$(env_value PUID || true)"
+      pgid="$(env_value PGID || true)"
+      if [[ "$puid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ ]] \
+        && sudo -n -u "#$puid" -g "#$pgid" true >/dev/null 2>&1; then
+        as_owner=(sudo -n -u "#$puid" -g "#$pgid")
+        note=" (run as $puid:$pgid via sudo)"
+      else
+        skip layout "folders exist and share one filesystem, but hardlinks were NOT tested: no write access here. Run with sudo (sudo scripts/host/check-host.sh --only layout), or add your user to the media group (sudo usermod -aG media \$USER, then log in again)"
+        return
+      fi
+      break
+    fi
+  done
+
   local src dst links err
   for i in "${!types[@]}"; do
     src="$root/downloads/${types[$i]}/.ytp-linktest.$$"
     dst="$root/${names[$i]}/.ytp-linktest.$$"
-    if ! : >"$src" 2>/dev/null; then
+    if ! "${as_owner[@]}" touch "$src" 2>/dev/null; then
       fail layout "cannot write to $root/downloads/${types[$i]} (owner and mode: sudo scripts/host/create-layout.sh)"
       return
     fi
-    if ! err="$(ln "$src" "$dst" 2>&1)"; then
-      rm -f "$src" "$dst"
+    if ! err="$("${as_owner[@]}" ln "$src" "$dst" 2>&1)"; then
+      "${as_owner[@]}" rm -f "$src" "$dst"
       fail layout "hardlink downloads/${types[$i]} -> ${names[$i]} failed: $err"
       return
     fi
-    links="$(stat -c '%h' "$src")"
-    rm -f "$src" "$dst"
+    links="$("${as_owner[@]}" stat -c '%h' "$src")"
+    "${as_owner[@]}" rm -f "$src" "$dst"
     if [ "$links" != "2" ]; then
       fail layout "hardlink downloads/${types[$i]} -> ${names[$i]} has link count $links, expected 2"
       return
     fi
   done
-  pass layout "hardlinks work from downloads/ into ${names[0]}, ${names[1]}, ${names[2]}, ${names[3]} (link count 2); ${names[4]} is on the same filesystem"
+  pass layout "hardlinks work from downloads/ into ${names[0]}, ${names[1]}, ${names[2]}, ${names[3]} (link count 2)$note; ${names[4]} is on the same filesystem"
 }
 
 main() {

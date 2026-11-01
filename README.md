@@ -36,7 +36,7 @@ make killswitch-test     # stops gluetun, checks qbittorrent has no network, the
 
 Passes when the output ends with `OK: the killswitch holds and qbittorrent recovers`:
 qBittorrent exits through a VPN address (`VPN IP`), has `no connection` while gluetun is
-stopped (never a `HOME IP LEAK`), and gets its connection back by itself after gluetun
+stopped (never a `HOME IP LEAK`), and gets its connection back automatically (netwatch restarts the container) after gluetun
 is started again. Only verdicts are printed, never an address. Details, and what to do when
 it fails: [docs/host-setup.md](docs/host-setup.md#5c-prove-the-killswitch-issue-4).
 

@@ -216,6 +216,6 @@ def test_the_render_script_writes_where_gluetun_reads_the_custom_config():
 
 def test_qbittorrent_watches_its_network_namespace():
     qbit = services(COMPOSE)["qbittorrent"]
-    assert "./scripts/qbittorrent/netwatch.sh:/custom-services.d/netwatch:ro" in qbit["volumes"]
+    assert "./scripts/qbittorrent/services:/custom-services.d:ro" in qbit["volumes"]
     assert qbit["healthcheck"]["test"] == ["CMD", "/custom-services.d/netwatch", "--check"]
-    assert (REPO_ROOT / "scripts" / "qbittorrent" / "netwatch.sh").exists()
+    assert (REPO_ROOT / "scripts" / "qbittorrent" / "services" / "netwatch").exists()
