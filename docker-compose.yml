@@ -127,6 +127,13 @@ services:
       # (docs/jellyfin.md). The app starts without them and says so in its log.
       JELLYFIN_URL: ${JELLYFIN_URL:-}
       JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+      # qBittorrent's Web UI is in gluetun's network namespace: over the bridge it is gluetun:8080
+      # (WEBUI_PORT is fixed at 8080 above). The login is the one scripts/qbittorrent/seed_config.py
+      # set; the password is a secret you put in .env (optional here: the app starts without it
+      # and says downloads are disabled).
+      QBIT_URL: http://gluetun:8080
+      QBIT_USER: ${QBIT_USER:-admin}
+      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.

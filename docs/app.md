@@ -26,6 +26,7 @@ the app the ones it needs):
 |---|---|---|
 | `MEDIA_DIR_MOVIES`, `_SERIES`, `_AUDIOBOOKS`, `_MUSIC`, `_YOUTUBE` | library folder names relative to `/data` | required |
 | `JELLYFIN_URL`, `JELLYFIN_API_KEY` | the external Jellyfin (docs/jellyfin.md) | empty: refreshes disabled, warned in the log |
+| `QBIT_URL`, `QBIT_USER`, `QBIT_PASSWORD` | qBittorrent's Web UI (over the bridge: `http://gluetun:8080`) and its login | password empty: downloads disabled, warned in the log |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | `INFO` |
 | `DATA_ROOT`, `CONFIG_DIR` | where the volumes are mounted in the container | `/data`, `/config` |
 | `APP_HOST`, `APP_PORT` | listen address inside the container | `0.0.0.0`, `8000` |
@@ -63,6 +64,35 @@ docker compose exec app python -c "import urllib.request as u; print(u.urlopen('
 
 It runs as `PUID:PGID` (`user:` in compose); the image has no user of its own and writes
 nothing at runtime except its database in `/config` (next section).
+
+## qBittorrent client (issue #10)
+
+`ytp.clients.qbittorrent.QbitClient` (standard library only, synchronous; async code calls it
+with `asyncio.to_thread`). One instance per app, `app.state.qbit` (`None` when
+`QBIT_PASSWORD` is empty). It never contacts qBittorrent at startup.
+
+| Call | What it does |
+|---|---|
+| `add_magnet(magnet, category)` | validates the link (`ytp.magnet`: one single-line `magnet:?` link with one v1 infohash, no whitespace, so nothing can ride along in the `urls` field) and the category (`movies`, `series`, `audiobooks`, `music`), sends both as form fields with `autoTMM=true`, returns the lower-case infohash |
+| `list_torrents(state=None, category=None, hashes=None)` | `Torrent` objects; `state` is a `torrents/info` filter (`downloading`, `completed`, ...); `paused`/`stopped` and `resumed`/`running` fall back to each other on 400 (qBittorrent 4 vs 5) |
+| `pause_all()` / `resume_all()` | `torrents/stop` / `start`, falling back to `pause` / `resume` on 404 |
+| `version()` | proves login and network work |
+
+Failure handling, all as typed exceptions (never a `ConnectionError`):
+
+- `QbitUnavailable`: refused, reset, DNS, timeout (10 s on every call), a 5xx, a garbled answer.
+  Expected whenever the VPN is down; the caller degrades and tries again later.
+- `QbitAuthError`: no password set, wrong credentials, banned address, or a session that is
+  still refused after one re-login. **A refused login is never retried automatically**
+  (five failures ban the address for an hour): wrong credentials stay refused until the app is
+  restarted with the right ones; after a ban (403) the next attempt waits an hour.
+- `QbitRequestError`: qBittorrent answered but refused (a magnet it won't take, an unknown call).
+- An expired session (403) is handled inside: log in again once, repeat the call once.
+- Bad input (`InvalidMagnet`, an unknown category or state) is a `ValueError` raised before
+  anything is sent.
+
+The client sends `Origin`/`Referer` equal to its base URL and a matching `Host`, which is what
+qBittorrent's CSRF and host checks need. The password and the session cookie are never logged.
 
 ## Database (issue #9)
 

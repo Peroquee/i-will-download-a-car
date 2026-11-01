@@ -14,6 +14,9 @@
       "MEDIA_DIR_YOUTUBE": "Youtube",
       "PGID": "1000",
       "PUID": "1000",
+      "QBIT_PASSWORD": "",
+      "QBIT_URL": "http://gluetun:8080",
+      "QBIT_USER": "admin",
       "TZ": "Europe/Berlin",
       "UMASK": "002"
     },

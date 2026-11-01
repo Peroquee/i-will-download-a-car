@@ -204,6 +204,23 @@ def test_the_app_gets_the_jellyfin_address_and_key_from_env():
     assert env["JELLYFIN_API_KEY"] == "${JELLYFIN_API_KEY:-}"
 
 
+def test_the_app_reaches_qbittorrent_through_gluetun_and_gets_the_login_from_env():
+    env = environment_as_dict(services(COMPOSE)["app"])
+    # qBittorrent has no network of its own: its Web UI answers on gluetun's name, port 8080.
+    assert env["QBIT_URL"] == "http://gluetun:8080"
+    assert env["QBIT_URL"].endswith(
+        ":" + environment_as_dict(services(COMPOSE)["qbittorrent"])["WEBUI_PORT"]
+    )
+    assert env["QBIT_USER"] == "${QBIT_USER:-admin}"
+    assert env["QBIT_PASSWORD"] == "${QBIT_PASSWORD:-}"
+
+
+def test_only_the_app_knows_the_qbittorrent_password():
+    for name, svc in services(COMPOSE).items():
+        if name != "app":
+            assert "QBIT_PASSWORD" not in environment_as_dict(svc), name
+
+
 def test_only_the_app_knows_the_jellyfin_key():
     for name, svc in services(COMPOSE).items():
         if name != "app":
