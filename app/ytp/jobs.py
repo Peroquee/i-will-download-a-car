@@ -1,4 +1,4 @@
-"""Reading and writing rows of the `jobs` table (issues #9, #13).
+"""Reading and writing rows of the `jobs` table (issues #9, #13, #18).
 
 Plain functions over `ytp.db.Database`, no ORM. Every value goes in as a query parameter,
 never into the SQL text. The unique index on (type, external_id) is what decides "is this
@@ -50,24 +50,29 @@ def get_job(db: Database, job_id: int) -> Job | None:
     return Job.from_row(rows[0]) if rows else None
 
 
-def submit_magnet_job(db: Database, infohash: str, metadata_json: str) -> tuple[Job, Outcome]:
-    """Create the job for a magnet, or find the one that already exists. One transaction.
+def submit_job(
+    db: Database, job_type: str, external_id: str, metadata_json: str
+) -> tuple[Job, Outcome]:
+    """Create the job for a thing (`job_type`: 'magnet' or 'youtube'), or find the existing one.
+
+    One transaction; the unique index on (type, external_id) decides, so two simultaneous
+    submissions create exactly one job.
 
     * "created": a new row with status `queued`.
-    * "requeued": the infohash was there with status `failed`; it is queued again with the new
-      metadata and the old error cleared (submitting a failed download again is a retry).
-    * "duplicate": the infohash is already in the system and not failed; nothing changes and the
-      existing job is returned.
+    * "requeued": it was there with status `failed`; it is queued again with the new metadata and
+      the old error cleared (submitting a failed download again is a retry).
+    * "duplicate": it is already in the system and not failed; nothing changes and the existing
+      job is returned.
     """
     with db.transaction() as conn:
         cursor = conn.execute(
-            "INSERT INTO jobs (type, external_id, metadata) VALUES ('magnet', ?, ?) "
+            "INSERT INTO jobs (type, external_id, metadata) VALUES (?, ?, ?) "
             "ON CONFLICT (type, external_id) DO NOTHING",
-            (infohash, metadata_json),
+            (job_type, external_id, metadata_json),
         )
         outcome: Outcome = "created" if cursor.rowcount == 1 else "duplicate"
         row = conn.execute(
-            "SELECT * FROM jobs WHERE type = 'magnet' AND external_id = ?", (infohash,)
+            "SELECT * FROM jobs WHERE type = ? AND external_id = ?", (job_type, external_id)
         ).fetchone()
         if outcome == "duplicate" and row["status"] == "failed":
             conn.execute(
@@ -77,6 +82,44 @@ def submit_magnet_job(db: Database, infohash: str, metadata_json: str) -> tuple[
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
             outcome = "requeued"
         return Job.from_row(row), outcome
+
+
+def submit_magnet_job(db: Database, infohash: str, metadata_json: str) -> tuple[Job, Outcome]:
+    """`submit_job` for a magnet link, keyed by its infohash."""
+    return submit_job(db, "magnet", infohash, metadata_json)
+
+
+def claim_next_queued(db: Database, job_type: str) -> Job | None:
+    """Take the oldest `queued` job of a type and mark it `downloading`; None if there is none.
+
+    The claim is one transaction, so two workers can never take the same job.
+    """
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE type = ? AND status = 'queued' ORDER BY id LIMIT 1",
+            (job_type,),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute("UPDATE jobs SET status = 'downloading' WHERE id = ?", (row["id"],))
+        return Job.from_row(
+            conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
+        )
+
+
+def requeue_interrupted(db: Database, job_type: str) -> int:
+    """After a restart: jobs of a type that were `downloading` or `organizing` start again.
+
+    Only for work the app does itself (YouTube); a torrent is qBittorrent's and is handled by
+    the reconciler. Returns how many jobs were put back.
+    """
+    with db.transaction() as conn:
+        cursor = conn.execute(
+            "UPDATE jobs SET status = 'queued' "
+            "WHERE type = ? AND status IN ('downloading', 'organizing')",
+            (job_type,),
+        )
+        return cursor.rowcount
 
 
 def mark_failed(db: Database, job_id: int, error: str) -> None:

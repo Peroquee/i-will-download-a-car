@@ -65,6 +65,8 @@ class Settings:
     # through the VPN. EMPTY = ask directly from the home line. See docs/youtube.md.
     ytdlp_proxy: str = "http://gluetun:8888"
     youtube_probe_timeout: float = 25.0
+    # Tallest YouTube video to download, in pixels (0 = no limit): a disk-space knob.
+    youtube_max_height: int = 1080
 
     @property
     def qbit_configured(self) -> bool:
@@ -185,6 +187,13 @@ class Settings:
             if not 3 <= probe_timeout <= 120:
                 problems.append("YOUTUBE_PROBE_TIMEOUT must be between 3 and 120 seconds")
 
+        raw_height = text("YOUTUBE_MAX_HEIGHT", "1080")
+        max_height = 1080
+        if raw_height.isdigit() and (int(raw_height) == 0 or 144 <= int(raw_height) <= 4320):
+            max_height = int(raw_height)
+        else:
+            problems.append("YOUTUBE_MAX_HEIGHT must be 0 (no limit) or between 144 and 4320")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -203,6 +212,7 @@ class Settings:
             watchdog_status_url=watchdog_url,
             ytdlp_proxy=proxy,
             youtube_probe_timeout=probe_timeout,
+            youtube_max_height=max_height,
         )
 
 

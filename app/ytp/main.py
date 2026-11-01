@@ -9,6 +9,7 @@ is global.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -25,6 +26,8 @@ from .organizer import FileOrganizer
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .scheduler import AppScheduler
 from .youtube import YoutubeProbe
+from .youtube_download import YoutubeDownloader
+from .youtube_jobs import YoutubeWorker
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except DatabaseError as exc:
         app.state.db_error = str(exc)
         logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
+    # YouTube downloads (#18): the database is the queue, one worker thread runs it.
+    app.state.youtube_worker = None
+    worker_stop = threading.Event()
+    if app.state.db is not None:
+        app.state.youtube_worker = YoutubeWorker(
+            app.state.db,
+            settings,
+            YoutubeDownloader(proxy=settings.ytdlp_proxy, max_height=settings.youtube_max_height),
+            app.state.jellyfin,
+        )
+        threading.Thread(
+            target=app.state.youtube_worker.run, args=(worker_stop,), name="youtube", daemon=True
+        ).start()
     # The scheduler needs the database (its jobs keep their state there).
     app.state.scheduler = None
     app.state.reconciler = None
@@ -84,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        worker_stop.set()
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown()
         if app.state.db is not None:
@@ -112,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.reconciler = None
     app.state.watchdog_status = None
     app.state.youtube = None
+    app.state.youtube_worker = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     api.register(app)
 

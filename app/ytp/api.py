@@ -35,8 +35,10 @@ from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError, QbitUnava
 from .clients.watchdog import WatchdogStatusClient
 from .db import Database
 from .magnet import InvalidMagnet, infohash_from_magnet
-from .metadata import Metadata, metadata_to_json
+from .metadata import Metadata, Name, metadata_to_json
 from .youtube import InvalidVideoUrl, ProbeError, YoutubeProbe, parse_video_url
+from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
+from .youtube_jobs import YoutubeJobMetadata, YoutubeWorker
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +119,26 @@ class ProbeRequest(BaseModel):
         return value
 
 
+class DownloadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    # The names the user confirmed (the probe suggests them): they become folder and file names.
+    channel: Name
+    title: Name
+
+    @field_validator("url")
+    @classmethod
+    def _video_url(cls, value: str) -> str:
+        try:
+            parse_video_url(value)
+        except InvalidVideoUrl as exc:
+            raise PydanticCustomError(
+                "video_url_invalid", "{reason}", {"reason": str(exc)}
+            ) from exc
+        return value
+
+
 # HTTP status per probe failure kind: the video itself (404), a restriction on it (403), the
 # upstream or the VPN path (502/504), our own limit (429).
 PROBE_STATUS = {
@@ -147,6 +169,37 @@ async def youtube_probe(body: ProbeRequest, request: Request) -> JSONResponse:
     return JSONResponse(info.as_dict())
 
 
+async def youtube_download(body: DownloadRequest, request: Request) -> JSONResponse:
+    """POST /api/youtube/download {"url", "channel", "title"}: queue a download, return at once.
+
+    201 {"id", "video_id", "type": "youtube", "status": "queued", "duplicate": false}  new job
+    200 {... "duplicate": true}   the video is already queued, downloading or done
+    422 invalid address or names (field-level)    503 the database is not available
+
+    The download runs in the background, one at a time; the job's status says where it is
+    (queued, downloading, organizing, done, failed with a reason). Sending a failed video again
+    retries it. Files end up in `<MEDIA_DIR_YOUTUBE>/<channel>/<title> [<id>].mp4` with a
+    thumbnail and a small `.info.json`.
+    """
+    db: Database | None = request.app.state.db
+    worker: YoutubeWorker | None = request.app.state.youtube_worker
+    if db is None or worker is None:
+        return _problem(503, "The database is not available; see /health.")
+    ref = parse_video_url(body.url)
+    metadata = YoutubeJobMetadata(video_id=ref.video_id, channel=body.channel, title=body.title)
+    job, outcome = await asyncio.to_thread(
+        jobs.submit_job, db, YOUTUBE_JOB_TYPE, ref.video_id, metadata.model_dump_json()
+    )
+    logger.info(
+        "youtube job", extra={"job_id": job.id, "video_id": ref.video_id, "outcome": outcome}
+    )
+    summary = {"id": job.id, "video_id": ref.video_id, "type": "youtube", "status": job.status}
+    if outcome == "duplicate":
+        return JSONResponse({**summary, "duplicate": True}, status_code=200)
+    worker.wake()
+    return JSONResponse({**summary, "duplicate": False}, status_code=201)
+
+
 async def vpn_status(request: Request) -> JSONResponse:
     """GET /api/vpn: the watchdog's view of the VPN, for the UI badge (issue #22).
 
@@ -164,3 +217,4 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/magnet", add_magnet, methods=["POST"])
     app.add_api_route("/api/vpn", vpn_status, methods=["GET"])
     app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])
+    app.add_api_route("/api/youtube/download", youtube_download, methods=["POST"])
