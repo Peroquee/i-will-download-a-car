@@ -4,6 +4,11 @@
     "depends_on": {},
     "devices": [],
     "environment": {
+      "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
+      "MEDIA_DIR_MOVIES": "Filme",
+      "MEDIA_DIR_MUSIC": "Musik",
+      "MEDIA_DIR_SERIES": "Serien",
+      "MEDIA_DIR_YOUTUBE": "Youtube",
       "PGID": "1000",
       "PUID": "1000",
       "TZ": "Europe/Berlin",
