@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response, status
 
 from . import __version__
+from .clients.qbittorrent import QbitClient
 from .config import Settings
 from .db import Database, DatabaseError
 from .logging_setup import configure_logging
@@ -29,6 +30,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("starting", extra={"version": __version__, **settings.summary()})
     if not settings.jellyfin_configured:
         logger.warning("jellyfin is not configured: library refreshes are disabled")
+    # The qBittorrent client does not touch the network until it is used (no login at startup:
+    # the VPN may be down, and a failed login counts towards qBittorrent's ban).
+    app.state.qbit = QbitClient.from_settings(settings) if settings.qbit_configured else None
+    if app.state.qbit is None:
+        logger.warning("qbittorrent is not configured (QBIT_PASSWORD is empty): downloads disabled")
     # A database that cannot be opened must not hide behind a crash loop: the app stays up
     # "degraded", logs the reason and the fix, and /health answers 503 until it is restarted.
     app.state.db = None
@@ -62,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.db = None
     app.state.db_error = None
+    app.state.qbit = None
 
     @app.get("/health")
     async def health(response: Response) -> dict[str, object]:

@@ -114,6 +114,37 @@ def test_the_api_key_never_shows_in_repr_str_or_summary():
     assert s.summary()["jellyfin_configured"] is True
 
 
+def test_qbittorrent_defaults_to_gluetun_over_the_bridge():
+    s = settings()
+    assert (s.qbit_url, s.qbit_user, s.qbit_password) == ("http://gluetun:8080", "admin", "")
+    assert not s.qbit_configured
+
+
+def test_qbittorrent_settings_come_from_the_environment():
+    s = settings(QBIT_URL="http://q.lan:9090/", QBIT_USER="mario", QBIT_PASSWORD="a password 12")
+    assert (s.qbit_url, s.qbit_user, s.qbit_password) == (
+        "http://q.lan:9090",
+        "mario",
+        "a password 12",
+    )
+    assert s.qbit_configured
+
+
+@pytest.mark.parametrize("value", ["ftp://x", "gluetun:8080", "http://gluetun:8080/qbt"])
+def test_a_bad_qbittorrent_url_is_reported_with_the_other_problems(value):
+    found = problems(QBIT_URL=value, LOG_LEVEL="loud")
+    assert any("QBIT_URL" in p for p in found)
+    assert any("LOG_LEVEL" in p for p in found)
+
+
+@pytest.mark.security
+def test_the_qbittorrent_password_never_shows_in_repr_str_or_summary():
+    s = settings(QBIT_PASSWORD="qbit-secret-value")
+    for text in (repr(s), str(s), str(s.summary())):
+        assert "qbit-secret-value" not in text
+    assert s.summary()["qbit_configured"] is True
+
+
 def test_settings_are_immutable():
     with pytest.raises(AttributeError):
         settings().port = 1  # type: ignore[misc]

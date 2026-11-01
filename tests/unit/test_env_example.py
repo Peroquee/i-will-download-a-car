@@ -131,6 +131,13 @@ def test_jellyfin_api_key_is_never_in_the_example():
     assert ENV_EXAMPLE["JELLYFIN_API_KEY"] == ""
 
 
+@pytest.mark.security
+def test_qbittorrent_password_is_never_in_the_example():
+    # The owner puts the password chosen in seed_config.py only into .env on the VM.
+    assert ENV_EXAMPLE["QBIT_PASSWORD"] == ""
+    assert ENV_EXAMPLE["QBIT_USER"] == "admin"
+
+
 def test_data_root_is_absolute():
     assert ENV_EXAMPLE["DATA_ROOT"].startswith("/")
 

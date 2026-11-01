@@ -50,6 +50,15 @@ class Settings:
     jellyfin_url: str = ""
     # A secret: never shown in repr/str, never logged (see logging_setup.redact).
     jellyfin_api_key: str = field(default="", repr=False)
+    # qBittorrent's Web UI, reached over the compose bridge (it lives in gluetun's namespace).
+    qbit_url: str = "http://gluetun:8080"
+    qbit_user: str = "admin"
+    # A secret, like the Jellyfin key: never in repr/str or a log line.
+    qbit_password: str = field(default="", repr=False)
+
+    @property
+    def qbit_configured(self) -> bool:
+        return bool(self.qbit_url and self.qbit_user and self.qbit_password)
 
     @property
     def jellyfin_configured(self) -> bool:
@@ -75,6 +84,9 @@ class Settings:
             "libraries": dict(self.library_dirs),
             "jellyfin_url": self.jellyfin_url or None,
             "jellyfin_configured": self.jellyfin_configured,
+            "qbit_url": self.qbit_url,
+            "qbit_user": self.qbit_user,
+            "qbit_configured": self.qbit_configured,
         }
 
     @classmethod
@@ -124,6 +136,13 @@ class Settings:
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 problems.append(f"JELLYFIN_URL must be an http(s) address, got {jellyfin_url!r}")
 
+        qbit_url = text("QBIT_URL", "http://gluetun:8080").rstrip("/")
+        parsed_qbit = urlparse(qbit_url)
+        if parsed_qbit.scheme not in {"http", "https"} or not parsed_qbit.hostname:
+            problems.append(f"QBIT_URL must be an http(s) address, got {qbit_url!r}")
+        elif parsed_qbit.path.strip("/"):
+            problems.append(f"QBIT_URL must be host[:port] without a path, got {qbit_url!r}")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -135,6 +154,9 @@ class Settings:
             library_dirs=library_dirs,
             jellyfin_url=jellyfin_url,
             jellyfin_api_key=text("JELLYFIN_API_KEY"),
+            qbit_url=qbit_url,
+            qbit_user=text("QBIT_USER", "admin"),
+            qbit_password=text("QBIT_PASSWORD"),
         )
 
 

@@ -259,6 +259,11 @@ would set.
 
 (Never put the password on a command line: it ends up in the shell history.)
 
+**The app logs in too.** Put the same user and password into `.env` as `QBIT_USER` /
+`QBIT_PASSWORD` (the password is plain text there: `.env` is gitignored, keep it mode 600, and
+only the `app` service receives it). Without it the app starts but says downloads are disabled.
+qBittorrent itself still stores only the hash.
+
 ## 5c. Prove the killswitch (issue #4)
 
 Run this once after the stack is up, and after any change to the VPN or network setup. It

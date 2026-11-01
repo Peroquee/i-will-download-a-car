@@ -164,6 +164,23 @@ def test_health_is_503_when_the_database_folder_is_not_writable(tmp_path):
     assert "not writable" in response.json()["checks"]["database"]
 
 
+def test_qbittorrent_client_exists_only_with_a_password_and_does_not_touch_the_network(tmp_path):
+    with make(tmp_path, QBIT_PASSWORD="a password 12", QBIT_URL="http://127.0.0.1:9") as client:
+        qbit = client.app.state.qbit
+        assert qbit is not None
+        assert qbit.base_url == "http://127.0.0.1:9"
+        assert "a password 12" not in repr(qbit)
+        # Nothing was contacted at startup: port 9 is closed, yet /health is fine.
+        assert client.get("/health").status_code == 200
+
+
+def test_without_a_qbittorrent_password_downloads_are_disabled_and_the_log_says_so(tmp_path, capfd):
+    with make(tmp_path) as client:
+        assert client.app.state.qbit is None
+        assert client.get("/health").status_code == 200, "health does not depend on qBittorrent"
+    assert "qbittorrent is not configured" in capfd.readouterr().out
+
+
 def test_health_notices_a_database_that_stops_being_usable(tmp_path):
     with make(tmp_path) as client:
         assert client.get("/health").status_code == 200

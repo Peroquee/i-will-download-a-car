@@ -59,9 +59,15 @@ def test_c1_qbittorrent_is_bound_to_the_tunnel_interface():
 
 @pytest.mark.security
 def test_c1_no_qbittorrent_password_in_git():
-    """Decision: the Web UI password never lives in a tracked file or in .env; only its
-    PBKDF2 hash is written, on the host, by scripts/qbittorrent/seed_config.py."""
-    assert not [k for k in parse_env_file(ENV_EXAMPLE) if "QBIT" in k and "PASS" in k]
+    """Decision: the Web UI password never lives in a tracked file. qBittorrent itself only
+    gets its PBKDF2 hash, written on the host by scripts/qbittorrent/seed_config.py.
+
+    Changed by #10: the APP has to log in to qBittorrent, so the owner also puts the plain
+    password into the host's .env as QBIT_PASSWORD (gitignored, mode 600, read only by the
+    app service). .env.example must keep it EMPTY."""
+    env = parse_env_file(ENV_EXAMPLE)
+    assert env["QBIT_PASSWORD"] == ""
+    assert not [k for k in env if "QBIT" in k and "PASS" in k and k != "QBIT_PASSWORD"]
     tracked = [p for p in Path(REPO_ROOT).rglob("qBittorrent.conf") if ".git" not in p.parts]
     assert tracked == [], "qBittorrent.conf holds the hash and belongs in config/ (gitignored)"
 
