@@ -154,3 +154,29 @@ docker compose logs app           # JSON lines
 
 For development without Docker: `make venv`, then `cd app && python -m ytp` with the
 variables above set.
+
+## Job metadata (issue #14)
+
+`ytp.metadata` defines what the user must say about a download, per type. `type` picks the
+schema and uses the qBittorrent category names (`movies`, `series`, `audiobooks`, `music`):
+
+| `type` | required | optional |
+|---|---|---|
+| `movies` | `title`, `year` (1870 to next year) | |
+| `series` | `title`, `season` (1 to 9999) | `episode` (1 to 9999); none = a season pack |
+| `audiobooks` | `author`, `title` | |
+| `music` | `artist`, `album` | |
+
+`parse_metadata(dict)` returns the model or raises pydantic's `ValidationError` with one
+error per field (`loc`, a machine-readable `type` such as `missing`, `name_empty`,
+`year_out_of_range`, `extra_forbidden`, and a readable `msg`); used as a FastAPI body
+(`body: Metadata`) it becomes the usual 422 response. Unknown extra fields are refused.
+`metadata_to_json` gives the JSON object stored in `jobs.metadata` (no nulls, so a season pack
+has no `episode` key); `metadata_from_json` reads it back.
+
+All text values go through `safe_path_component` because they become folder names (#16): it
+strips, normalises to NFC (one "ö", not "o" + diaeresis), and refuses empty or longer than
+200 characters, `/` and `\`, control/invisible characters (newline, tab, NUL, bidi overrides),
+and names of only dots. A colon, quotes, a leading dot and umlauts are fine; making a name safe
+for a particular file system is #16's job. #16 reuses this function for anything else it
+builds a path from.
