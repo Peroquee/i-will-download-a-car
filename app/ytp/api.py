@@ -36,6 +36,7 @@ from .clients.watchdog import WatchdogStatusClient
 from .db import Database
 from .magnet import InvalidMagnet, infohash_from_magnet
 from .metadata import Metadata, metadata_to_json
+from .youtube import InvalidVideoUrl, ProbeError, YoutubeProbe, parse_video_url
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,53 @@ async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     return JSONResponse({**summary, "duplicate": False}, status_code=201)
 
 
+class ProbeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+
+    @field_validator("url")
+    @classmethod
+    def _video_url(cls, value: str) -> str:
+        try:
+            parse_video_url(value)
+        except InvalidVideoUrl as exc:
+            raise PydanticCustomError(
+                "video_url_invalid", "{reason}", {"reason": str(exc)}
+            ) from exc
+        return value
+
+
+# HTTP status per probe failure kind: the video itself (404), a restriction on it (403), the
+# upstream or the VPN path (502/504), our own limit (429).
+PROBE_STATUS = {
+    "private": 404, "unavailable": 404, "unsupported": 422,
+    "region": 403, "age": 403, "members": 403, "live": 409,
+    "bot_check": 502, "network": 502, "unknown": 502, "timeout": 504, "busy": 429,
+}  # fmt: skip
+
+
+async def youtube_probe(body: ProbeRequest, request: Request) -> JSONResponse:
+    """POST /api/youtube/probe {"url"}: title, channel, duration and thumbnail of ONE video.
+
+    200 {video_id, url, title, channel, channel_id, duration, duration_text, thumbnail}
+    422 the text is not a single-video YouTube address (field-level, loc ["body","url"])
+    404/403/409/502/504/429 {"detail", "kind"}: the video is deleted/private, restricted (region,
+    age, members), a live stream, YouTube not reachable, too slow, or too many probes at once.
+    Nothing is downloaded and nothing is stored.
+    """
+    probe: YoutubeProbe = request.app.state.youtube
+    ref = parse_video_url(body.url)
+    try:
+        info = await probe.probe(ref)
+    except ProbeError as error:
+        logger.info("youtube probe failed", extra={"video_id": ref.video_id, "kind": error.kind})
+        return JSONResponse(
+            {"detail": error.message, "kind": error.kind}, status_code=PROBE_STATUS[error.kind]
+        )
+    return JSONResponse(info.as_dict())
+
+
 async def vpn_status(request: Request) -> JSONResponse:
     """GET /api/vpn: the watchdog's view of the VPN, for the UI badge (issue #22).
 
@@ -115,3 +163,4 @@ def register(app: FastAPI) -> None:
     """Add the API routes to the app (plain routes, so `app.routes` lists every path)."""
     app.add_api_route("/api/magnet", add_magnet, methods=["POST"])
     app.add_api_route("/api/vpn", vpn_status, methods=["GET"])
+    app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])

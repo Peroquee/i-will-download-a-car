@@ -52,6 +52,10 @@ services:
       # The LAN stays reachable outside the tunnel so the Web UI answers; every
       # other destination is blocked unless it goes through the VPN.
       FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:?LAN_SUBNET must be set in .env}
+      # gluetun's HTTP proxy (inside the bridge network only, never published) lets the app's
+      # yt-dlp ask YouTube THROUGH the VPN (#17, docs/youtube.md). No URL logging.
+      HTTPPROXY: "on"
+      HTTPPROXY_LOG: "off"
     # Gluetun's own health check: healthy only while the tunnel works, so that
     # qbittorrent's depends_on (service_healthy) is meaningful. The long start
     # period gives OpenVPN time to connect before failures count.
@@ -136,6 +140,9 @@ services:
       QBIT_PASSWORD: ${QBIT_PASSWORD:-}
       # The VPN watchdog's status page, for the UI badge (#22).
       WATCHDOG_STATUS_URL: http://watchdog:8090
+      # yt-dlp (YouTube, #17) goes out through gluetun's HTTP proxy, i.e. through the VPN. Set
+      # EMPTY in .env to ask YouTube directly from the home line. (No colon: unset = default.)
+      YTDLP_PROXY: ${YTDLP_PROXY-http://gluetun:8888}
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.
