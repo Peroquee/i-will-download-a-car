@@ -18,6 +18,18 @@ Cross-cutting markers, combinable with any level:
 - `compose`, `docker`, `tun`, `network`: required capabilities. Missing ones **skip with a reason** locally and **fail** in CI (`REQUIRE_CAPABILITIES=1`), so a broken runner can't produce a green pipeline.
 - `slow`: more than ~10 s.
 
+### The app (C3)
+
+`app/` is a FastAPI package (`ytp`) with its own Dockerfile. Its **unit tests** live in
+`tests/unit/test_app_*.py` like all others and run in the normal `test:unit` job, which also
+installs `requirements-app.txt` (the app's pinned dependencies plus the test client). CI has
+no Docker daemon, so the **image build** cannot be checked there: `tests/unit/test_app_image.py`
+pins what the build and compose rely on (pinned base, health check, non-root, no published
+port), and `tests/system/test_c3_app_image.py` builds the real image, runs it as an arbitrary
+uid and waits for Docker's health status (gated like the other host tests; on the VM:
+`make test-system`, or by hand `docker compose build app && docker compose up -d app &&
+docker compose ps`, where the app must show `healthy`).
+
 ### Tests that need real credentials (C1)
 
 `tests/system/test_c1_qbittorrent_login.py` starts a real qBittorrent with a seeded login

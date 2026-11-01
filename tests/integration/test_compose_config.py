@@ -35,12 +35,12 @@ def test_config_is_valid_with_every_profile():
 
 def test_default_services_are_only_the_built_ones():
     result = compose("config", "--services")
-    assert sorted(result.stdout.split()) == ["gluetun", "qbittorrent"]
+    assert sorted(result.stdout.split()) == ["app", "gluetun", "qbittorrent"]
 
 
 def test_planned_profile_adds_the_placeholders():
     result = compose("config", "--services", profiles=("planned",))
-    assert {"app", "watchdog", "proxy"} <= set(result.stdout.split())
+    assert {"watchdog", "proxy"} <= set(result.stdout.split())
 
 
 def test_every_rendered_service_restarts_unless_stopped():
@@ -216,7 +216,7 @@ def test_library_folder_names_reach_the_app_with_their_umlauts(tmp_path: Path):
     env_file = write_env(
         tmp_path / ".env", MEDIA_DIR_AUDIOBOOKS="Hörbücher", MEDIA_DIR_MOVIES="Filme"
     )
-    app = rendered_config(env_file, profiles=("planned",))["services"]["app"]["environment"]
+    app = rendered_config(env_file)["services"]["app"]["environment"]
     assert app["MEDIA_DIR_AUDIOBOOKS"] == "Hörbücher"
     assert app["MEDIA_DIR_MOVIES"] == "Filme"
 
@@ -225,14 +225,14 @@ def test_jellyfin_settings_reach_the_app(tmp_path: Path):
     env_file = write_env(
         tmp_path / ".env", JELLYFIN_URL="http://192.168.178.108:8096", JELLYFIN_API_KEY="k3y"
     )
-    app = rendered_config(env_file, profiles=("planned",))["services"]["app"]["environment"]
+    app = rendered_config(env_file)["services"]["app"]["environment"]
     assert app["JELLYFIN_URL"] == "http://192.168.178.108:8096"
     assert app["JELLYFIN_API_KEY"] == "k3y"
 
 
 @pytest.mark.parametrize("missing", ["JELLYFIN_URL", "JELLYFIN_API_KEY"])
 def test_the_jellyfin_settings_are_optional_in_compose(tmp_path: Path, missing):
-    """The app is still a placeholder and the key is created by the owner later: an .env
+    """The key is created by the owner later (docs/jellyfin.md): an .env
     without them must not stop `docker compose` (the app checks them when it runs)."""
     env_file = write_env(tmp_path / ".env", **{missing: None})
     result = compose("config", "--quiet", env_file=env_file, profiles=("*",))
