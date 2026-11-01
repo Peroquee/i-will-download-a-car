@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>youtube-premium</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <main class="card" aria-labelledby="title">
+    <header class="header">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="32" cy="38" rx="16" ry="15" fill="#dba876"/>
+          <path d="M14 30 C14 15 22 9 32 9 C42 9 50 15 50 30 C50 21 42 19 32 19 C22 19 14 21 14 30 Z" fill="#a4372f"/>
+          <path d="M45 19 L58 12 L53 25 Z" fill="#a4372f"/>
+          <circle cx="25" cy="16" r="1.4" fill="#f2e6c9"/>
+          <circle cx="32" cy="13.5" r="1.4" fill="#f2e6c9"/>
+          <circle cx="39" cy="16" r="1.4" fill="#f2e6c9"/>
+          <path d="M11 31 L53 35" stroke="#171310" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+          <ellipse cx="25.5" cy="34.5" rx="5.5" ry="4.5" fill="#171310"/>
+          <circle cx="41" cy="35" r="2.3" fill="#171310"/>
+          <path d="M35.5 31.5 Q41 29.5 45 32" stroke="#171310" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+          <path d="M22 45 C26 41 29.5 46.5 32 44.5 C34.5 46.5 38 41 42 45 C39.5 49.5 34.5 47 32 48 C29.5 47 24.5 49.5 22 45 Z" fill="#2a1c10"/>
+        </svg>
+      </div>
+      <div class="titles">
+        <h1 id="title" class="title">youtube-premium</h1>
+        <p class="subtitle" data-i18n="subtitle"></p>
+      </div>
+      <div class="tools">
+        <span id="vpn" class="badge badge-unknown" role="status" aria-live="polite">
+          <span class="dot" aria-hidden="true"></span><span id="vpn-text" data-i18n="vpn.unknown"></span>
+        </span>
+        <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
+      </div>
+    </header>
+
+    <form id="form" autocomplete="off" novalidate>
+      <div class="row">
+        <label class="field" for="link" data-i18n="link.label"></label>
+        <input id="link" name="link" type="text" inputmode="url" spellcheck="false"
+               autocapitalize="off" autocorrect="off" data-i18n-placeholder="link.placeholder"
+               aria-describedby="link-note link-error">
+        <p id="link-note" class="note" data-i18n="link.note"></p>
+        <p id="link-error" class="error" role="alert"></p>
+      </div>
+
+      <fieldset class="row mode" aria-labelledby="mode-label">
+        <legend id="mode-label" class="field" data-i18n="mode.label"></legend>
+        <div class="segmented">
+          <input type="radio" name="mode" id="mode-youtube" value="youtube" checked>
+          <label for="mode-youtube" data-i18n="mode.youtube"></label>
+          <input type="radio" name="mode" id="mode-magnet" value="magnet">
+          <label for="mode-magnet" data-i18n="mode.magnet"></label>
+        </div>
+      </fieldset>
+
+      <section id="youtube-fields" class="panel" aria-live="polite">
+        <p id="probe-status" class="note"></p>
+        <div class="row">
+          <label class="field" for="f-channel" data-i18n="yt.channel"></label>
+          <input id="f-channel" name="channel" type="text" maxlength="200" aria-describedby="f-channel-error">
+          <p id="f-channel-error" class="error" role="alert"></p>
+        </div>
+        <div class="row">
+          <label class="field" for="f-yt-title" data-i18n="yt.title"></label>
+          <input id="f-yt-title" name="title" type="text" maxlength="200" aria-describedby="f-yt-title-error">
+          <p id="f-yt-title-error" class="error" role="alert"></p>
+        </div>
+        <p id="probe-duration" class="note"></p>
+        <label class="checkbox muted-box" for="subscribe">
+          <input id="subscribe" type="checkbox" disabled>
+          <span data-i18n="yt.subscribe"></span>
+        </label>
+        <p class="note" data-i18n="yt.subscribe_soon"></p>
+      </section>
+
+      <section id="magnet-fields" class="panel" hidden>
+        <div class="row">
+          <label class="field" for="media-type" data-i18n="mg.type"></label>
+          <select id="media-type" name="media-type">
+            <option value="movies" data-i18n="type.movies"></option>
+            <option value="series" data-i18n="type.series"></option>
+            <option value="audiobooks" data-i18n="type.audiobooks"></option>
+            <option value="music" data-i18n="type.music"></option>
+          </select>
+        </div>
+
+        <div class="type-fields" data-type="movies">
+          <div class="row">
+            <label class="field" for="f-movie-title" data-i18n="field.title"></label>
+            <input id="f-movie-title" type="text" maxlength="200" data-field="title" aria-describedby="f-movie-title-error">
+            <p id="f-movie-title-error" class="error" role="alert"></p>
+          </div>
+          <div class="row">
+            <label class="field" for="f-year" data-i18n="field.year"></label>
+            <input id="f-year" type="text" inputmode="numeric" maxlength="4" data-field="year" aria-describedby="f-year-error">
+            <p id="f-year-error" class="error" role="alert"></p>
+          </div>
+        </div>
+
+        <div class="type-fields" data-type="series" hidden>
+          <div class="row">
+            <label class="field" for="f-series-title" data-i18n="field.show"></label>
+            <input id="f-series-title" type="text" maxlength="200" data-field="title" aria-describedby="f-series-title-error">
+            <p id="f-series-title-error" class="error" role="alert"></p>
+          </div>
+          <div class="pair">
+            <div class="row">
+              <label class="field" for="f-season" data-i18n="field.season"></label>
+              <input id="f-season" type="text" inputmode="numeric" maxlength="4" data-field="season" aria-describedby="f-season-error">
+              <p id="f-season-error" class="error" role="alert"></p>
+            </div>
+            <div class="row">
+              <label class="field" for="f-episode" data-i18n="field.episode"></label>
+              <input id="f-episode" type="text" inputmode="numeric" maxlength="4" data-field="episode" aria-describedby="f-episode-error">
+              <p id="f-episode-error" class="error" role="alert"></p>
+            </div>
+          </div>
+          <label class="checkbox" for="pack">
+            <input id="pack" type="checkbox">
+            <span data-i18n="field.pack"></span>
+          </label>
+        </div>
+
+        <div class="type-fields" data-type="audiobooks" hidden>
+          <div class="row">
+            <label class="field" for="f-author" data-i18n="field.author"></label>
+            <input id="f-author" type="text" maxlength="200" data-field="author" aria-describedby="f-author-error">
+            <p id="f-author-error" class="error" role="alert"></p>
+          </div>
+          <div class="row">
+            <label class="field" for="f-book-title" data-i18n="field.book"></label>
+            <input id="f-book-title" type="text" maxlength="200" data-field="title" aria-describedby="f-book-title-error">
+            <p id="f-book-title-error" class="error" role="alert"></p>
+          </div>
+        </div>
+
+        <div class="type-fields" data-type="music" hidden>
+          <div class="row">
+            <label class="field" for="f-artist" data-i18n="field.artist"></label>
+            <input id="f-artist" type="text" maxlength="200" data-field="artist" aria-describedby="f-artist-error">
+            <p id="f-artist-error" class="error" role="alert"></p>
+          </div>
+          <div class="row">
+            <label class="field" for="f-album" data-i18n="field.album"></label>
+            <input id="f-album" type="text" maxlength="200" data-field="album" aria-describedby="f-album-error">
+            <p id="f-album-error" class="error" role="alert"></p>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="button" class="ghost" id="reset" data-i18n="btn.reset"></button>
+        <button type="submit" class="primary" id="submit" data-i18n="btn.submit"></button>
+      </div>
+      <p id="result" class="result" role="status" aria-live="polite"></p>
+    </form>
+
+    <details class="help">
+      <summary data-i18n="help.title"></summary>
+      <p data-i18n="help.body"></p>
+    </details>
+  </main>
+</div>
+
+<script type="application/json" id="i18n">
+{
+  "de": {
+    "subtitle": "Einen YouTube-Link oder Magnet-Link einfügen und ablegen lassen",
+    "link.label": "Link",
+    "link.placeholder": "YouTube-Link oder magnet:?xt=…",
+    "link.note": "Der Link wird automatisch erkannt. Mit „Typ“ kann man das ändern.",
+    "mode.label": "Typ",
+    "mode.youtube": "YouTube",
+    "mode.magnet": "Magnet",
+    "yt.channel": "Kanal",
+    "yt.title": "Titel",
+    "yt.subscribe": "Kanal abonnieren",
+    "yt.subscribe_soon": "Abos gibt es noch nicht; diese Option wird mit der Kanal-Abo-Funktion freigeschaltet.",
+    "mg.type": "Art des Inhalts",
+    "type.movies": "Film",
+    "type.series": "Serie",
+    "type.audiobooks": "Hörbuch",
+    "type.music": "Musik",
+    "field.title": "Titel",
+    "field.year": "Erscheinungsjahr",
+    "field.show": "Serientitel",
+    "field.season": "Staffel",
+    "field.episode": "Folge (leer bei ganzer Staffel)",
+    "field.pack": "Ganze Staffel (Season-Pack)",
+    "field.author": "Autor",
+    "field.book": "Titel des Hörbuchs",
+    "field.artist": "Künstler",
+    "field.album": "Album",
+    "btn.submit": "Hinzufügen",
+    "btn.reset": "Zurücksetzen",
+    "probe.looking": "YouTube wird abgefragt …",
+    "probe.ok": "Gefunden. Kanal und Titel können noch geändert werden.",
+    "probe.manual": "Die Abfrage hat nicht geklappt. Kanal und Titel können von Hand eingetragen werden.",
+    "probe.duration": "Länge: {value}",
+    "result.created": "Auftrag #{id} angelegt (Status: {status}).",
+    "result.duplicate": "Ist schon im System: Auftrag #{id} (Status: {status}).",
+    "result.failed": "Das hat nicht geklappt.",
+    "result.fix": "Bitte die markierten Felder prüfen.",
+    "result.network": "Der Server ist nicht erreichbar.",
+    "vpn.ok": "VPN läuft",
+    "vpn.down": "VPN aus – Downloads pausiert",
+    "vpn.blind": "VPN-Wächter blind",
+    "vpn.starting": "VPN-Wächter startet",
+    "vpn.unknown": "VPN unbekannt",
+    "status.queued": "wartet",
+    "status.downloading": "lädt",
+    "status.organizing": "wird einsortiert",
+    "status.done": "fertig",
+    "status.failed": "fehlgeschlagen",
+    "kind.private": "Dieses Video ist privat.",
+    "kind.unavailable": "Dieses Video wurde gelöscht oder ist nicht mehr verfügbar.",
+    "kind.region": "Dieses Video ist in diesem Land nicht verfügbar.",
+    "kind.age": "Dieses Video ist altersbeschränkt und lässt sich ohne YouTube-Login nicht lesen.",
+    "kind.members": "Dieses Video ist nur für Kanalmitglieder.",
+    "kind.live": "Das ist ein Livestream oder eine Premiere, die noch nicht zu Ende ist.",
+    "kind.bot_check": "YouTube verlangt einen Nachweis, dass kein Bot fragt (bei VPN-Adressen häufig). Später noch einmal versuchen.",
+    "kind.network": "YouTube ist nicht erreichbar (läuft das VPN?).",
+    "kind.timeout": "YouTube hat nicht rechtzeitig geantwortet.",
+    "kind.busy": "Es laufen schon mehrere Abfragen. Gleich noch einmal versuchen.",
+    "kind.unsupported": "Das ist keine Video-Adresse.",
+    "kind.unknown": "YouTube hat einen unerwarteten Fehler gemeldet.",
+    "err.required": "Bitte ausfüllen.",
+    "err.missing": "Bitte ausfüllen.",
+    "err.name_empty": "Bitte ausfüllen.",
+    "err.name_too_long": "Zu lang (höchstens 200 Zeichen).",
+    "err.name_path_separator": "Darf kein / oder \\ enthalten.",
+    "err.name_control_character": "Darf keine Steuer- oder unsichtbaren Zeichen enthalten.",
+    "err.name_dots_only": "Darf nicht nur aus Punkten bestehen.",
+    "err.year_out_of_range": "Jahr zwischen 1870 und {max}.",
+    "err.int_parsing": "Bitte eine ganze Zahl eingeben.",
+    "err.int_from_float": "Bitte eine ganze Zahl eingeben.",
+    "err.int_type": "Bitte eine ganze Zahl eingeben.",
+    "err.greater_than_equal": "Mindestens 1.",
+    "err.less_than_equal": "Höchstens 9999.",
+    "err.magnet_invalid": "Das ist kein gültiger Magnet-Link.",
+    "err.video_url_invalid": "Das ist kein Link zu einem einzelnen YouTube-Video.",
+    "err.extra_forbidden": "Unerwartetes Feld.",
+    "err.string_type": "Bitte Text eingeben.",
+    "err.other": "Ungültiger Wert.",
+    "help.title": "Hilfe",
+    "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Das Ergebnis erscheint später in Jellyfin."
+  },
+  "en": {
+    "subtitle": "Paste a YouTube link or a magnet link and have it filed",
+    "link.label": "Link",
+    "link.placeholder": "YouTube link or magnet:?xt=…",
+    "link.note": "The link type is detected automatically. Use \"Type\" to change it.",
+    "mode.label": "Type",
+    "mode.youtube": "YouTube",
+    "mode.magnet": "Magnet",
+    "yt.channel": "Channel",
+    "yt.title": "Title",
+    "yt.subscribe": "Subscribe to the channel",
+    "yt.subscribe_soon": "Subscriptions do not exist yet; this option will be enabled with the channel subscription feature.",
+    "mg.type": "Kind of content",
+    "type.movies": "Movie",
+    "type.series": "Series",
+    "type.audiobooks": "Audiobook",
+    "type.music": "Music",
+    "field.title": "Title",
+    "field.year": "Release year",
+    "field.show": "Series title",
+    "field.season": "Season",
+    "field.episode": "Episode (empty for a whole season)",
+    "field.pack": "Whole season (season pack)",
+    "field.author": "Author",
+    "field.book": "Audiobook title",
+    "field.artist": "Artist",
+    "field.album": "Album",
+    "btn.submit": "Add",
+    "btn.reset": "Reset",
+    "probe.looking": "Asking YouTube …",
+    "probe.ok": "Found it. Channel and title can still be changed.",
+    "probe.manual": "The lookup did not work. Channel and title can be entered by hand.",
+    "probe.duration": "Length: {value}",
+    "result.created": "Job #{id} created (status: {status}).",
+    "result.duplicate": "Already in the system: job #{id} (status: {status}).",
+    "result.failed": "That did not work.",
+    "result.fix": "Please check the marked fields.",
+    "result.network": "The server cannot be reached.",
+    "vpn.ok": "VPN running",
+    "vpn.down": "VPN down - downloads paused",
+    "vpn.blind": "VPN watchdog blind",
+    "vpn.starting": "VPN watchdog starting",
+    "vpn.unknown": "VPN unknown",
+    "status.queued": "queued",
+    "status.downloading": "downloading",
+    "status.organizing": "being filed",
+    "status.done": "done",
+    "status.failed": "failed",
+    "kind.private": "This video is private.",
+    "kind.unavailable": "This video is deleted or no longer available.",
+    "kind.region": "This video is not available in this country.",
+    "kind.age": "This video is age-restricted and cannot be read without a YouTube login.",
+    "kind.members": "This video is for channel members only.",
+    "kind.live": "This is a live stream or premiere that has not ended yet.",
+    "kind.bot_check": "YouTube wants proof that this is not a bot (often the case for VPN addresses). Try again later.",
+    "kind.network": "YouTube could not be reached (is the VPN up?).",
+    "kind.timeout": "YouTube did not answer in time.",
+    "kind.busy": "Several lookups are already running. Try again in a moment.",
+    "kind.unsupported": "This is not a video address.",
+    "kind.unknown": "YouTube reported an unexpected error.",
+    "err.required": "Please fill this in.",
+    "err.missing": "Please fill this in.",
+    "err.name_empty": "Please fill this in.",
+    "err.name_too_long": "Too long (at most 200 characters).",
+    "err.name_path_separator": "Must not contain / or \\.",
+    "err.name_control_character": "Must not contain control or invisible characters.",
+    "err.name_dots_only": "Must not consist of dots only.",
+    "err.year_out_of_range": "Year between 1870 and {max}.",
+    "err.int_parsing": "Please enter a whole number.",
+    "err.int_from_float": "Please enter a whole number.",
+    "err.int_type": "Please enter a whole number.",
+    "err.greater_than_equal": "At least 1.",
+    "err.less_than_equal": "At most 9999.",
+    "err.magnet_invalid": "This is not a valid magnet link.",
+    "err.video_url_invalid": "This is not a link to a single YouTube video.",
+    "err.extra_forbidden": "Unexpected field.",
+    "err.string_type": "Please enter text.",
+    "err.other": "Invalid value.",
+    "help.title": "Help",
+    "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. The result appears in Jellyfin later."
+  }
+}
+</script>
+<script src="/static/logic.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
