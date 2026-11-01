@@ -90,8 +90,20 @@ def test_a_down_tunnel_is_not_a_dead_namespace(run):
     assert not run.halted.exists()
 
 
-def test_unknown_arguments_are_rejected(run):
-    assert run("--bogus", content=net_dev("lo", "eth0")).returncode == 2
+@pytest.mark.parametrize("arg", ["custom-svc-netwatch", "anything", "--bogus"])
+def test_any_argument_but_check_means_watch_mode(run, arg):
+    """Regression: s6 starts the service as `run custom-svc-netwatch`. The script used to
+    exit 2 on that argument, so s6 restarted it every second and it never watched."""
+    result = run(arg, content=net_dev("lo"))
+    assert result.returncode == 0
+    assert run.halted.exists(), "it must run the watch loop, not exit on the argument"
+    assert "usage" not in result.stdout + result.stderr
+
+
+def test_s6_style_call_with_a_working_namespace_keeps_watching(run):
+    result = run("custom-svc-netwatch", content=net_dev("lo", "eth0"), NETWATCH_MAX_LOOPS="3")
+    assert result.returncode == 0
+    assert not run.halted.exists()
 
 
 def test_the_real_proc_net_dev_has_an_interface_or_is_readable():
