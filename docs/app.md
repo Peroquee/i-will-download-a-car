@@ -339,7 +339,7 @@ scripts and styles.
 - **German and English** (text in `index.html`, chosen from the browser language, switch at the top
   right, remembered in the browser). Umlauts work everywhere (UTF-8).
 - **Mobile:** one column under 520 px, 44 px touch targets, 16 px inputs (phones do not zoom in).
-- A small **VPN badge** at the top reads `GET /api/vpn` every 15 s.
+- The **VPN bar** (issue #28) sticks to the top of the page, so it is always in view; see below.
 
 **Same-origin protection (the note on !20):** the JSON endpoints are state-changing, and the
 browser holds the proxy login, so a page on another website could otherwise make it add downloads.
@@ -353,6 +353,26 @@ Security headers on every answer: `Content-Security-Policy`, `X-Content-Type-Opt
 `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`.
 
 Not part of this form: the how-to guide (#33).
+
+## VPN indicator (issue #28)
+
+A bar across the top of the page, sticky while scrolling, shows the state from `GET /api/vpn`
+(the watchdog's status, see watchdog.md). It asks every 5 s while the tab is visible, and once
+when the tab comes back.
+
+| View | Bar | When |
+| --- | --- | --- |
+| ok | calm green line, "VPN running", how long ago it changed, exit country | watchdog `ok` (and the egress check not alarming) |
+| down | **solid red band**, "VPN down - downloads paused", "torrents paused" if the watchdog paused them | watchdog `down` |
+| mismatch | **solid red band**, "WARNING: traffic is not going through the VPN" | the egress check (#23) reports a mismatch |
+| blind | **solid red band** | the watchdog cannot read the VPN state (treated like down) |
+| starting, unknown | gold line | the watchdog has not measured yet / does not answer |
+| stale | gold line "Status out of date" | the page's own request to the app failed |
+
+Anything the page cannot read counts as unknown, never as ok. In the red states the tab title gets
+a warning sign and the icon turns red (`favicon-alert.svg`), so it is visible from another tab too,
+and the bar gets `role="alert"` for screen readers. No sound or animation. The exit country is the
+only detail from the egress check shown; addresses are never sent to the page.
 
 ## Job list and retry (issue #26)
 

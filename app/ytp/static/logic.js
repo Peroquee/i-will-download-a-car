@@ -119,9 +119,28 @@
              music: "type.music", youtube: "mode.youtube" }[kind] || null;
   }
 
+  /* What the VPN bar shows for an /api/vpn answer. `view` is the colour/state, in order of
+     priority: down, mismatch (the egress check caught a leak), blind, starting, unknown, ok.
+     `alert` = the bar must be unmissable. Anything unreadable counts as unknown, never as ok. */
+  function vpnView(data) {
+    var d = data && typeof data === "object" ? data : {};
+    var state = ["ok", "down", "blind", "starting"].indexOf(d.state) >= 0 ? d.state : "unknown";
+    var view = state;
+    if (state === "ok" && d.egress === "mismatch") view = "mismatch";
+    if (state === "unknown" && d.egress === "mismatch") view = "mismatch";
+    return {
+      view: view,
+      alert: view === "down" || view === "mismatch" || view === "blind",
+      paused: d.paused === true,
+      since: typeof d.since === "string" ? d.since : null,
+      country: view === "ok" && d.egress === "ok" && typeof d.egress_country === "string" ? d.egress_country.slice(0, 60) : null,
+    };
+  }
+
   return {
     age: age,
     kindKey: kindKey,
+    vpnView: vpnView,
     detectMode: detectMode,
     looksLikeVideoUrl: looksLikeVideoUrl,
     format: format,

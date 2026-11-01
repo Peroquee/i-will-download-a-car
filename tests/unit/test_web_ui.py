@@ -53,7 +53,9 @@ def test_the_form_is_served_at_the_root(client):
     assert 'src="/static/app.js"' in response.text
 
 
-@pytest.mark.parametrize("name", ["app.css", "app.js", "logic.js", "favicon.svg"])
+@pytest.mark.parametrize(
+    "name", ["app.css", "app.js", "logic.js", "favicon.svg", "favicon-alert.svg"]
+)
 def test_the_static_files_are_served(client, name):
     response = client.get(f"/static/{name}")
     assert response.status_code == 200
@@ -326,7 +328,10 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     t = translations()["en"]
     used = set(re.findall(r'data-i18n(?:-placeholder)?="([\w.]+)"', HTML))
     used |= {k for k in re.findall(r'\bt\("([\w.]+)"', APP_JS) if not k.endswith(".")}
-    used |= {f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown")}
+    used |= {
+        f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch", "stale")
+    }
+    used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
     used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
     missing = {k for k in used if k not in t}
@@ -518,3 +523,55 @@ def test_the_page_has_the_job_list_and_the_script_builds_rows_without_innerhtml(
     assert "innerHTML" not in APP_JS
     assert "/api/jobs" in APP_JS
     assert "visibilityState" in APP_JS, "polling pauses while the tab is hidden"
+
+
+# --- the VPN bar (#28) ----------------------
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("data", "view", "alert"),
+    [
+        ({"state": "ok"}, "ok", False),
+        ({"state": "ok", "egress": "ok", "egress_country": "Switzerland"}, "ok", False),
+        ({"state": "down", "paused": True}, "down", True),
+        ({"state": "ok", "egress": "mismatch"}, "mismatch", True),
+        ({"state": "unknown", "egress": "mismatch"}, "mismatch", True),
+        ({"state": "blind"}, "blind", True),
+        ({"state": "starting"}, "starting", False),
+        ({"state": "unknown"}, "unknown", False),
+        ({"state": "something new"}, "unknown", False),
+        ({}, "unknown", False),
+        (None, "unknown", False),
+        ("ok", "unknown", False),
+    ],
+)
+def test_the_vpn_view_is_never_ok_unless_the_watchdog_says_so(data, view, alert):
+    result = run_node(f"L.vpnView({json.dumps(data)})")
+    assert result["view"] == view
+    assert result["alert"] is alert
+
+
+@needs_node
+def test_the_vpn_view_passes_on_only_safe_details():
+    result = run_node(
+        "L.vpnView({state: 'ok', egress: 'ok', egress_country: 'Switzerland', paused: true,"
+        " since: '2026-11-01T10:00:00Z', ip: '1.2.3.4'})"
+    )
+    assert result == {
+        "view": "ok", "alert": False, "paused": True, "since": "2026-11-01T10:00:00Z",
+        "country": "Switzerland",
+    }  # fmt: skip
+    assert (
+        run_node("L.vpnView({state: 'down', egress: 'ok', egress_country: 'X'})")["country"] is None
+    )
+
+
+def test_the_vpn_bar_is_part_of_the_page_before_the_content_and_marks_alerts():
+    assert HTML.index('id="vpn"') < HTML.index('class="wrap"')
+    assert 'id="vpn-detail"' in HTML
+    assert "position: sticky" in CSS
+    for view in ("down", "mismatch", "blind"):
+        assert f".vpn-{view}" in CSS
+    assert "favicon-alert.svg" in APP_JS
+    assert "visibilityState" in APP_JS
