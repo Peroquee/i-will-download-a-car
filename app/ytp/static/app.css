@@ -37,8 +37,8 @@ html, body {
 .vpn-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #66707d; }
 .vpn-ok { color: var(--good); }
 .vpn-ok .vpn-dot { background: var(--good); }
-.vpn-starting .vpn-dot, .vpn-stale .vpn-dot { background: var(--gold); }
-.vpn-starting, .vpn-stale { color: var(--gold); }
+.vpn-starting .vpn-dot, .vpn-stale .vpn-dot, .vpn-unknown .vpn-dot { background: var(--gold); }
+.vpn-starting, .vpn-stale, .vpn-unknown { color: var(--gold); }
 /* Down, leaking or blind: a solid red band that cannot be mistaken for the calm states. */
 .vpn-down, .vpn-mismatch, .vpn-blind {
   padding: 14px 16px;
