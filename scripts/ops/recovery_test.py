@@ -16,7 +16,7 @@ stack and then checks, printing one PASS/FAIL/WARN line each and NO address:
   * every container is running again, was started AFTER the reboot, is healthy, and has a restart
     policy that brings it back;
   * the ORDER: gluetun before qbittorrent, app before proxy, and qBittorrent was started only after
-    gluetun reported healthy (from gluetun's log, when that can be read);
+    gluetun's log said the tunnel was up and its DNS ready (when that can be read);
   * the VPN comes before qBittorrent's traffic: the watchdog says `ok`, qBittorrent's public
     address is a VPN one (never the home one) and no torrent runs while the VPN is not ok;
   * the jobs that were in progress: each one is done, failed WITH a reason, or on its way again
@@ -285,16 +285,32 @@ def wait_for_stack(docker: Docker, wait: float, poll: float, clock, sleep) -> di
         sleep(poll)
 
 
-def first_healthy_time(logs: str, since: datetime | None) -> datetime | None:
-    """The first line in gluetun's timestamped log that says it is healthy, after `since`."""
-    for line in logs.splitlines():
-        if re.search(r"\bhealthy\b", line, re.IGNORECASE) and not re.search(
-            r"unhealthy|not healthy", line, re.IGNORECASE
-        ):
-            stamp = parse_time(line.split(" ", 1)[0])
+# What gluetun 3.41's log says when it is ready (it never prints "healthy"): the OpenVPN tunnel is
+# up, and its DNS is ready. [healthcheck] listening only means its health server started.
+READY_LINES = (
+    re.compile(r"\[openvpn\] Initialization Sequence Completed"),
+    re.compile(r"\[dns\] ready"),
+)
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def gluetun_ready_time(logs: str, since: datetime | None) -> datetime | None:
+    """When gluetun's timestamped log says it is ready, after `since` (its latest start).
+
+    The tunnel-up line and the DNS-ready line are each looked for (first one after `since`); the
+    LATER of the two found is the answer, so a qBittorrent started before either is caught.
+    None if neither line is there (then only the start order can be judged)."""
+    found: list[datetime] = []
+    for pattern in READY_LINES:
+        for line in logs.splitlines():
+            clean = _ANSI.sub("", line)
+            if not pattern.search(clean):
+                continue
+            stamp = parse_time(clean.split(" ", 1)[0])
             if stamp is not None and (since is None or stamp >= since):
-                return stamp
-    return None
+                found.append(stamp)
+                break
+    return max(found) if found else None
 
 
 def home_address(url: str) -> str:
@@ -378,15 +394,13 @@ def verify(
     gluetun_id = docker.container("gluetun")
     qbit_started = started.get("qbittorrent")
     gluetun_started = started.get("gluetun")
-    healthy_at = (
-        first_healthy_time(docker.logs(gluetun_id), gluetun_started) if gluetun_id else None
-    )
-    if healthy_at is None or qbit_started is None:
-        report.warn("could not read from gluetun's log when it became healthy; start order only")
-    elif qbit_started >= healthy_at:
-        report.ok("qbittorrent was started only after gluetun reported healthy")
+    ready_at = gluetun_ready_time(docker.logs(gluetun_id), gluetun_started) if gluetun_id else None
+    if ready_at is None or qbit_started is None:
+        report.warn("could not read from gluetun's log when it was ready; start order only")
+    elif qbit_started >= ready_at:
+        report.ok("qbittorrent was started only after gluetun's tunnel and DNS were ready")
     else:
-        report.bad("qbittorrent was started BEFORE gluetun reported healthy")
+        report.bad("qbittorrent was started BEFORE gluetun's tunnel and DNS were ready")
 
     # 4. the VPN before qBittorrent's traffic
     watchdog_id = docker.container("watchdog")
