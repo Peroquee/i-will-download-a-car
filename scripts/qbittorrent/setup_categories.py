@@ -63,6 +63,13 @@ def category_path(name: str) -> str:
     return f"{DOWNLOAD_ROOT}/{name}"
 
 
+LOGIN_REFUSED = (
+    "login refused: wrong user or password. (qBittorrent also answers 401 when the port in "
+    "--url differs from its own Web UI port, for example through a 18080->8080 mapping: use "
+    "the port qBittorrent listens on, 8080 by default.)"
+)
+
+
 class Api:
     def __init__(self, base_url: str):
         self.base = base_url.rstrip("/")
@@ -70,24 +77,50 @@ class Api:
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
         )
 
-    def call(self, path: str, form: dict[str, str] | None = None) -> str:
+    def _open(self, path: str, form: dict[str, str] | None) -> tuple[int, str]:
+        """(HTTP status, body). Network problems become SetupError; HTTP errors propagate."""
         data = urllib.parse.urlencode(form).encode() if form is not None else None
         try:
             with self.opener.open(f"{self.base}/api/v2/{path}", data=data, timeout=20) as resp:
-                return resp.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            hint = " (too many failed logins? wait, then retry)" if exc.code == 403 else ""
-            raise SetupError(f"qBittorrent answered {exc.code} for {path}{hint}") from exc
+                return resp.status, resp.read().decode("utf-8")
+        except urllib.error.HTTPError:
+            raise
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             raise SetupError(
                 f"cannot reach qBittorrent at {self.base}: {exc}. "
                 "Is the stack up (docker compose ps) and the Web UI published?"
             ) from exc
 
+    def call(self, path: str, form: dict[str, str] | None = None) -> str:
+        try:
+            return self._open(path, form)[1]
+        except urllib.error.HTTPError as exc:
+            raise SetupError(
+                f"qBittorrent answered {exc.code} for {path}{_hint(exc.code)}"
+            ) from exc
+
     def login(self, user: str, password: str) -> None:
-        answer = self.call("auth/login", {"username": user, "password": password}).strip()
-        if answer != "Ok.":
-            raise SetupError("login refused: wrong user or password")
+        """Current qBittorrent answers a good login with 204 and no body, a bad one with 401;
+        older versions answer 200 with "Ok." or "Fails.". Accept the former, refuse the rest."""
+        try:
+            status, body = self._open("auth/login", {"username": user, "password": password})
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                raise SetupError(LOGIN_REFUSED) from exc
+            raise SetupError(
+                f"qBittorrent answered {exc.code} for auth/login{_hint(exc.code)}"
+            ) from exc
+        if status == 204 or (status == 200 and body.strip() in {"Ok.", ""}):
+            return
+        raise SetupError(LOGIN_REFUSED)
+
+
+def _hint(code: int) -> str:
+    if code == 403:
+        return " (too many failed logins? wait, then retry)"
+    if code == 401:
+        return " (not logged in, or the port in --url is not qBittorrent's own Web UI port)"
+    return ""
 
 
 def plan_categories(existing: dict[str, dict[str, str]]) -> list[tuple[str, str, str]]:

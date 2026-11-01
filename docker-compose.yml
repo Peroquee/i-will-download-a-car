@@ -99,7 +99,8 @@ services:
       - ./config/qbittorrent:/config
       # s6 services of the linuxserver image (see scripts/qbittorrent/services/netwatch). The
       # whole folder is mounted, not one file: a bind-mounted single file keeps its old inode
-      # after `git pull` replaces it, so the running container would not see the new script.
+      # after `git pull` replaces it. The image copies the folder into s6 at container start,
+      # so after a pull that changes the script run `docker restart qbittorrent`.
       - ./scripts/qbittorrent/services:/custom-services.d:ro
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
 

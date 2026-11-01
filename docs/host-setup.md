@@ -281,7 +281,10 @@ that the container has no network interface left for about 30 seconds and stops 
 container; `restart: unless-stopped` starts it again inside the new namespace. It needs no
 Docker socket. A tunnel that is merely down does not trigger it: gluetun's own interface is
 still there and its firewall blocks everything. If recovery ever fails, restart by hand:
-`docker restart qbittorrent`. The qBittorrent container also reports `unhealthy` in
+`docker restart qbittorrent`. After a `git pull` that changes the watcher, run `docker restart
+qbittorrent` too: the linuxserver image copies `/custom-services.d` into s6 when the container
+starts, so a running container keeps using the version it started with (the folder mount only
+avoids the stale single-file inode, it does not reload the service). The qBittorrent container also reports `unhealthy` in
 `docker compose ps` while the namespace is dead. The planned watchdog (#21) is the second
 layer on top of this.
 
@@ -304,7 +307,9 @@ scripts/qbittorrent/setup_categories.py        # asks for the Web UI password (a
 It only creates or corrects those four categories and the settings above. Other categories
 and settings are left alone, and re-running it changes nothing once everything is set. The
 password is asked for on the terminal (or `--password-stdin`); it is never on a command line,
-in a file or in the output. If the Web UI port is not 8080 on localhost, pass `--url`.
+in a file or in the output. If the Web UI port is not 8080 on localhost, pass `--url`. Use the port qBittorrent itself listens
+on: it answers `401` (shown as "login refused") also when the port in the address differs from
+its own Web UI port, for example behind a `18080->8080` mapping.
 
 **Verify with a real torrent (manual, once):** use a legal test torrent such as a Debian
 installer ISO from debian.org (torrent link under "Download"). In the Web UI (SSH tunnel as in
