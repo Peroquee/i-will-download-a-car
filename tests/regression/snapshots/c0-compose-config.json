@@ -40,12 +40,13 @@
     ],
     "environment": {
       "FIREWALL_OUTBOUND_SUBNETS": "192.168.178.0/24",
+      "OPENVPN_CUSTOM_CONFIG": "/gluetun/custom/expressvpn.ovpn",
       "OPENVPN_PASSWORD": "changeme",
       "OPENVPN_USER": "changeme",
       "SERVER_CITIES": "",
       "SERVER_COUNTRIES": "",
       "TZ": "Europe/Berlin",
-      "VPN_SERVICE_PROVIDER": "expressvpn",
+      "VPN_SERVICE_PROVIDER": "custom",
       "VPN_TYPE": "openvpn"
     },
     "healthcheck": {
@@ -74,7 +75,9 @@
     "profiles": [],
     "restart": "unless-stopped",
     "user": null,
-    "volumes": []
+    "volumes": [
+      "<repo>/config/gluetun:/gluetun"
+    ]
   },
   "jellyfin": {
     "cap_add": [],
@@ -140,7 +143,17 @@
       "UMASK": "002",
       "WEBUI_PORT": "8080"
     },
-    "healthcheck": null,
+    "healthcheck": {
+      "interval": "30s",
+      "retries": 3,
+      "start_period": "1m0s",
+      "test": [
+        "CMD",
+        "/custom-services.d/netwatch",
+        "--check"
+      ],
+      "timeout": "5s"
+    },
     "image": "lscr.io/linuxserver/qbittorrent:latest",
     "logging": {
       "driver": "json-file",
@@ -156,7 +169,8 @@
     "user": null,
     "volumes": [
       "/data:/data",
-      "<repo>/config/qbittorrent:/config"
+      "<repo>/config/qbittorrent:/config",
+      "<repo>/scripts/qbittorrent/netwatch.sh:/custom-services.d/netwatch:ro"
     ]
   },
   "watchdog": {
