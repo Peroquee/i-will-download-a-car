@@ -166,8 +166,9 @@ What to fill in (the template explains each line):
   `docker compose` refuses to start with a clear message if one is missing.
 
 `.env` is gitignored; CI scans history for leaked secrets (`lint:secrets`).
-Services for later issues (`app`, `watchdog`, `proxy`) are behind the
-`planned` profile, so `docker compose up -d` only starts what exists.
+The `watchdog` (a later issue) is behind the `planned` profile, so `docker compose up -d` only
+starts what exists. The `proxy` needs `PROXY_USER` and `PROXY_PASSWORD_HASH` first: run
+`make proxy-password` (and set `PROXY_BIND` to the VM's LAN address), see [proxy.md](proxy.md).
 
 **ExpressVPN has no port forwarding.** Torrents still download, but nobody can
 connect *to* you through the VPN, so you get fewer peers and slower speeds on
@@ -226,7 +227,8 @@ docker compose logs gluetun | tail   # "Public IP address is ..." is the VPN add
 `qbittorrent` uses `network_mode: service:gluetun`: it has no network of its own,
 so it can only reach the internet through the tunnel, and **all** ports are
 published on `gluetun` (the Web UI on `QBIT_WEBUI_BIND:QBIT_WEBUI_PORT`, localhost
-by default until the reverse proxy exists). It starts only when gluetun is healthy.
+only: the LAN reaches it through the reverse proxy, [docs/proxy.md](proxy.md)). It starts only
+when gluetun is healthy.
 
 The linuxserver image would start with a temporary random password. Replace that
 with your own **before the first start**; the script stores only a hash:

@@ -1,0 +1,67 @@
+# Reverse proxy for the youtube-premium stack (#29). Caddy 2, plain HTTP on the LAN.
+#
+# Two listeners, both guarded the same way, in this order:
+#   1. the client must be inside LAN_SUBNET, judged by the TCP connection's own source
+#      address (remote_ip). X-Forwarded-For is never read: trusted_proxies is not set,
+#      and client_ip (which would honour it) is deliberately not used.
+#   2. HTTP basic auth against PROXY_USER / PROXY_PASSWORD_HASH (a bcrypt hash, made by
+#      scripts/proxy/set_password.py).
+# Only then is the request passed on. Anything that fails answers before it reaches
+# the upstream, and an empty LAN_SUBNET, user or hash makes Caddy refuse to start
+# (a parse error), so a half-configured proxy never serves anything.
+#
+# Container ports: 8080 -> the app, 8081 -> the qBittorrent Web UI. The host ports are
+# PROXY_PORT / PROXY_QBT_PORT in .env, bound to PROXY_BIND (docker-compose.yml).
+# docs/proxy.md explains the design.
+
+{
+	# No admin API socket: nothing can reconfigure the proxy at runtime.
+	admin off
+	# Plain HTTP on the LAN is intended (like the GitLab); there are no certificates.
+	auto_https off
+}
+
+(guard) {
+	@outside not remote_ip {$LAN_SUBNET}
+	respond @outside "Forbidden" 403
+
+	basic_auth {
+		{$PROXY_USER} {$PROXY_PASSWORD_HASH}
+	}
+
+	header -Server
+}
+
+# The app (#8). Reached over the compose bridge network.
+:8080 {
+	log {
+		output stdout
+		format json
+	}
+	route {
+		import guard
+		reverse_proxy app:8000
+	}
+}
+
+# qBittorrent's Web UI, which lives in gluetun's network namespace and is therefore
+# reached as gluetun:8080 over the bridge. Its own login stays on as a second layer.
+# The Host header is passed through unchanged, which is what qBittorrent's CSRF check
+# (Origin against Host) needs: it would answer 401 if the port differed.
+:8081 {
+	log {
+		output stdout
+		format json
+	}
+	route {
+		import guard
+		reverse_proxy gluetun:8080
+	}
+}
+
+# Health check for Docker, reachable only inside the proxy container (loopback, not published).
+http://127.0.0.1:8082 {
+	bind 127.0.0.1
+	respond /health "ok" 200
+	respond 404
+}

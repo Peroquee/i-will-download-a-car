@@ -35,12 +35,12 @@ def test_config_is_valid_with_every_profile():
 
 def test_default_services_are_only_the_built_ones():
     result = compose("config", "--services")
-    assert sorted(result.stdout.split()) == ["app", "gluetun", "qbittorrent"]
+    assert sorted(result.stdout.split()) == ["app", "gluetun", "proxy", "qbittorrent"]
 
 
 def test_planned_profile_adds_the_placeholders():
     result = compose("config", "--services", profiles=("planned",))
-    assert {"watchdog", "proxy"} <= set(result.stdout.split())
+    assert "watchdog" in set(result.stdout.split())
 
 
 def test_every_rendered_service_restarts_unless_stopped():
@@ -106,6 +106,12 @@ def test_shell_environment_does_not_leak_into_tests(tmp_path: Path, monkeypatch)
         "QBIT_WEBUI_BIND",
         "MEDIA_DIR_MOVIES",
         "MEDIA_DIR_YOUTUBE",
+        "PROXY_BIND",
+        "PROXY_PORT",
+        "PROXY_QBT_PORT",
+        "PROXY_USER",
+        "PROXY_PASSWORD_HASH",
+        "CADDY_TAG",
     ],
 )
 def test_missing_required_variable_stops_compose(tmp_path: Path, missing):
@@ -242,3 +248,68 @@ def test_the_jellyfin_settings_are_optional_in_compose(tmp_path: Path, missing):
 def test_there_is_no_jellyfin_service():
     config = rendered_config(profiles=("*",))
     assert "jellyfin" not in config["services"]
+
+
+# --- reverse proxy (#29) ---
+
+
+def test_proxy_ports_are_published_on_the_configured_address(tmp_path: Path):
+    env_file = write_env(
+        tmp_path / ".env", PROXY_BIND="192.168.178.50", PROXY_PORT="8088", PROXY_QBT_PORT="8089"
+    )
+    ports = rendered_config(env_file)["services"]["proxy"]["ports"]
+    shape = {(p["host_ip"], p["published"], p["target"]) for p in ports}
+    assert shape == {("192.168.178.50", "8088", 8080), ("192.168.178.50", "8089", 8081)}
+
+
+@pytest.mark.security
+def test_the_app_publishes_no_port_and_only_the_proxy_and_gluetun_do():
+    config = rendered_config(profiles=("*",))["services"]
+    assert "ports" not in config["app"]
+    assert {n for n, svc in config.items() if svc.get("ports")} == {"gluetun", "proxy"}
+
+
+@pytest.mark.security
+def test_the_proxy_gets_the_lan_subnet_and_the_login_from_env(tmp_path: Path):
+    env_file = write_env(
+        tmp_path / ".env", LAN_SUBNET="10.1.2.0/24", PROXY_USER="mario", PROXY_PASSWORD_HASH="x"
+    )
+    env = rendered_config(env_file)["services"]["proxy"]["environment"]
+    assert (env["LAN_SUBNET"], env["PROXY_USER"], env["PROXY_PASSWORD_HASH"]) == (
+        "10.1.2.0/24",
+        "mario",
+        "x",
+    )
+
+
+@pytest.mark.security
+def test_the_proxy_renders_read_only_without_capabilities_except_the_one_it_needs():
+    proxy = rendered_config()["services"]["proxy"]
+    assert proxy["read_only"] is True
+    assert proxy["cap_drop"] == ["ALL"]
+    assert proxy["cap_add"] == ["NET_BIND_SERVICE"]
+    assert proxy["depends_on"]["app"]["condition"] == "service_healthy"
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("missing", ["PROXY_USER", "PROXY_PASSWORD_HASH"])
+def test_an_empty_login_stops_compose(tmp_path: Path, missing):
+    env_file = write_env(tmp_path / ".env", **{missing: ""})
+    result = compose("config", "--quiet", env_file=env_file)
+    assert result.returncode != 0
+    assert f"{missing} must be set" in result.stderr
+
+
+def test_a_single_quoted_hash_reaches_the_proxy_literally(tmp_path: Path):
+    """The hash contains "$": make proxy-password writes it single-quoted so Compose keeps it."""
+    hashed = "$2a$14$" + "a" * 22 + "B" * 31
+    env_file = tmp_path / ".env"
+    write_env(env_file, PROXY_PASSWORD_HASH="x")
+    lines = [
+        ln for ln in env_file.read_text().splitlines() if not ln.startswith("PROXY_PASSWORD_HASH")
+    ]
+    env_file.write_text("\n".join([*lines, f"PROXY_PASSWORD_HASH='{hashed}'"]) + "\n")
+    env = rendered_config(env_file)["services"]["proxy"]["environment"]
+    # `compose config` prints a literal "$" as "$$" (so the output can be read back); the
+    # container gets the single "$". Interpolated, "$2a" would have come out empty.
+    assert env["PROXY_PASSWORD_HASH"] == hashed.replace("$", "$$")
