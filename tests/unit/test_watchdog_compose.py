@@ -106,7 +106,14 @@ def test_the_watchdog_module_imports_only_what_it_needs():
             r"^from (\.[\w.]*) import", (REPO_ROOT / "app/ytp/watchdog.py").read_text(), re.M
         )
     }
-    assert local == {".alerts", ".clients.gluetun", ".clients.qbittorrent", ".logging_setup"}
+    assert local == {
+        ".alerts",
+        ".clients.gluetun",
+        ".clients.qbittorrent",
+        ".clients.watchdog",
+        ".egress",
+        ".logging_setup",
+    }
 
 
 @pytest.mark.security

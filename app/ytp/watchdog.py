@@ -48,6 +48,7 @@ from urllib.parse import urlsplit
 from .alerts import FORMATS, Alert, Alerter
 from .clients.gluetun import GluetunAuthError, GluetunControl, GluetunUnreachable
 from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError
+from .clients.watchdog import WatchdogStatusClient
 from .logging_setup import configure_logging
 
 logger = logging.getLogger("ytp.watchdog")
@@ -460,12 +461,57 @@ def check(path: Path | None = None, max_age: float = 10.0) -> tuple[bool, str]:
     return True, "ok"
 
 
+def probe(what: str, argument: str = "", env: Mapping[str, str] | None = None) -> tuple[int, str]:
+    """Helpers for `scripts/vpn/vpn-abuse-test.sh`, run inside the watchdog container.
+
+    They print plain words (no JSON, no names, no addresses) so the host script can read them:
+
+    * `state`: the watchdog's own state (`ok`, `down`, `blind`, `starting`) from its status page;
+    * `counts`: `running=N paused=M` torrents, from qBittorrent;
+    * `hashes`: the infohashes of the running torrents, comma separated;
+    * `resume HASHES`: resume exactly those torrents (comma separated), prints `ok`.
+
+    Returns (exit code, text); exit 1 and `unreachable` when the thing cannot be asked.
+    """
+    values = os.environ if env is None else env
+    try:
+        config = WatchdogConfig.from_env(values)
+    except ConfigError:
+        return 2, "invalid configuration"
+    if what == "state":
+        port = config.status_port or 8090
+        status = WatchdogStatusClient(f"http://127.0.0.1:{port}").fetch_status()
+        return (0, str(status["state"])) if status["state"] != "unknown" else (1, "unreachable")
+    qbit = QbitClient(config.qbit_url, config.qbit_user, config.qbit_password, timeout=5.0)
+    try:
+        torrents = qbit.list_torrents()
+        running = [t.hash for t in torrents if not t.paused]
+        if what == "counts":
+            return 0, f"running={len(running)} paused={len(torrents) - len(running)}"
+        if what == "hashes":
+            return 0, ",".join(running)
+        if what == "resume":
+            hashes = [h for h in argument.split(",") if h]
+            if hashes:
+                qbit.resume_torrents(hashes)
+            return 0, "ok"
+    except QbitError:
+        return 1, "unreachable"
+    except ValueError as exc:
+        return 2, str(exc)
+    return 2, f"unknown probe {what!r}"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if args == ["--check"]:
         ok, message = check()
         print(message)
         return 0 if ok else 1
+    if args and args[0] == "--probe":
+        code, text = probe(args[1] if len(args) > 1 else "", args[2] if len(args) > 2 else "")
+        print(text)
+        return code
     configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
     try:
         config = WatchdogConfig.from_env()
