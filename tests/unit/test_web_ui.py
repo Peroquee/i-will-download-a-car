@@ -165,6 +165,7 @@ def test_requests_from_other_sites_are_refused_before_anything_happens(client, h
         ("POST", "/api/youtube/probe", {"url": "https://youtu.be/dQw4w9WgXcQ"}),
         ("POST", "/api/subscriptions", {"channel": "@kurzgesagt"}),
         ("DELETE", "/api/subscriptions/1", None),
+        ("POST", "/api/subscriptions/1/poll", None),
     ],
 )  # fmt: skip
 def test_every_state_changing_route_is_protected_and_nothing_is_created(client, method, path, body):
@@ -336,6 +337,7 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
     used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
+    used |= {"subs.polling", "subs.poll", "subs.confirm", "subs.remove", "subs.ok"}
     missing = {k for k in used if k not in t}
     assert not missing, sorted(missing)
 
@@ -583,3 +585,14 @@ def test_the_subscribe_checkbox_is_enabled_and_explains_what_it_does():
     assert re.search(r'<input id="subscribe" type="checkbox">', HTML)
     assert "yt.subscribe_soon" not in HTML
     assert "/api/subscriptions" in APP_JS
+
+
+def test_the_page_has_the_subscription_view_built_without_innerhtml():
+    for element_id in ("subs-form", "subs-channel", "subs-backfill", "subs-add", "subs-list",
+                       "subs-empty", "subs-error", "subs-result", "subs-load-error"):  # fmt: skip
+        assert f'id="{element_id}"' in HTML
+    for route in ("/api/subscriptions", "/poll"):
+        assert route in APP_JS
+    assert "innerHTML" not in APP_JS
+    assert 'method: "DELETE"' in APP_JS or '"DELETE"' in APP_JS
+    assert "window.confirm" not in APP_JS, "the two-step button is used instead of a dialog"

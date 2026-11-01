@@ -100,15 +100,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 seconds=RECONCILE_SECONDS,
                 run_immediately=True,
             )
+        # The poller also serves the "check now" button, so it exists even when the schedule is off.
+        app.state.poller = SubscriptionPoller(
+            app.state.db,
+            FeedClient(settings.ytdlp_proxy),
+            app.state.youtube_worker,
+            poll_minutes=settings.subscription_poll_minutes or 60,
+        )
         if settings.subscription_poll_minutes > 0:
             # New videos of subscribed channels go into the YouTube queue (#20). The feeds are
             # fetched through the same proxy as yt-dlp.
-            app.state.poller = SubscriptionPoller(
-                app.state.db,
-                FeedClient(settings.ytdlp_proxy),
-                app.state.youtube_worker,
-                poll_minutes=settings.subscription_poll_minutes,
-            )
             app.state.scheduler.add_interval_job(
                 app.state.poller.run_once, job_id=POLL_JOB_ID, seconds=POLL_JOB_SECONDS
             )

@@ -20,6 +20,12 @@ GET /api/subscriptions
 
 DELETE /api/subscriptions/{id}
     204; 404 if unknown. Videos that were already downloaded stay where they are.
+
+POST /api/subscriptions/{id}/poll
+    "Check now" (#27): looks at the channel's feed at once, whatever its interval, and queues new
+    videos like the scheduled poll. 200 with the subscription (fresh last_checked/last_error) and
+    `queued` (how many videos); 404 unknown; 429 another manual check is running; 502/503
+    {"detail", "kind"} if the feed could not be read (the reason is also in `last_error`).
 """
 
 from __future__ import annotations
@@ -35,7 +41,9 @@ from pydantic_core import PydanticCustomError
 from . import subscriptions
 from .apiutil import PROBE_STATUS, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
+from .feeds import FeedError
 from .metadata import Name, sanitize_name
+from .subscription_poller import PollBusy
 from .youtube import ProbeError
 
 logger = logging.getLogger(__name__)
@@ -103,7 +111,38 @@ async def unsubscribe(subscription_id: int, request: Request) -> Response:
     return Response(status_code=204)
 
 
+# The status of a failed "check now" by feed error kind (the channel is fine, the way to it is not).
+FEED_STATUS = {"network": 502, "not_found": 502, "temporary": 503, "bad_feed": 502}
+
+
+async def poll_now(subscription_id: int, request: Request) -> JSONResponse:
+    db = request.app.state.db
+    poller = request.app.state.poller
+    if db is None or poller is None:
+        return problem(503, "The database is not available; see /health.")
+    sub = await asyncio.to_thread(subscriptions.get, db, subscription_id)
+    if sub is None:
+        return problem(404, "no such subscription")
+    try:
+        queued = await asyncio.to_thread(poller.poll_now, sub)
+    except PollBusy:
+        return problem(429, "Another check is running; try again in a moment.")
+    except FeedError as error:
+        return JSONResponse(
+            {"detail": error.message, "kind": error.kind}, status_code=FEED_STATUS[error.kind]
+        )
+    except Exception:
+        logger.exception("manual channel poll crashed", extra={"subscription_id": sub.id})
+        await asyncio.to_thread(
+            subscriptions.record_poll, db, sub.id, "internal error while polling"
+        )
+        return problem(500, "Checking the channel failed unexpectedly; see the logs.")
+    fresh = await asyncio.to_thread(subscriptions.get, db, sub.id)
+    return JSONResponse({**(fresh or sub).as_dict(), "queued": queued})
+
+
 def register(app: FastAPI) -> None:
     app.add_api_route("/api/subscriptions", subscribe, methods=["POST"])
     app.add_api_route("/api/subscriptions", list_subscriptions, methods=["GET"])
     app.add_api_route("/api/subscriptions/{subscription_id}", unsubscribe, methods=["DELETE"])
+    app.add_api_route("/api/subscriptions/{subscription_id}/poll", poll_now, methods=["POST"])

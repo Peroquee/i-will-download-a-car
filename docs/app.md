@@ -376,6 +376,27 @@ a warning sign and the icon turns red (`favicon-alert.svg`), so it is visible fr
 and the bar gets `role="alert"` for screen readers. No sound or animation. The exit country is the
 only detail from the egress check shown; addresses are never sent to the page.
 
+## Subscription view (issue #27)
+
+Below the job list: **Subscribed channels**.
+
+- **Add:** one field for an `@handle`, a channel link or the link of one of its videos, and "Also
+  take older videos" (0 to 15, default 0 = only videos published after subscribing). It calls
+  `POST /api/subscriptions`; a bad address is shown under the field, a failed lookup (YouTube not
+  reachable, channel not found) as a message.
+- **List:** each channel with when it was last checked (or "never checked") and, in red, the last
+  error the poller recorded (for example that the feed could not be fetched because the VPN is
+  down). Refreshes every 30 s while the tab is visible and after every action.
+- **Check now:** `POST /api/subscriptions/{id}/poll` looks at that channel's feed at once,
+  whatever its interval, and queues new videos like the scheduled poll; the row says how many were
+  queued (they show up in the job list). It works even with `SUBSCRIPTION_POLL_MINUTES=0`. One
+  manual check runs at a time (429 otherwise); a failure answers 502/503 with the reason, which is
+  also stored as the channel's last error.
+- **Remove:** two clicks ("Remove", then "Really remove?" for 5 seconds), no dialog. Videos that
+  were already downloaded stay.
+
+Ticking "Subscribe to the channel" in the YouTube form (#19) refreshes this list too.
+
 ## Job list and retry (issue #26)
 
 Below the form the page lists the jobs, newest first (50 at a time), and refreshes itself every

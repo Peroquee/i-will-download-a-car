@@ -34,6 +34,7 @@
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
     refreshVpnText();
     renderJobs();
+    renderSubs();
   }
 
   /* ---------------------------------------------------------------- state */
@@ -168,6 +169,7 @@
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? "sub.duplicate" : "sub.created";
         showResult(downloadText + " " + t(key, { name: reply.data.channel_name }), true);
+        loadSubs();
         return;
       }
       var detail = "";
@@ -422,6 +424,214 @@
     });
   }
 
+  /* ---------------------------------------------------------------- subscriptions (#27) */
+
+  var SUBS_POLL_MS = 30000;
+  var subsData = null;
+  var subsLoading = false;
+  var subsLoadFailed = false;
+  var subsBusy = {};          // id -> "poll" | "remove" while a request runs
+  var subsConfirm = {};       // id -> true after the first click on Remove
+  var subsMessages = {};      // id -> {text, ok} shown under the row
+
+  function loadSubs() {
+    if (subsLoading) return;
+    subsLoading = true;
+    fetch("/api/subscriptions", { credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("status " + response.status);
+        return response.json();
+      })
+      .then(function (data) { subsData = data.subscriptions; subsLoadFailed = false; })
+      .catch(function () { subsLoadFailed = true; })
+      .then(function () { subsLoading = false; renderSubs(); });
+  }
+
+  function subsRequest(method, path) {
+    return fetch(path, {
+      method: method,
+      credentials: "same-origin",
+      headers: { "Accept": "application/json" },
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (data) {
+        return { status: response.status, data: data };
+      });
+    });
+  }
+
+  function failureText(reply, fallbackKey) {
+    var kind = reply.data && reply.data.kind;
+    var known = kind && t("kind." + kind) !== "kind." + kind;
+    var detail = reply.data && typeof reply.data.detail === "string" ? reply.data.detail : "";
+    return t(fallbackKey) + (known ? " " + t("kind." + kind) : detail ? " " + detail : "");
+  }
+
+  function subRow(sub) {
+    var li = document.createElement("li");
+    li.className = "job" + (sub.last_error ? " job-failed" : "");
+
+    var top = document.createElement("div");
+    top.className = "job-top";
+    var name = document.createElement("span");
+    name.className = "job-name";
+    name.textContent = sub.channel_name;
+    top.appendChild(name);
+    li.appendChild(top);
+
+    var meta = document.createElement("div");
+    meta.className = "job-meta";
+    meta.textContent = sub.last_checked
+      ? t("subs.checked", { when: timeText(sub.last_checked) })
+      : t("subs.never");
+    li.appendChild(meta);
+
+    if (sub.last_error) {
+      var problem = document.createElement("p");
+      problem.className = "job-error";
+      problem.textContent = sub.last_error;
+      li.appendChild(problem);
+    }
+    if (subsMessages[sub.id]) {
+      var note = document.createElement("p");
+      note.className = subsMessages[sub.id].ok ? "job-note" : "job-error";
+      note.textContent = subsMessages[sub.id].text();
+      li.appendChild(note);
+    }
+
+    var buttons = document.createElement("div");
+    buttons.className = "row-actions";
+    var busy = subsBusy[sub.id];
+    var poll = document.createElement("button");
+    poll.type = "button";
+    poll.className = "ghost small";
+    poll.disabled = !!busy;
+    poll.textContent = t(busy === "poll" ? "subs.polling" : "subs.poll");
+    poll.addEventListener("click", function () { pollSub(sub.id); });
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost small" + (subsConfirm[sub.id] ? " danger" : "");
+    remove.disabled = !!busy;
+    remove.textContent = t(subsConfirm[sub.id] ? "subs.confirm" : "subs.remove");
+    remove.addEventListener("click", function () { removeSub(sub.id); });
+    buttons.appendChild(poll);
+    buttons.appendChild(remove);
+    li.appendChild(buttons);
+    return li;
+  }
+
+  function renderSubs() {
+    var list = $("subs-list");
+    list.textContent = "";
+    $("subs-load-error").textContent = subsLoadFailed ? t("subs.load_error") : "";
+    if (!subsData) { $("subs-empty").hidden = true; return; }
+    subsData.forEach(function (sub) { list.appendChild(subRow(sub)); });
+    $("subs-empty").hidden = subsData.length > 0;
+  }
+
+  function pollSub(id) {
+    subsBusy[id] = "poll";
+    delete subsConfirm[id];
+    delete subsMessages[id];
+    renderSubs();
+    subsRequest("POST", "/api/subscriptions/" + id + "/poll").then(function (reply) {
+      if (reply.status === 200) {
+        var n = reply.data.queued || 0;
+        subsMessages[id] = { ok: true, text: function () { return n ? t("subs.polled", { n: n }) : t("subs.polled_none"); } };
+        if (n) pollJobs();
+      } else {
+        subsMessages[id] = { ok: false, text: function () { return failureText(reply, "subs.poll_failed"); } };
+      }
+    }).catch(function () {
+      subsMessages[id] = { ok: false, text: function () { return t("subs.poll_failed") + " " + t("result.network"); } };
+    }).then(function () { delete subsBusy[id]; loadSubs(); renderSubs(); });
+  }
+
+  /* Two clicks: the first asks "Really remove?", the second does it; the question lapses. */
+  function removeSub(id) {
+    if (!subsConfirm[id]) {
+      subsConfirm[id] = true;
+      renderSubs();
+      window.setTimeout(function () {
+        if (subsConfirm[id]) { delete subsConfirm[id]; renderSubs(); }
+      }, 5000);
+      return;
+    }
+    delete subsConfirm[id];
+    subsBusy[id] = "remove";
+    renderSubs();
+    subsRequest("DELETE", "/api/subscriptions/" + id).then(function (reply) {
+      delete subsBusy[id];
+      if (reply.status === 204 || reply.status === 404) {
+        delete subsMessages[id];
+        $("subs-result").textContent = t("subs.removed_note");
+        $("subs-result").className = "result ok";
+      } else {
+        subsMessages[id] = { ok: false, text: function () { return failureText(reply, "subs.remove_failed"); } };
+      }
+    }).catch(function () {
+      delete subsBusy[id];
+      subsMessages[id] = { ok: false, text: function () { return t("subs.remove_failed") + " " + t("result.network"); } };
+    }).then(function () { loadSubs(); renderSubs(); });
+  }
+
+  function subsShowResult(text, ok) {
+    $("subs-result").textContent = text;
+    $("subs-result").className = "result " + (ok ? "ok" : "bad");
+  }
+
+  function onSubsSubmit(event) {
+    event.preventDefault();
+    $("subs-error").textContent = "";
+    $("subs-result").textContent = "";
+    $("subs-result").className = "result";
+    $("subs-channel").removeAttribute("aria-invalid");
+    var channel = $("subs-channel").value.trim();
+    var backfillText = $("subs-backfill").value.trim() || "0";
+    if (!channel) {
+      $("subs-channel").setAttribute("aria-invalid", "true");
+      $("subs-error").textContent = t("err.required");
+      $("subs-channel").focus();
+      return;
+    }
+    if (!/^\d+$/.test(backfillText) || +backfillText > 15) {
+      $("subs-error").textContent = t("err.int_out_of_range");
+      $("subs-backfill").focus();
+      return;
+    }
+    $("subs-add").disabled = true;
+    post("/api/subscriptions", { channel: channel, backfill: +backfillText }).then(function (reply) {
+      $("subs-add").disabled = false;
+      if (reply.status === 201 || reply.status === 200) {
+        var key = reply.data.duplicate ? "subs.already" : "subs.added";
+        subsShowResult(t(key, { name: reply.data.channel_name }), true);
+        if (!reply.data.duplicate) { $("subs-channel").value = ""; $("subs-backfill").value = "0"; }
+        loadSubs();
+        return;
+      }
+      if (reply.status === 422) {
+        var errors = L.serverErrors(reply.data.detail);
+        $("subs-error").textContent = Object.keys(errors).map(function (field) { return message(errors[field]); }).join(" ");
+        $("subs-channel").setAttribute("aria-invalid", "true");
+        return;
+      }
+      subsShowResult(failureText(reply, "subs.add_failed"), false);
+    }).catch(function () {
+      $("subs-add").disabled = false;
+      subsShowResult(t("subs.add_failed") + " " + t("result.network"), false);
+    });
+  }
+
+  function startSubs() {
+    loadSubs();
+    $("subs-form").addEventListener("submit", onSubsSubmit);
+    window.setInterval(function () {
+      if (document.visibilityState !== "hidden") loadSubs();
+    }, SUBS_POLL_MS);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") loadSubs();
+    });
+  }
+
   /* ---------------------------------------------------------------- wiring */
 
   function onLinkChanged() {
@@ -459,6 +669,7 @@
       if (document.visibilityState === "visible") pollVpn();
     });
     startJobPolling();
+    startSubs();
   }
 
   init();

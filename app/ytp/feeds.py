@@ -7,7 +7,9 @@ and needs no API key. The feed comes from the internet, so it is treated as untr
   short timeouts, no redirects and a size limit;
 * the XML is read with the standard library after a **refusal of any DTD or entity declaration**
   (a real feed has none): that is what "billion laughs" and external-entity tricks need, so
-  without them ElementTree is safe to use and no extra dependency is needed;
+  without them ElementTree is safe to use and no extra dependency is needed. The check is made on
+  the text, so the feed must be UTF-8 (no NUL bytes, valid UTF-8): a UTF-16 feed could otherwise
+  hide the declaration from it;
 * only the fields used are taken (video id, title, publication time), each one checked: an id
   must look like a video id, a time must parse. Titles are later made safe as folder names by
   `metadata.sanitize_name`; nothing of the feed is ever used as a path or a command.
@@ -33,7 +35,7 @@ MAX_FEED_BYTES = 1024 * 1024
 MAX_ENTRIES = 50
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}")
-_DTD = re.compile(rb"<!\s*(doctype|entity)", re.IGNORECASE)
+_DTD = re.compile(r"<!\s*(doctype|entity)", re.IGNORECASE)
 
 
 class FeedError(Exception):
@@ -67,7 +69,15 @@ def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
     """
     if len(data) > MAX_FEED_BYTES:
         raise FeedError("bad_feed", "the feed is unexpectedly large")
-    if _DTD.search(data):
+    # Only UTF-8 is read. Another encoding (UTF-16 with or without a byte order mark, which has
+    # NUL bytes between the letters) would hide "<!DOCTYPE" from the check below.
+    if b"\x00" in data:
+        raise FeedError("bad_feed", "the feed is not UTF-8 text")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise FeedError("bad_feed", "the feed is not UTF-8 text") from None
+    if _DTD.search(text):
         raise FeedError("bad_feed", "the feed contains a DTD or entity declaration; refused")
     try:
         root = ET.fromstring(data)

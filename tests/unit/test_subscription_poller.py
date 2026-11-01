@@ -407,4 +407,4 @@ def test_the_app_schedules_the_poller_unless_it_is_switched_off(tmp_path, minute
     app = create_app(Settings.from_env(env))
     with TestClient(app):
         assert ("subscription-poll" in app.state.scheduler.job_ids()) is scheduled
-        assert (app.state.poller is not None) is scheduled
+        assert app.state.poller is not None, "it also serves the check-now button"
