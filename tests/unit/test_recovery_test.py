@@ -48,7 +48,13 @@ def info(started: float, health="healthy", running=True, policy="unless-stopped"
 # Start times after the reboot: gluetun first, qbittorrent after it is healthy, app, then proxy.
 AFTER = {"gluetun": 100, "qbittorrent": 140, "app": 110, "proxy": 130, "watchdog": 120}
 BEFORE = {"gluetun": -5000, "qbittorrent": -4990, "app": -4980, "proxy": -4970, "watchdog": -4960}
-HEALTHY_LOG = f"{stamp(135)} INFO [healthcheck] healthy!\n{stamp(90)} INFO [vpn] connecting\n"
+# gluetun 3.41's real wording (it never says "healthy"): tunnel up, then DNS ready.
+HEALTHY_LOG = (
+    f"{stamp(90)} INFO [vpn] connecting\n"
+    f"{stamp(120)} INFO [healthcheck] listening on 127.0.0.1:9999\n"
+    f"{stamp(130)} INFO [openvpn] Initialization Sequence Completed\n"
+    f"{stamp(135)} INFO [dns] ready\n"
+)
 
 
 class FakeDocker:
@@ -374,18 +380,57 @@ def test_proxy_before_app_fails(tmp_path, db_path, capsys):
     assert "proxy started BEFORE app" in capsys.readouterr().out
 
 
-def test_qbittorrent_started_before_gluetun_was_healthy_fails(tmp_path, db_path, capsys):
+def test_qbittorrent_started_before_gluetun_was_ready_fails(tmp_path, db_path, capsys):
     docker = FakeDocker()
-    docker.logs_text = f"{stamp(300)} INFO [healthcheck] healthy!\n"
+    docker.logs_text = f"{stamp(300)} INFO [openvpn] Initialization Sequence Completed\n{stamp(301)} INFO [dns] ready\n"
     assert run_verify(tmp_path, db_path, docker) == 1
-    assert "BEFORE gluetun reported healthy" in capsys.readouterr().out
+    assert "BEFORE gluetun's tunnel and DNS were ready" in capsys.readouterr().out
 
 
-def test_unhealthy_log_lines_do_not_count_as_healthy(tmp_path, db_path, capsys):
+def test_the_later_of_tunnel_up_and_dns_ready_counts(tmp_path, db_path, capsys):
+    """qbittorrent started between the two lines: after the tunnel, before DNS."""
     docker = FakeDocker()
-    docker.logs_text = f"{stamp(120)} ERROR [healthcheck] unhealthy: dial tcp\n{stamp(135)} INFO [healthcheck] healthy!\n"
+    docker.logs_text = f"{stamp(130)} INFO [openvpn] Initialization Sequence Completed\n{stamp(160)} INFO [dns] ready\n"
+    assert run_verify(tmp_path, db_path, docker) == 1
+    assert "BEFORE" in capsys.readouterr().out
+
+
+def test_lines_from_an_earlier_run_of_the_same_container_are_ignored(tmp_path, db_path, capsys):
+    """Docker keeps one log across restarts: only lines after this start count."""
+    docker = FakeDocker()
+    docker.logs_text = (
+        f"{stamp(-9000)} INFO [openvpn] Initialization Sequence Completed\n"
+        f"{stamp(-8990)} INFO [dns] ready\n"
+        f"{stamp(90)} INFO [vpn] connecting\n"
+        f"{stamp(130)} INFO [openvpn] Initialization Sequence Completed\n"
+        f"{stamp(135)} INFO [dns] ready\n"
+    )
     assert run_verify(tmp_path, db_path, docker) == 0
-    assert "after gluetun reported healthy" in capsys.readouterr().out
+    assert "after gluetun's tunnel and DNS were ready" in capsys.readouterr().out
+
+
+def test_colour_codes_in_the_log_do_not_hide_the_lines(tmp_path, db_path, capsys):
+    docker = FakeDocker()
+    docker.logs_text = (
+        f"{stamp(130)} \x1b[32mINFO\x1b[0m [openvpn] Initialization Sequence Completed\n"
+        f"{stamp(135)} INFO [dns] ready\n"
+    )
+    assert run_verify(tmp_path, db_path, docker) == 0
+    assert "after gluetun's tunnel and DNS were ready" in capsys.readouterr().out
+
+
+def test_only_one_of_the_two_lines_is_enough(tmp_path, db_path, capsys):
+    docker = FakeDocker()
+    docker.logs_text = f"{stamp(130)} INFO [openvpn] Initialization Sequence Completed\n"
+    assert run_verify(tmp_path, db_path, docker) == 0
+    assert "after gluetun's tunnel and DNS were ready" in capsys.readouterr().out
+
+
+def test_the_old_healthy_wording_does_not_count_any_more(tmp_path, db_path, capsys):
+    docker = FakeDocker()
+    docker.logs_text = f"{stamp(135)} INFO [healthcheck] healthy!\n"
+    assert run_verify(tmp_path, db_path, docker) == 0
+    assert "WARN  could not read from gluetun's log" in capsys.readouterr().out
 
 
 def test_an_unreadable_gluetun_log_is_only_a_warning(tmp_path, db_path, capsys):
