@@ -122,6 +122,22 @@ class Torrent:
         return self.progress >= 1.0
 
     @property
+    def failed(self) -> bool:
+        """qBittorrent itself reports the torrent as broken (`error`, `missingFiles`)."""
+        return self.state in {"error", "missingFiles"}
+
+    @property
+    def ready_to_organize(self) -> bool:
+        """Completely downloaded AND settled: not being moved from the incomplete folder to
+        its category folder (`moving`; the path changes), not being re-checked (`checking*`)."""
+        return (
+            self.finished
+            and not self.failed
+            and self.state != "moving"
+            and not self.state.startswith("checking")
+        )
+
+    @property
     def paused(self) -> bool:
         """Paused by hand or pause_all(): `paused*` (qBittorrent 4.x) or `stopped*` (5.x) states."""
         return self.state.startswith(("paused", "stopped"))

@@ -179,6 +179,43 @@ raises and never waits for Jellyfin, so a refresh problem cannot fail a download
 - Pending refreshes live in memory: a restart loses them, and Jellyfin's own library scan finds
   the files later.
 
+## Completion reconciler (issue #15)
+
+The scheduler job `reconcile` (every 30 s, started at once, only when qBittorrent is configured)
+keeps the unfinished magnet jobs in step with qBittorrent (`ytp.reconciler.Reconciler`):
+
+```
+queued -> downloading -> organizing -> done          any of them -> failed (with a reason)
+```
+
+It polls the Web API instead of using qBittorrent's "run on completion" hook (silent-failure
+reports; it would run inside gluetun's namespace and need a hole in the VPN firewall).
+
+| qBittorrent says | the job |
+|---|---|
+| the torrent is there and downloading | `queued` becomes `downloading` |
+| finished (`progress` 1.0) and settled | claimed as `organizing`, the organizer runs, then `done` |
+| `moving` (leaving the incomplete folder) or `checking*` | wait; the path is not final yet |
+| `error` / `missingFiles` | `failed`: "qBittorrent reports the torrent as 'error'" |
+| the torrent is gone | `failed`: "no longer in qBittorrent ... send the magnet link again" |
+| gone, and the job is `queued` for over 2 min | `failed`: "never reached qBittorrent (the app stopped before adding it)" (the endpoint writes the job before it asks qBittorrent) |
+
+- **Idempotent:** every run starts from what is true now, so a torrent that finished while the
+  app was down is organized at the first run; a `done` job is never touched; the claim is a
+  conditional UPDATE. The organizer (#16) must tolerate being run again for the same job.
+- **Never stuck in `organizing`:** the organizer runs in a `try`; an `OrganizeError` (or any
+  other exception) makes the job `failed` with `organizing failed: <reason>`. If the app is killed
+  in the middle, the next run finds the leftover `organizing` job (nothing else organizes at the
+  start of a run) and organizes it again.
+- **qBittorrent away** (the VPN reconnects): nothing changes, no job is failed; the outage and
+  the recovery are logged once each. A refused login is logged once and not retried (ban
+  protection of the client).
+- **Without an organizer** (until #16 sets `app.state.organizer`): finished torrents stay
+  `downloading`, with one warning in the log; nothing is lost.
+- `app_state` key `reconciler.last_ok` has the time of the last successful run.
+- A torrent that never finds metadata (a magnet nobody seeds) stays `downloading`; a timeout for
+  that is not part of this issue.
+
 ## Database (issue #9)
 
 The app keeps its jobs and YouTube subscriptions in one SQLite file, `/config/app.db`

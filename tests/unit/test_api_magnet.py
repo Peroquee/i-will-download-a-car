@@ -131,7 +131,7 @@ def test_a_bad_magnet_is_a_422_on_the_magnet_field(client, fake, magnet):
     assert error["loc"] == ["body", "magnet"]
     assert error["type"] == "magnet_invalid"
     assert rows(client) == []
-    assert fake.seen == []
+    assert fake.calls("torrents/add") == []
 
 
 def test_bad_metadata_is_a_422_naming_the_field(client, fake):
@@ -143,7 +143,7 @@ def test_bad_metadata_is_a_422_naming_the_field(client, fake):
         (("body", "metadata", "movies", "title"), "name_empty"),
     }
     assert rows(client) == []
-    assert fake.seen == []
+    assert fake.calls("torrents/add") == []
 
 
 @pytest.mark.parametrize(
@@ -161,7 +161,7 @@ def test_bad_metadata_is_a_422_naming_the_field(client, fake):
 def test_malformed_bodies_are_a_422(client, fake, body):
     assert client.post("/api/magnet", json=body).status_code == 422
     assert rows(client) == []
-    assert fake.seen == []
+    assert fake.calls("torrents/add") == []
 
 
 def test_a_body_that_is_not_json_is_a_422(client):
@@ -285,7 +285,7 @@ def test_without_a_database_the_answer_is_503_and_qbittorrent_is_not_asked(tmp_p
         response = post(client)
         assert response.status_code == 503
         assert "database" in response.json()["detail"]
-        assert fake.seen == []
+        assert fake.calls("torrents/add") == []
 
 
 # --- security and logging ----------------------
@@ -314,7 +314,7 @@ def test_the_log_has_the_infohash_but_never_the_link_or_its_tracker_passkey(tmp_
 def test_a_hostile_title_cannot_become_a_path_or_a_second_torrent(client, fake):
     for title in ("../../etc/passwd", "a\nb", "a/b"):
         assert post(client, metadata={**MOVIE, "title": title}).status_code == 422
-    assert fake.seen == []
+    assert fake.calls("torrents/add") == []
 
 
 # --- the job function on its own ----------------------
