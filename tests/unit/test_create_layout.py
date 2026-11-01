@@ -28,13 +28,18 @@ class Layout:
         self.data = self.root / "data"
         self.data.mkdir(parents=True)
         self.env_file = tmp / "host.env"
+        # As root (CI) any non-root owner can be created; otherwise only our own ids work.
+        if os.geteuid() == 0:
+            self.puid = self.pgid = 4242
+        else:
+            self.puid, self.pgid = os.getuid(), os.getgid()
         self.write_env()
 
     def write_env(self, **overrides: str | None) -> None:
         values: dict[str, str | None] = {
             "DATA_ROOT": "/data",
-            "PUID": str(os.getuid()),
-            "PGID": str(os.getgid()),
+            "PUID": str(self.puid),
+            "PGID": str(self.pgid),
             **LIBRARIES,
         }
         values.update(overrides)
@@ -79,7 +84,7 @@ def test_new_folders_are_setgid_group_writable(layout):
 def test_new_folders_get_the_configured_owner(layout):
     layout.run()
     info = (layout.data / "Serien").stat()
-    assert (info.st_uid, info.st_gid) == (os.getuid(), os.getgid())
+    assert (info.st_uid, info.st_gid) == (layout.puid, layout.pgid)
 
 
 def test_is_safe_to_run_twice(layout):
