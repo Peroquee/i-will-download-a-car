@@ -10,7 +10,7 @@
 # starting a half-configured VPN.
 #
 # Services marked `profiles: [planned]` are placeholders for later issues and
-# do not start with a plain `docker compose up -d`.
+# do not start with a plain `docker compose up -d` (none are left at the moment).
 
 name: youtube-premium
 
@@ -146,13 +146,45 @@ services:
           create_host_path: false
       - ${DATA_ROOT:?DATA_ROOT must be set in .env}:/data
 
-  # Second safety layer: pauses all torrents when the VPN drops. Placeholder until #18.
+  # Second safety layer (#21): pauses all torrents when the VPN drops. Gluetun's firewall is the
+  # real protection; this is a separate small process (same image as the app, `python -m
+  # ytp.watchdog`) that keeps working if the app is wedged. It asks gluetun's control server for
+  # the VPN status every second with a read-only key (scripts/watchdog/setup_key.py), and after
+  # WATCHDOG_THRESHOLD failures in a row tells qBittorrent to pause everything. No ports, no
+  # volumes, no database, no capabilities. See docs/watchdog.md.
   watchdog:
     <<: *service-defaults
-    profiles: [planned]
-    image: youtube-premium/watchdog:dev
+    build: ./app
+    image: youtube-premium/app:dev
+    command: ["python", "-m", "ytp.watchdog"]
+    user: "${PUID:?PUID must be set in .env}:${PGID:?PGID must be set in .env}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       TZ: ${TZ:?TZ must be set in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GLUETUN_CONTROL_URL: http://gluetun:8000
+      GLUETUN_CONTROL_APIKEY: ${GLUETUN_CONTROL_APIKEY:?GLUETUN_CONTROL_APIKEY must be set (make watchdog-key)}
+      QBIT_URL: http://gluetun:8080
+      QBIT_USER: ${QBIT_USER:-admin}
+      # Empty = the watchdog refuses to start (exit 2, says so in its log): without the password it could not pause anything.
+      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
+      WATCHDOG_INTERVAL: ${WATCHDOG_INTERVAL:-1}
+      WATCHDOG_THRESHOLD: ${WATCHDOG_THRESHOLD:-3}
+      WATCHDOG_RESUME_AFTER: ${WATCHDOG_RESUME_AFTER:-0}
+    # Unhealthy when the poll loop stopped, or when it cannot read the VPN status (the key or
+    # gluetun's auth file is wrong): then it protects nothing, and docker compose ps says so.
+    healthcheck:
+      test: ["CMD", "python", "-m", "ytp.watchdog", "--check"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   # Reverse proxy with login, LAN only (#29): the ONLY way in from the LAN. Caddy checks that the
   # client is inside LAN_SUBNET and asks for a login (proxy/Caddyfile, docs/proxy.md), then passes
