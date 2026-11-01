@@ -271,7 +271,7 @@ It does exactly this, and prints only the verdicts `VPN IP`, `no connection` and
 2. `docker stop gluetun`, then the same request again must give **no connection**. If it
    answers with the home address, that is a **HOME IP LEAK** and the setup is wrong.
 3. `docker start gluetun`: qbittorrent must have a connection again, with a VPN address,
-   **without anyone restarting it**.
+   **automatically** (netwatch restarts the container; nobody has to).
 
 Step 3 is the recovery path. qBittorrent shares gluetun's network namespace; when gluetun
 restarts as the same container it gets a new namespace and qBittorrent keeps the dead
