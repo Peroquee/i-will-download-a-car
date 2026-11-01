@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -115,6 +116,19 @@ def test_media_dirs_are_single_folder_names_relative_to_data_root(name):
 def test_media_dirs_are_distinct():
     values = [ENV_EXAMPLE[name] for name in MEDIA_DIRS]
     assert len(set(values)) == len(values)
+
+
+def test_jellyfin_url_is_an_http_address_on_the_lan():
+    url = urlparse(ENV_EXAMPLE["JELLYFIN_URL"])
+    assert url.scheme == "http"
+    assert ipaddress.ip_address(url.hostname).is_private
+    assert not url.path.strip("/"), "the base address only, no path"
+
+
+@pytest.mark.security
+def test_jellyfin_api_key_is_never_in_the_example():
+    # The owner creates it in Jellyfin and puts it only in .env on the VM.
+    assert ENV_EXAMPLE["JELLYFIN_API_KEY"] == ""
 
 
 def test_data_root_is_absolute():

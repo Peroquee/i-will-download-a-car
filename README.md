@@ -7,7 +7,7 @@ the VPN) and files the result into the right library.
 ## Layout
 
 ```
-docker-compose.yml     the stack (gluetun, qbittorrent; app/watchdog/proxy planned)
+docker-compose.yml     the stack (gluetun, qbittorrent; app/watchdog/proxy planned; Jellyfin is external)
 compose/               per-VPN-type gluetun settings (vpn-openvpn.yml, vpn-wireguard.yml)
 .env.example           every setting; copy to .env on the host
 scripts/proxmox/       create the VM on the Proxmox node
@@ -16,6 +16,7 @@ scripts/qbittorrent/   seed qBittorrent's login and VPN binding; categories; net
 scripts/vpn/           render ExpressVPN's .ovpn for gluetun; the killswitch test
 tests/<level>/         unit, integration, smoke, system, regression
 docs/host-setup.md     step-by-step host setup (issue #1)
+docs/jellyfin.md       the external Jellyfin: API key, libraries, audiobooks question
 docs/testing.md        test levels, markers and rules
 index.html             first draft of the submission form (moves into app/ with #8)
 ```

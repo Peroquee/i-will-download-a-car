@@ -219,3 +219,26 @@ def test_library_folder_names_reach_the_app_with_their_umlauts(tmp_path: Path):
     app = rendered_config(env_file, profiles=("planned",))["services"]["app"]["environment"]
     assert app["MEDIA_DIR_AUDIOBOOKS"] == "Hörbücher"
     assert app["MEDIA_DIR_MOVIES"] == "Filme"
+
+
+def test_jellyfin_settings_reach_the_app(tmp_path: Path):
+    env_file = write_env(
+        tmp_path / ".env", JELLYFIN_URL="http://192.168.178.108:8096", JELLYFIN_API_KEY="k3y"
+    )
+    app = rendered_config(env_file, profiles=("planned",))["services"]["app"]["environment"]
+    assert app["JELLYFIN_URL"] == "http://192.168.178.108:8096"
+    assert app["JELLYFIN_API_KEY"] == "k3y"
+
+
+@pytest.mark.parametrize("missing", ["JELLYFIN_URL", "JELLYFIN_API_KEY"])
+def test_the_jellyfin_settings_are_optional_in_compose(tmp_path: Path, missing):
+    """The app is still a placeholder and the key is created by the owner later: an .env
+    without them must not stop `docker compose` (the app checks them when it runs)."""
+    env_file = write_env(tmp_path / ".env", **{missing: None})
+    result = compose("config", "--quiet", env_file=env_file, profiles=("*",))
+    assert result.returncode == 0, result.stderr
+
+
+def test_there_is_no_jellyfin_service():
+    config = rendered_config(profiles=("*",))
+    assert "jellyfin" not in config["services"]

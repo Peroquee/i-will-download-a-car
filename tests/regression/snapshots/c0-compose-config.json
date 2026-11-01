@@ -4,6 +4,8 @@
     "depends_on": {},
     "devices": [],
     "environment": {
+      "JELLYFIN_API_KEY": "",
+      "JELLYFIN_URL": "http://192.168.178.108:8096",
       "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
       "MEDIA_DIR_MOVIES": "Filme",
       "MEDIA_DIR_MUSIC": "Musik",
@@ -82,32 +84,6 @@
     "user": null,
     "volumes": [
       "<repo>/config/gluetun:/gluetun"
-    ]
-  },
-  "jellyfin": {
-    "cap_add": [],
-    "depends_on": {},
-    "devices": [],
-    "environment": {},
-    "healthcheck": null,
-    "image": "jellyfin/jellyfin:latest",
-    "logging": {
-      "driver": "json-file",
-      "options": {
-        "max-file": "3",
-        "max-size": "10m"
-      }
-    },
-    "network_mode": null,
-    "ports": [],
-    "profiles": [
-      "jellyfin"
-    ],
-    "restart": "unless-stopped",
-    "user": "1000:1000",
-    "volumes": [
-      "/data/media:/data/media:ro",
-      "<repo>/config/jellyfin:/config"
     ]
   },
   "proxy": {
