@@ -33,13 +33,21 @@ def env(tmp_path: Path):
     return {"stubs": stubs, "os_release": os_release, "fstab": fstab, "tmp": tmp_path}
 
 
-def bootstrap(env, *args: str, dry_run: bool = True) -> ScriptResult:
+def bootstrap(env, *args: str, dry_run: bool = True, qga_device: bool = False) -> ScriptResult:
+    """Run bootstrap.sh; qga_device says whether the fake host has the guest-agent device."""
     argv = list(args) + (["--dry-run"] if dry_run else [])
+    device = env["tmp"] / "org.qemu.guest_agent.0"
+    if qga_device:
+        device.touch()
     return run_script(
         SCRIPT,
         argv,
         stubs=env["stubs"],
-        env={"OS_RELEASE": str(env["os_release"]), "FSTAB_FILE": str(env["fstab"])},
+        env={
+            "OS_RELEASE": str(env["os_release"]),
+            "FSTAB_FILE": str(env["fstab"]),
+            "QGA_DEVICE": str(device),
+        },
     )
 
 
@@ -131,8 +139,40 @@ def test_does_not_use_debian_docker_io_package(env):
 
 def test_enables_docker_and_adds_user_to_group(env):
     lines = planned(bootstrap(env, "--user", "alice"))
-    assert "+ systemctl enable --now docker qemu-guest-agent" in lines
+    assert "+ systemctl enable --now docker" in lines
     assert "+ usermod -aG docker alice" in lines
+
+
+def test_guest_agent_is_enabled_but_never_started_blocking(env):
+    """Regression: `enable --now qemu-guest-agent` waited ~90 s for a missing virtio device,
+    failed, and set -e aborted bootstrap before the tun and /data steps."""
+    for qga_device in (False, True):
+        lines = planned(bootstrap(env, "--user", "u", qga_device=qga_device))
+        assert "+ systemctl enable qemu-guest-agent" in lines
+        assert not any("qemu-guest-agent" in line and "--now" in line.split() for line in lines), (
+            lines
+        )
+        starts = [ln for ln in lines if "systemctl start" in ln and "qemu-guest-agent" in ln]
+        assert all("--no-block" in ln.split() for ln in starts), starts
+
+
+def test_guest_agent_is_started_only_when_its_device_exists(env):
+    lines = planned(bootstrap(env, "--user", "u", qga_device=True))
+    assert "+ systemctl start --no-block qemu-guest-agent" in lines
+
+
+def test_without_the_guest_agent_device_it_is_not_started_and_a_hint_is_logged(env):
+    result = bootstrap(env, "--user", "u", qga_device=False)
+    assert result.returncode == 0, result.stderr
+    assert not any("systemctl start" in line for line in planned(result))
+    assert "QEMU Guest Agent" in result.stdout
+    assert "Options" in result.stdout
+
+
+def test_the_tun_and_media_steps_still_follow_the_guest_agent_step(env):
+    lines = planned(bootstrap(env, "--user", "u", qga_device=False))
+    docker = lines.index("+ systemctl enable --now docker")
+    assert docker < lines.index("+ write /etc/modules-load.d/tun.conf: tun")
 
 
 def test_tun_module_loads_on_boot(env):
