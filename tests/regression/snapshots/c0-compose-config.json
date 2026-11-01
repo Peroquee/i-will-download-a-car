@@ -183,10 +183,31 @@
     "depends_on": {},
     "devices": [],
     "environment": {
-      "TZ": "Europe/Berlin"
+      "GLUETUN_CONTROL_APIKEY": "changeme",
+      "GLUETUN_CONTROL_URL": "http://gluetun:8000",
+      "LOG_LEVEL": "INFO",
+      "QBIT_PASSWORD": "",
+      "QBIT_URL": "http://gluetun:8080",
+      "QBIT_USER": "admin",
+      "TZ": "Europe/Berlin",
+      "WATCHDOG_INTERVAL": "1",
+      "WATCHDOG_RESUME_AFTER": "0",
+      "WATCHDOG_THRESHOLD": "3"
     },
-    "healthcheck": null,
-    "image": "youtube-premium/watchdog:dev",
+    "healthcheck": {
+      "interval": "10s",
+      "retries": 3,
+      "start_period": "15s",
+      "test": [
+        "CMD",
+        "python",
+        "-m",
+        "ytp.watchdog",
+        "--check"
+      ],
+      "timeout": "5s"
+    },
+    "image": "youtube-premium/app:dev",
     "logging": {
       "driver": "json-file",
       "options": {
@@ -196,11 +217,9 @@
     },
     "network_mode": null,
     "ports": [],
-    "profiles": [
-      "planned"
-    ],
+    "profiles": [],
     "restart": "unless-stopped",
-    "user": null,
+    "user": "1000:1000",
     "volumes": []
   }
 }
