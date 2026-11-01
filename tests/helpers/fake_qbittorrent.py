@@ -42,6 +42,8 @@ class FakeQbittorrent:
     bad_filters: set[str] = field(default_factory=set)  # torrents/info?filter=<these> -> 400
     seen: list[Seen] = field(default_factory=list)
     sid: str = "SID-0001"
+    # qBittorrent 5.2+ names the cookie QBT_SID_<port>; older versions SID. None = the 5.2 name.
+    cookie_name: str | None = None
     logins: int = 0
     _generation: int = 1
 
@@ -56,6 +58,11 @@ class FakeQbittorrent:
         self._valid_sids = set()
 
     _valid_sids: set = field(default_factory=set)
+
+    @property
+    def cookie(self) -> str:
+        """The Cookie header value a client must send for the current session."""
+        return f"{self.cookie_name or f'QBT_SID_{self.port}'}={self.sid}"
 
     @property
     def url(self) -> str:
@@ -113,7 +120,7 @@ class FakeQbittorrent:
                 cookie = headers.get("cookie", "")
                 if (
                     fake.reject_sessions
-                    or cookie != f"SID={fake.sid}"
+                    or cookie != fake.cookie
                     or fake.sid not in fake._valid_sids
                 ):
                     return self.reply(403, "Forbidden")
@@ -135,13 +142,13 @@ class FakeQbittorrent:
                         return self.reply(200, "Fails.")
                     fake._valid_sids.add(fake.sid)
                     return self.reply(
-                        200, "Ok.", {"Set-Cookie": f"SID={fake.sid}; HttpOnly; path=/"}
+                        200, "Ok.", {"Set-Cookie": f"{fake.cookie}; HttpOnly; path=/"}
                     )
                 if not good:
                     return self.reply(401, "Unauthorized")
                 fake._valid_sids.add(fake.sid)
                 self.reply(
-                    204, "", {"Set-Cookie": f"SID={fake.sid}; HttpOnly; SameSite=Strict; path=/"}
+                    204, "", {"Set-Cookie": f"{fake.cookie}; HttpOnly; SameSite=Lax; path=/"}
                 )
 
             def api(self, method, path, query, form):
