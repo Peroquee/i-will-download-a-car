@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,9 @@ class Settings:
     qbit_user: str = "admin"
     # A secret, like the Jellyfin key: never in repr/str or a log line.
     qbit_password: str = field(default="", repr=False)
+    # File mode mask for the folders the organizer creates (UMASK in .env; 002 keeps the group
+    # able to write, which the other media users need). Applied once at startup, see __main__.
+    umask: int = 0o022
 
     @property
     def qbit_configured(self) -> bool:
@@ -143,6 +147,13 @@ class Settings:
         elif parsed_qbit.path.strip("/"):
             problems.append(f"QBIT_URL must be host[:port] without a path, got {qbit_url!r}")
 
+        umask = 0o022
+        raw_umask = text("UMASK", "022")
+        if re.fullmatch(r"0?[0-7]{3}", raw_umask):
+            umask = int(raw_umask, 8)
+        else:
+            problems.append(f"UMASK must be an octal mask like 002, got {raw_umask!r}")
+
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -157,6 +168,7 @@ class Settings:
             qbit_url=qbit_url,
             qbit_user=text("QBIT_USER", "admin"),
             qbit_password=text("QBIT_PASSWORD"),
+            umask=umask,
         )
 
 

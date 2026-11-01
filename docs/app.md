@@ -216,6 +216,44 @@ reports; it would run inside gluetun's namespace and need a hole in the VPN fire
 - A torrent that never finds metadata (a magnet nobody seeds) stays `downloading`; a timeout for
   that is not part of this issue.
 
+## File organizer (issue #16)
+
+`ytp.organizer.FileOrganizer` is the `organize(job, torrent)` the reconciler (#15) calls for a
+finished torrent. It reads the job's metadata (#14), builds the target paths, links the wanted
+files into the library folder of the type (`MEDIA_DIR_*` under `/data`) and asks Jellyfin for a
+debounced refresh of that library (`request_refresh(<folder>)`, #11).
+
+| type | target |
+|---|---|
+| movies | `Filme/Title (2008)/Title (2008).mkv`, subtitles next to it keep their language suffix (`Title (2008).de.srt`) |
+| series | `Serien/Title/Season 03/Title - S03E07.mkv` |
+| audiobooks | `Hörbücher/Author/Title/<audio files as they are, disc folders kept>` + `cover.jpg`/`folder.jpg` |
+| music | `Musik/Artist/Album/<audio files as they are, disc folders kept>` + cover |
+
+- **Hardlink, never move.** One file on disk, two names; the torrent keeps seeding from its
+  original path, which is never touched. If the two folders are on different filesystems
+  (`EXDEV`) the file is copied (via a temporary name) with a warning in the log; any other link
+  error is a failure with the system's message, never a silent copy.
+- **Series:** a single episode uses the metadata (season and episode) whatever the file is called;
+  a **season pack** maps every video by the number in its name: `S03E07`, `s3e7`, `3x07`,
+  `S03E07E08` / `S03E07-E09` (written `S03E07-E08`), or `E05`/`Episode 06` with the season from a
+  `Season N`/`Staffel N` folder, else from the metadata. A season in the file name wins over the
+  metadata (it describes the content). Two files for one episode: the larger is kept. Files
+  without an episode number are skipped (with a note in the log); a pack with none at all fails.
+- **Movies:** the largest video file; further videos are treated as extras and not linked.
+- **Junk is not linked:** `.nfo`, `.txt`, `.url`, checksums, executables, posters, sample files
+  (a `sample` word in the name or a `Sample/` folder), screenshot folders; video types take only
+  videos and subtitles, audio types only audio and covers.
+- **Repeatable and careful:** a target that already is the same file is fine; a different file
+  there is never overwritten (skipped and logged; if nothing at all could be linked the job fails
+  with "already exist in the library with other content"). Missing downloads, a missing library
+  folder, no video/audio, or invalid stored metadata fail the job with a readable reason.
+- **Untrusted file names:** symlinks in the torrent are never followed; the source must be inside
+  `downloads/` and every target inside its library folder; every name passes
+  `safe_path_component` (names with control characters or over 255 bytes are skipped).
+- New folders honour `UMASK` from `.env` (the app applies it at start): 002 keeps them
+  group-writable; Jellyfin reads through the "other" bits.
+
 ## Database (issue #9)
 
 The app keeps its jobs and YouTube subscriptions in one SQLite file, `/config/app.db`
