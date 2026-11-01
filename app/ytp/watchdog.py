@@ -48,6 +48,7 @@ from urllib.parse import urlsplit
 from .alerts import FORMATS, Alert, Alerter
 from .clients.gluetun import GluetunAuthError, GluetunControl, GluetunUnreachable
 from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError
+from .egress import EgressChecker, parse_networks
 from .logging_setup import configure_logging
 
 logger = logging.getLogger("ytp.watchdog")
@@ -75,6 +76,10 @@ class WatchdogConfig:
     alert_token: str = ""
     alert_format: str = "ntfy"
     status_port: int = 8090  # 0 = no status server
+    egress_interval: float = 300.0  # seconds between egress checks; 0 = off
+    egress_confirm: int = 2  # consecutive mismatches before acting
+    home_public_ip: str = ""  # semi-secret: addresses/prefixes of the home line
+    egress_expected_country: str = ""
 
     def __repr__(self) -> str:  # never show the secrets
         return f"WatchdogConfig(control_url={self.control_url!r}, interval={self.interval})"
@@ -106,6 +111,14 @@ class WatchdogConfig:
             )
         if alert_url and urlsplit(alert_url).scheme not in {"http", "https"}:
             problems.append("ALERT_URL must be an http(s) address (its value is not shown)")
+        egress_interval = number("EGRESS_CHECK_INTERVAL", 300.0, 0.0, 86400.0)
+        if 0 < egress_interval < 30:
+            problems.append("EGRESS_CHECK_INTERVAL must be 0 (off) or at least 30 seconds")
+        home_ip = text("HOME_PUBLIC_IP")
+        try:
+            parse_networks(home_ip)
+        except ValueError as exc:  # names the entry, never its value
+            problems.append(f"HOME_PUBLIC_IP: {exc}")
         api_key = text("GLUETUN_CONTROL_APIKEY")
         password = text("QBIT_PASSWORD")
         if not api_key:
@@ -127,6 +140,10 @@ class WatchdogConfig:
             alert_token=text("ALERT_TOKEN"),
             alert_format=alert_format,
             status_port=int(number("WATCHDOG_STATUS_PORT", 8090, 0, 65535)),
+            egress_interval=egress_interval,
+            egress_confirm=int(number("EGRESS_CONFIRM", 2, 1, 10)),
+            home_public_ip=home_ip,
+            egress_expected_country=text("EGRESS_EXPECTED_COUNTRY"),
         )
         if problems:
             raise ConfigError("invalid configuration:\n  " + "\n  ".join(problems))
@@ -143,8 +160,15 @@ class Watchdog:
         clock: Callable[[], float] = time.monotonic,
         alerter: Alerter | None = None,
         wall: Callable[[], datetime] = lambda: datetime.now(UTC),
+        egress: EgressChecker | None = None,
     ):
         self.alerter = alerter
+        self.egress = egress
+        self.egress_state = "off" if egress is None else "unknown"  # off|unknown|ok|mismatch
+        self.egress_country = ""
+        self._egress_checked: datetime | None = None
+        self._egress_bad = 0
+        self._egress_paused = False
         self._wall = wall
         self._lock = threading.Lock()
         self._since = wall()
@@ -189,6 +213,13 @@ class Watchdog:
                 if self._last_poll
                 else None,
                 "auto_resume": self.config.resume_after > 0,
+                "egress": self.egress_state,
+                "egress_checked": (
+                    self._egress_checked.isoformat(timespec="seconds")
+                    if self._egress_checked
+                    else None
+                ),
+                "egress_country": self.egress_country,
             }
 
     def _mark(self, reason: str = "") -> None:
@@ -377,9 +408,97 @@ class Watchdog:
         with contextlib.suppress(QbitError):
             self._remembered = [t.hash for t in self.qbit.list_torrents() if not t.paused]
 
+    # ------------------------------------------------------------------ the egress check (#23)
+
+    def check_egress(self) -> None:
+        """One slow egress sanity check and what follows. Runs on its own thread, every few minutes.
+
+        Only while the VPN is up and the watchdog can see: a restarting tunnel is not a mismatch.
+        `egress_confirm` mismatches in a row are needed (one odd answer is not a leak). A
+        confirmed mismatch alerts loudly and pauses all torrents; they are never resumed
+        automatically (that needs a person who has looked), also not when the next check is fine.
+        """
+        if self.egress is None or self.state != "healthy" or self.misconfigured:
+            return
+        result = self.egress.check()
+        with self._lock:
+            self._egress_checked = self._wall()
+            if result.country:
+                self.egress_country = result.country
+        if result.status == "inconclusive":
+            logger.warning("egress check inconclusive", extra={"why": "; ".join(result.problems)})
+            return
+        if result.status == "ok":
+            self._egress_bad = 0
+            if self.egress_state == "mismatch":
+                logger.warning("egress check passes again (torrents stay paused)")
+                self._alert(
+                    "egress_ok",
+                    "VPN egress check passes again",
+                    [
+                        "The egress address looks right again.",
+                        "Torrents that were paused stay paused: check and resume them yourself.",
+                    ],
+                    urgent=False,
+                )
+            self.egress_state = "ok"
+            return
+        self._egress_bad += 1
+        logger.error(
+            "egress check found a problem",
+            extra={
+                "problems": result.problems,
+                "egress": result.masked_ip,
+                "organization": result.organization,
+                "consecutive": self._egress_bad,
+            },
+        )
+        if self._egress_bad < self.config.egress_confirm:
+            return
+        first = self.egress_state != "mismatch"
+        self.egress_state = "mismatch"
+        if not self._egress_paused:
+            try:
+                self.qbit.pause_all()
+                self._egress_paused = True
+            except QbitError as exc:
+                logger.error(
+                    "could not pause the torrents after an egress mismatch",
+                    extra={"error": str(exc)},
+                )
+        if first:
+            self._alert(
+                "egress",
+                "VPN egress check FAILED",
+                [
+                    *[f"- {problem}" for problem in result.problems],
+                    "All torrents were paused. They stay paused until you resume them."
+                    if self._egress_paused
+                    else "Pausing the torrents did not work yet; it is retried at the next check.",
+                ],
+                urgent=True,
+            )
+
     # ------------------------------------------------------------------ the loop
 
+    def _egress_loop(self, stop: threading.Event, first_after: float) -> None:
+        interval = self.config.egress_interval
+        stop.wait(first_after)  # let the tunnel settle after a start
+        while not stop.is_set():
+            try:
+                self.check_egress()
+            except Exception:
+                logger.exception("egress check failed")
+            stop.wait(interval)
+
     def run(self, stop: threading.Event, heartbeat: Path | None = HEARTBEAT_FILE) -> None:
+        if self.egress is not None and self.config.egress_interval > 0:
+            threading.Thread(
+                target=self._egress_loop,
+                args=(stop, min(20.0, self.config.egress_interval)),
+                name="egress-check",
+                daemon=True,
+            ).start()
         while not stop.is_set():
             started = self._clock()
             try:
@@ -477,12 +596,21 @@ def main(argv: list[str] | None = None) -> int:
         if config.alert_url
         else None
     )
-    watchdog = Watchdog(
-        GluetunControl(config.control_url, config.api_key),
-        QbitClient(config.qbit_url, config.qbit_user, config.qbit_password, timeout=5.0),
-        config,
-        alerter=alerter,
+    control = GluetunControl(config.control_url, config.api_key)
+    qbit = QbitClient(config.qbit_url, config.qbit_user, config.qbit_password, timeout=5.0)
+    egress = (
+        EgressChecker(
+            control,
+            qbit,
+            home_networks=parse_networks(config.home_public_ip),
+            expected_countries=tuple(
+                c.strip() for c in config.egress_expected_country.split(",") if c.strip()
+            ),
+        )
+        if config.egress_interval > 0
+        else None
     )
+    watchdog = Watchdog(control, qbit, config, alerter=alerter, egress=egress)
     status_server = StatusServer(watchdog, config.status_port) if config.status_port else None
     if status_server:
         status_server.start()
@@ -497,6 +625,9 @@ def main(argv: list[str] | None = None) -> int:
             "threshold": config.threshold,
             "resume_after": config.resume_after,
             "alerts": alerter.host if alerter else "off",
+            "egress_check_every": config.egress_interval or "off",
+            "home_networks_configured": bool(config.home_public_ip),
+            "expected_country": config.egress_expected_country or None,
             "status_port": config.status_port or "off",
         },
     )

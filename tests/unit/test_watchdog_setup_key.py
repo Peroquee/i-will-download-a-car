@@ -48,10 +48,10 @@ def test_creates_a_key_in_both_places_and_they_match(files):
 
 
 @pytest.mark.security
-def test_the_role_may_read_the_vpn_status_and_nothing_else(files):
+def test_the_role_may_read_the_vpn_status_and_the_public_address_and_nothing_else(files):
     run(files)
     (role,) = tomllib.loads(files[1].read_text())["roles"]
-    assert role["routes"] == ["GET /v1/vpn/status"]
+    assert role["routes"] == ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
 
 
 def test_modes_the_env_keeps_and_the_auth_file_is_private(files):
@@ -123,3 +123,18 @@ def test_a_missing_env_file_is_explained(tmp_path):
     with pytest.raises(SystemExit) as error:
         mod.main(["--env-file", str(tmp_path / "nope"), "--auth-file", str(tmp_path / "a.toml")])
     assert "not found" in str(error.value)
+
+
+def test_an_auth_file_from_an_older_version_gains_the_new_route_on_rerun(files):
+    """Re-running `make watchdog-key` updates the role without changing the key."""
+    env, auth = files
+    run(files)
+    key = key_in_env(env)
+    auth.write_text(
+        '[[roles]]\nname = "watchdog"\nroutes = ["GET /v1/vpn/status"]\n'
+        f'auth = "apikey"\napikey = "{key}"\n'
+    )
+    run(files)
+    role = tomllib.loads(auth.read_text())["roles"][0]
+    assert role["routes"] == ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+    assert role["apikey"] == key == key_in_env(env)

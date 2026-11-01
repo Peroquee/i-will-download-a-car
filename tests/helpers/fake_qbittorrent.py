@@ -36,6 +36,7 @@ class FakeQbittorrent:
     check_host: bool = True
     torrents: list[dict] = field(default_factory=list)
     add_result: str = "Ok."
+    preferences: dict = field(default_factory=lambda: {"current_network_interface": "tun0"})
     list_status: int = 200
     fail_status: int | None = None  # answer every authenticated call with this status
     reject_sessions: bool = False  # even a fresh login does not help: every API call is 403
@@ -154,6 +155,8 @@ class FakeQbittorrent:
             def api(self, method, path, query, form):
                 if path == "app/version":
                     return self.reply(200, "v5.0.4")
+                if path == "app/preferences":
+                    return self.reply(200, json.dumps(fake.preferences))
                 if path == "torrents/add":
                     return self.reply(200, fake.add_result)
                 if path == "torrents/info":

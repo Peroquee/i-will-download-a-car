@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 
@@ -49,14 +50,14 @@ class GluetunControl:
     def __repr__(self) -> str:
         return f"GluetunControl({self.base_url!r})"
 
-    def vpn_status(self) -> str:
-        """The VPN's status word ("running", "stopped", ...)."""
+    def _get_json(self, path: str) -> object:
+        """GET a route of the control server with the key; typed errors as described above."""
         conn_class = (
             http.client.HTTPSConnection if self._scheme == "https" else http.client.HTTPConnection
         )
         conn = conn_class(self._host, self._port, timeout=self._timeout)
         try:
-            conn.request("GET", "/v1/vpn/status", headers={"X-API-Key": self._api_key})
+            conn.request("GET", path, headers={"X-API-Key": self._api_key})
             response = conn.getresponse()
             status = response.status
             body = response.read().decode("utf-8", errors="replace")
@@ -66,17 +67,52 @@ class GluetunControl:
             conn.close()
         if status in (401, 403, 404):
             raise GluetunAuthError(
-                f"gluetun's control server answered {status}: the watchdog key or "
-                "config/gluetun/auth/config.toml is missing or wrong (make watchdog-key)"
+                f"gluetun's control server answered {status} for {path}: the watchdog key or "
+                "config/gluetun/auth/config.toml is missing, wrong or out of date "
+                "(make watchdog-key, then recreate gluetun)"
             )
         if status != 200:
             raise GluetunUnreachable(f"gluetun's control server answered {status}")
         try:
-            value = json.loads(body)["status"]
-        except (ValueError, KeyError, TypeError) as exc:
+            return json.loads(body)
+        except ValueError as exc:
             raise GluetunUnreachable(
                 "gluetun's control server returned an unreadable answer"
             ) from exc
+
+    def vpn_status(self) -> str:
+        """The VPN's status word ("running", "stopped", ...)."""
+        data = self._get_json("/v1/vpn/status")
+        value = data.get("status") if isinstance(data, dict) else None
         if not isinstance(value, str) or not value:
             raise GluetunUnreachable("gluetun's control server returned an unreadable status")
         return value.lower()
+
+    def public_ip(self) -> PublicIP:
+        """The address gluetun sees as its own, and where it is (`GET /v1/publicip/ip`)."""
+        data = self._get_json("/v1/publicip/ip")
+        ip = data.get("public_ip") if isinstance(data, dict) else None
+        if not isinstance(ip, str) or not ip:
+            raise GluetunUnreachable("gluetun has no public address (the tunnel may be restarting)")
+        assert isinstance(data, dict)
+        return PublicIP(
+            ip=ip,
+            country=str(data.get("country") or ""),
+            region=str(data.get("region") or ""),
+            city=str(data.get("city") or ""),
+            organization=str(data.get("organization") or ""),
+        )
+
+
+@dataclass(frozen=True)
+class PublicIP:
+    """What gluetun reports about the VPN's public address (never log `ip` in full)."""
+
+    ip: str
+    country: str = ""
+    region: str = ""
+    city: str = ""
+    organization: str = ""
+
+    def __repr__(self) -> str:
+        return f"PublicIP(country={self.country!r}, organization={self.organization!r})"

@@ -106,7 +106,13 @@ def test_the_watchdog_module_imports_only_what_it_needs():
             r"^from (\.[\w.]*) import", (REPO_ROOT / "app/ytp/watchdog.py").read_text(), re.M
         )
     }
-    assert local == {".alerts", ".clients.gluetun", ".clients.qbittorrent", ".logging_setup"}
+    assert local == {
+        ".alerts",
+        ".clients.gluetun",
+        ".clients.qbittorrent",
+        ".egress",
+        ".logging_setup",
+    }
 
 
 @pytest.mark.security
@@ -135,3 +141,16 @@ def test_only_the_watchdog_gets_the_alert_target():
     for name, svc in services(COMPOSE).items():
         if name != "watchdog":
             assert not [k for k in environment_as_dict(svc) if k.startswith("ALERT_")], name
+
+
+@pytest.mark.security
+def test_the_egress_check_settings_reach_only_the_watchdog_and_the_home_address_is_not_shipped():
+    env = environment_as_dict(WATCHDOG)
+    assert env["EGRESS_CHECK_INTERVAL"] == "${EGRESS_CHECK_INTERVAL:-300}"
+    assert env["HOME_PUBLIC_IP"] == "${HOME_PUBLIC_IP:-}"
+    assert ENV_EXAMPLE["HOME_PUBLIC_IP"] == "", "the owner's own line is never in Git"
+    assert int(ENV_EXAMPLE["EGRESS_CHECK_INTERVAL"]) >= 30
+    assert int(ENV_EXAMPLE["EGRESS_CONFIRM"]) >= 2
+    for name, svc in services(COMPOSE).items():
+        if name != "watchdog":
+            assert "HOME_PUBLIC_IP" not in environment_as_dict(svc), name
