@@ -26,6 +26,7 @@ def env(tmp_path: Path):
     stubs.add("getent", "exit 2")
     stubs.add("blkid", "exit 2")
     stubs.add("dpkg", "echo amd64")
+    stubs.add("mountpoint", "exit 1")  # /data is a plain directory unless a test says otherwise
     os_release = tmp_path / "os-release"
     os_release.write_text(BOOKWORM)
     fstab = tmp_path / "fstab"
@@ -167,6 +168,9 @@ def test_without_the_guest_agent_device_it_is_not_started_and_a_hint_is_logged(e
     assert not any("systemctl start" in line for line in planned(result))
     assert "QEMU Guest Agent" in result.stdout
     assert "Options" in result.stdout
+    # A reboot from inside the VM does not add the device; Proxmox adds it at VM start.
+    assert "shut the VM down and start it again" in result.stdout
+    assert "not enough" in result.stdout
 
 
 def test_the_tun_and_media_steps_still_follow_the_guest_agent_step(env):
@@ -250,3 +254,21 @@ def test_empty_device_is_formatted_with_flag(env):
 
 # Never formatting a device that has a filesystem is pinned in
 # tests/regression/test_c0_host_decisions.py.
+
+
+# --------------------------------------------------------------------------- existing /data
+
+
+def test_an_existing_mount_point_is_not_described_as_the_system_disk(env):
+    env["stubs"].add("mountpoint", "exit 0")
+    result = bootstrap(env, "--user", "u", "--puid", "1001", "--pgid", "1001")
+    assert "system disk" not in result.stdout
+    assert "already a mount point; using the mounted volume" in result.stdout
+    # Owner and mode are still set, as before.
+    assert "+ install -d -m 2775 -o 1001 -g 1001 /data" in planned(result)
+
+
+def test_without_a_mount_point_data_is_created_on_the_system_disk(env):
+    result = bootstrap(env, "--user", "u")
+    assert "creating /data on the system disk" in result.stdout
+    assert "+ install -d -m 2775 -o 1000 -g 1000 /data" in planned(result)

@@ -45,9 +45,15 @@ def test_secrets_are_placeholders(name):
 
 
 def test_vpn_defaults_match_expressvpn():
-    # ExpressVPN: OpenVPN only. WireGuard would not work with this provider.
-    assert ENV_EXAMPLE["VPN_SERVICE_PROVIDER"] == "expressvpn"
+    # ExpressVPN: OpenVPN only, with its own .ovpn because gluetun's built-in key is stale.
+    assert ENV_EXAMPLE["VPN_SERVICE_PROVIDER"] == "custom"
     assert ENV_EXAMPLE["VPN_TYPE"] == "openvpn"
+    assert ENV_EXAMPLE["OPENVPN_CUSTOM_CONFIG"] == "/gluetun/custom/expressvpn.ovpn"
+
+
+def test_custom_provider_leaves_the_server_filters_empty():
+    assert ENV_EXAMPLE["VPN_SERVER_COUNTRIES"] == ""
+    assert ENV_EXAMPLE["VPN_SERVER_CITIES"] == ""
 
 
 def test_gluetun_tag_is_pinned_to_an_explicit_version():

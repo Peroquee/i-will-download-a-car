@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean
+        smoke-host host-check snapshot clean vpn-config up killswitch-test
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -12,6 +12,9 @@ help:
 	@echo "test-<level>      unit | integration | smoke | system | regression"
 	@echo "host-check        run scripts/host/check-host.sh against ./.env (on the media VM)"
 	@echo "smoke-host        smoke tests incl. full host checks (on the media VM)"
+	@echo "vpn-config        render config/expressvpn.ovpn for gluetun (resolves the server name to an IP)"
+	@echo "up                vpn-config, then docker compose up -d"
+	@echo "killswitch-test   on the media VM: stop gluetun, prove qbittorrent has no network, check recovery"
 	@echo "snapshot          regenerate the compose regression snapshot after an intended change"
 
 $(VENV)/.installed: requirements-test.txt requirements-lint.txt
@@ -38,6 +41,15 @@ host-check:
 
 smoke-host: venv
 	SMOKE_FULL_HOST=1 SMOKE_ENV_FILE=.env REQUIRE_CAPABILITIES=1 $(PYTEST) tests/smoke
+
+vpn-config:
+	scripts/vpn/render_ovpn.py
+
+up: vpn-config
+	docker compose up -d
+
+killswitch-test:
+	scripts/vpn/killswitch-test.sh
 
 snapshot: venv
 	UPDATE_SNAPSHOTS=1 $(PYTEST) tests/regression -k snapshot

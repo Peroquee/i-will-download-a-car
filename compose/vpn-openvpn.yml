@@ -8,3 +8,6 @@ services:
       # not the account e-mail and password.
       OPENVPN_USER: ${OPENVPN_USER:?OPENVPN_USER must be set in .env}
       OPENVPN_PASSWORD: ${OPENVPN_PASSWORD:?OPENVPN_PASSWORD must be set in .env}
+      # Only used with VPN_SERVICE_PROVIDER=custom: the .ovpn file inside the container.
+      # Empty means "not set" for gluetun, so the built-in providers are unaffected.
+      OPENVPN_CUSTOM_CONFIG: ${OPENVPN_CUSTOM_CONFIG:-}

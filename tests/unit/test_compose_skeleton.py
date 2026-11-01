@@ -13,6 +13,7 @@ from tests.helpers.compose import (
     environment_as_dict,
     gluetun_environment,
     load_compose,
+    parse_env_file,
     services,
     vpn_variant_files,
 )
@@ -107,7 +108,8 @@ def test_each_variant_sets_its_type_and_requires_only_its_own_secrets(vpn_type):
         services(load_compose(vpn_variant_files(COMPOSE_PATH)[vpn_type]))["gluetun"]
     )
     assert env["VPN_TYPE"] == vpn_type
-    assert set(env) == {"VPN_TYPE", *VPN_SECRETS[vpn_type]}
+    optional = {"OPENVPN_CUSTOM_CONFIG"} if vpn_type == "openvpn" else set()
+    assert set(env) == {"VPN_TYPE", *VPN_SECRETS[vpn_type], *optional}
     for key in VPN_SECRETS[vpn_type]:
         assert REQUIRED.fullmatch(env[key]), f"{key} must be ${{VAR:?msg}}"
 
@@ -195,3 +197,25 @@ def test_media_writers_mount_the_same_data_root():
 def test_jellyfin_reads_media_read_only():
     volumes = services(COMPOSE)["jellyfin"]["volumes"]
     assert any(v.endswith(":/data/media:ro") for v in volumes)
+
+
+def test_gluetun_persists_its_state_and_sees_the_rendered_ovpn():
+    volumes = services(COMPOSE)["gluetun"]["volumes"]
+    assert volumes == ["./config/gluetun:/gluetun"]
+
+
+def test_the_render_script_writes_where_gluetun_reads_the_custom_config():
+    # ./config/gluetun on the host is /gluetun in the container; the .env.example value is
+    # the in-container path, render_ovpn.py's default output the host path.
+    env = parse_env_file(REPO_ROOT / ".env.example")
+    in_container = env["OPENVPN_CUSTOM_CONFIG"]
+    host_path = REPO_ROOT / "config" / "gluetun" / in_container.removeprefix("/gluetun/")
+    assert in_container.startswith("/gluetun/")
+    assert host_path == REPO_ROOT / "config" / "gluetun" / "custom" / "expressvpn.ovpn"
+
+
+def test_qbittorrent_watches_its_network_namespace():
+    qbit = services(COMPOSE)["qbittorrent"]
+    assert "./scripts/qbittorrent/netwatch.sh:/custom-services.d/netwatch:ro" in qbit["volumes"]
+    assert qbit["healthcheck"]["test"] == ["CMD", "/custom-services.d/netwatch", "--check"]
+    assert (REPO_ROOT / "scripts" / "qbittorrent" / "netwatch.sh").exists()

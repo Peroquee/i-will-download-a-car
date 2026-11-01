@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# netwatch.sh: restart qBittorrent when it is stuck in a dead network namespace (issue #4).
+#
+# qbittorrent shares gluetun's network namespace (network_mode: service:gluetun).
+# When gluetun restarts as the same container (a crash, Docker's restart policy,
+# `docker start`), it gets a NEW namespace and qbittorrent keeps the old, dead one:
+# no interfaces at all, no network, until qbittorrent itself is restarted.
+#
+# This script runs INSIDE the qbittorrent container as an s6 service (mounted at
+# /custom-services.d/netwatch). If the container has no network interface besides
+# `lo` for several checks in a row, it stops the container (SIGTERM to PID 1).
+# `restart: unless-stopped` then starts it again, and it joins gluetun's current
+# namespace. No docker.sock is needed.
+#
+# A tunnel that is merely DOWN does not trigger this: gluetun's own interface
+# (eth0) is still there and its firewall blocks everything, which is the killswitch
+# working. Only a namespace with nothing in it counts as dead.
+#
+# Usage:
+#   netwatch.sh            watch forever (what s6 runs)
+#   netwatch.sh --check    exit 0 if the namespace has an interface, 1 if it is dead
+#                          (used as the container's health check)
+#
+# Test hooks: NETWATCH_NET_DEV (default /proc/net/dev), NETWATCH_INTERVAL (seconds, 10),
+# NETWATCH_FAILS (checks in a row, 3), NETWATCH_HALT (command run instead of
+# `kill -s TERM 1`), NETWATCH_MAX_LOOPS (stop after N checks; 0 = never).
+
+set -uo pipefail
+
+NET_DEV="${NETWATCH_NET_DEV:-/proc/net/dev}"
+INTERVAL="${NETWATCH_INTERVAL:-10}"
+FAILS_NEEDED="${NETWATCH_FAILS:-3}"
+HALT="${NETWATCH_HALT:-kill -s TERM 1}"
+MAX_LOOPS="${NETWATCH_MAX_LOOPS:-0}"
+
+log() { printf 'netwatch: %s\n' "$*"; }
+
+# True if the namespace has any interface other than lo. /proc/net is the live view of
+# THIS process's namespace (unlike /sys/class/net, which is fixed when the container starts).
+has_interface() {
+  # No grep -q: closing the pipe early would make `pipefail` report SIGPIPE from sed.
+  tail -n +3 "$NET_DEV" 2>/dev/null | sed 's/:.*//; s/^[[:space:]]*//' | grep -vx -e lo -e '' >/dev/null
+}
+
+watch_loop() {
+  local fails=0 loops=0
+  while true; do
+    if has_interface; then
+      [ "$fails" -eq 0 ] || log "network namespace is back"
+      fails=0
+    else
+      fails=$((fails + 1))
+      log "no network interface (check $fails of $FAILS_NEEDED)"
+      if [ "$fails" -ge "$FAILS_NEEDED" ]; then
+        log "the network namespace is dead (gluetun was restarted?); stopping the container so Docker restarts it"
+        sh -c "$HALT"
+        return 0
+      fi
+    fi
+    loops=$((loops + 1))
+    if [ "$MAX_LOOPS" -gt 0 ] && [ "$loops" -ge "$MAX_LOOPS" ]; then
+      return 0
+    fi
+    sleep "$INTERVAL"
+  done
+}
+
+case "${1:-}" in
+  --check) has_interface ;;
+  "") watch_loop ;;
+  *) echo "usage: netwatch.sh [--check]" >&2; exit 2 ;;
+esac
