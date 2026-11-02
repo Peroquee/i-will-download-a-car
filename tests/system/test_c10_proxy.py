@@ -72,6 +72,19 @@ def get(port: int, path: str = "/", headers: dict[str, str] | None = None):
         conn.close()
 
 
+def get_headers_seen_by_upstream(port: int, headers: dict[str, str]) -> dict[str, str]:
+    """The request headers the stand-in upstream received for a request through the proxy."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request("GET", "/", headers=headers)
+        response = conn.getresponse()
+        body = response.read()
+        assert response.status == 200, body
+        return json.loads(body)
+    finally:
+        conn.close()
+
+
 @pytest.fixture(scope="module")
 def net() -> Iterator[Net]:
     name = docker.unique_name("net")
@@ -84,13 +97,33 @@ def net() -> Iterator[Net]:
     docker.run(["network", "rm", name])
 
 
+ECHO_UPSTREAM = """
+import http.server, json, threading
+
+class Echo(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({k.lower(): v for k, v in self.headers.items()}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+for port in (8000, 8080):
+    server = http.server.ThreadingHTTPServer(("", port), Echo)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+threading.Event().wait()
+"""
+
+
 @pytest.fixture(scope="module")
 def upstream(net) -> Iterator[str]:
-    """Answers 200 on :8000 (the app) and :8080 (qBittorrent) and logs each request."""
+    """Answers 200 on :8000 (the app) and :8080 (qBittorrent), sends back the request headers it
+    received as JSON, and logs each request."""
     name = docker.unique_name("upstream")
-    cmd = "python -m http.server 8000 & exec python -m http.server 8080"
     args = ["run", "-d", "--name", name, "--network", net.name]
-    args += ["--network-alias", "app", "--network-alias", "gluetun", docker.PYTHON, "sh", "-c", cmd]
+    args += ["--network-alias", "app", "--network-alias", "gluetun"]
+    args += [docker.PYTHON, "python", "-u", "-c", ECHO_UPSTREAM]
     started = docker.run(args, timeout=300)
     assert started.returncode == 0, started.stderr
     time.sleep(2)
@@ -265,6 +298,25 @@ def test_unauthenticated_requests_never_reach_the_upstream(inside, upstream):
         get(port)
         get(port, headers=basic(password="wrong"))
     assert upstream_requests(upstream) == before
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("port_name", ["app_port", "qbt_port"])
+def test_the_upstream_never_receives_the_proxy_login(inside, port_name):
+    """The browser's basic-auth header is the proxy's login. qBittorrent 5.3 answers 401 to any
+    request with an Authorization header, and no backend has a use for the proxy password."""
+    seen = get_headers_seen_by_upstream(getattr(inside, port_name), basic())
+    assert "authorization" not in seen, seen
+    assert "proxy-authorization" not in seen, seen
+    assert "password" not in json.dumps(seen).lower()
+
+
+@pytest.mark.parametrize("port_name", ["app_port", "qbt_port"])
+def test_the_host_header_still_reaches_the_upstream_unchanged(inside, port_name):
+    """qBittorrent's CSRF check compares Origin with Host, so Host must not be rewritten."""
+    port = getattr(inside, port_name)
+    seen = get_headers_seen_by_upstream(port, {**basic(), "Host": f"192.168.178.123:{port}"})
+    assert seen["host"] == f"192.168.178.123:{port}"
 
 
 @pytest.mark.security

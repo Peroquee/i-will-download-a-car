@@ -78,6 +78,15 @@ its Web UI uses absolute paths and a cookie scoped to `/`, so a sub-path needs r
 cannot be tested without the real UI. Caddy passes the `Host` header through unchanged (`<lan address>:8081`), and qBittorrent's
 CSRF check, which compares `Origin` with `Host`, is **on** and keeps working.
 
+**The proxy login is not passed on.** The browser sends the basic-auth login (`Authorization:
+Basic ...`) with every request; Caddy checks it and, by default, would forward it. Both
+`reverse_proxy` blocks therefore remove the header (`header_up -Authorization`): no backend has a
+use for the proxy password, and qBittorrent 5.3 answers `401` to **any** request that carries an
+Authorization header (it reads one as API-key authentication), whatever the `Host` header says.
+This, and not only the Host header below, was the cause of the `401` the first installs got. The
+system test `test_c10_proxy.py` checks with a stand-in upstream that echoes its request headers
+that none arrives; `test_c1_qbittorrent_login.py` shows the `401` of the real image.
+
 **Host header validation is off (`WebUI\HostHeaderValidation=false`).** qBittorrent answers
 `401` to any request whose `Host` header names another port than its own Web UI port (8080), or
 an address it does not know. Through the proxy the port is always 8081, so with the check on the

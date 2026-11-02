@@ -245,3 +245,21 @@ def test_an_existing_config_without_the_setting_is_repaired_through_the_api(tmp_
         assert login(name, PASSWORD, headers=(PROXY_HOST,)), effective_settings(name)
     finally:
         docker.run(["rm", "-f", name])
+
+
+def test_any_authorization_header_makes_qbittorrent_answer_401(qbittorrent):
+    """Why the proxy must strip the Authorization header (proxy/Caddyfile, header_up
+    -Authorization): since 5.3 qBittorrent reads an Authorization header as API-key auth and
+    refuses the request, whatever the Host header says. Caddy would otherwise forward the
+    browser's basic-auth header, the proxy login."""
+
+    def status(*headers: str) -> str:
+        return sh(
+            qbittorrent, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            *[arg for header in headers for arg in ("-H", header)],
+            "http://localhost:8080/",
+        )  # fmt: skip
+
+    assert status(PROXY_HOST) == "200", "without the header the proxy's Host header is fine"
+    assert status(PROXY_HOST, "Authorization: Basic dGVzdGVyOnBhc3N3b3Jk") == "401"
+    assert status("Authorization: Basic dGVzdGVyOnBhc3N3b3Jk") == "401"
