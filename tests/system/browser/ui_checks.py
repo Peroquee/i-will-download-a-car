@@ -44,10 +44,14 @@ def watch(page, label: str, problems: list[str]) -> None:
         if message.type == "error"
         else None,
     )
-    page.on(
-        "requestfailed",
-        lambda request: report("REQUEST FAILED", f"{request.url} {request.failure}"),
-    )
+
+    def request_failed(request) -> None:
+        # A poll that is still running when the page navigates away is aborted by the browser:
+        # that is not a failure of the page.
+        if "ERR_ABORTED" not in str(request.failure):
+            report("REQUEST FAILED", f"{request.url} {request.failure}")
+
+    page.on("requestfailed", request_failed)
     page.on(
         "response",
         lambda response: report("BAD RESPONSE", f"{response.status} {response.url}")

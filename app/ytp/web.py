@@ -46,6 +46,12 @@ from starlette.types import Scope
 
 STATIC_DIR = Path(__file__).parent / "static"
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# Pages that change nothing and read nothing, so the same-origin refusal has no job there.
+# `/reload-needed` is where a form lands whose scripts did not load: a browser sends such a
+# NATIVE form post with `Origin: null` (the page's Referrer-Policy is no-referrer, and a
+# navigation, unlike fetch(), then gets a null origin), which the check would answer with JSON
+# instead of the page that explains what to do.
+SAME_ORIGIN_EXEMPT = frozenset({"/reload-needed"})
 ALLOWED_FETCH_SITES = frozenset({"same-origin", "none"})
 
 SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
@@ -87,7 +93,11 @@ class SecurityMiddleware:
             await self.app(scope, receive, send)
             return
         headers = {k.lower(): v for k, v in scope["headers"]}
-        if scope["method"] in UNSAFE_METHODS and cross_site(headers):
+        if (
+            scope["method"] in UNSAFE_METHODS
+            and scope["path"] not in SAME_ORIGIN_EXEMPT
+            and cross_site(headers)
+        ):
             await send(
                 {
                     "type": "http.response.start",

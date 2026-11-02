@@ -250,7 +250,7 @@
 
     <section id="subscriptions" class="subs" data-view="input" aria-labelledby="subs-title">
       <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
-      <form id="subs-form" autocomplete="off" novalidate>
+      <form id="subs-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
         <div class="row">
           <label class="field" for="subs-channel" data-i18n="subs.channel"></label>
           <input id="subs-channel" type="text" inputmode="url" spellcheck="false" autocapitalize="off"

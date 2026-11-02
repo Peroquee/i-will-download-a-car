@@ -120,11 +120,12 @@ def test_the_static_files_still_cannot_be_escaped_with_a_version_query(client):
 # --- the form never submits natively ---------------------------------------------------------
 
 
-def test_the_form_has_no_get_fallback_and_goes_to_the_reload_page():
-    form = re.search(r'<form id="form"[^>]*>', HTML)
-    assert form
-    assert 'method="post"' in form.group(0)
-    assert 'action="/reload-needed"' in form.group(0)
+def test_no_form_has_a_get_fallback_every_form_goes_to_the_reload_page():
+    forms = re.findall(r"<form [^>]*>", HTML)
+    assert len(forms) >= 2
+    for form in forms:
+        assert 'method="post"' in form, form
+        assert 'action="/reload-needed"' in form, form
 
 
 def test_a_native_submit_lands_on_a_page_that_says_to_reload_and_echoes_nothing(client):
@@ -141,14 +142,39 @@ def test_a_native_submit_lands_on_a_page_that_says_to_reload_and_echoes_nothing(
     assert client.get("/api/jobs").json()["counts"]["queued"] == 0, "no job was made"
 
 
-@pytest.mark.security
-def test_the_reload_page_is_protected_like_every_other_post(client):
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {
+            "Origin": "null",
+            "Sec-Fetch-Site": "same-origin",
+        },  # what a browser sends for a native form post
+        {"Origin": "null"},
+        {"Origin": "http://evil.example", "Sec-Fetch-Site": "cross-site"},
+        {},
+    ],
+)
+def test_the_reload_page_answers_a_native_form_post_whatever_origin_it_carries(client, headers):
+    """A browser sends a native form post with `Origin: null` (Referrer-Policy: no-referrer): the
+    same-origin refusal would show JSON instead of the page that says what to do. The page changes
+    nothing and reads nothing, so it is exempt; every other POST stays protected."""
     answer = client.post(
-        "/reload-needed",
-        data={"link": "x"},
-        headers={"Origin": "http://evil.example", "Sec-Fetch-Site": "cross-site"},
+        "/reload-needed", data={"link": "https://youtu.be/dQw4w9WgXcQ"}, headers=headers
     )
+    assert answer.status_code == 400
+    assert "neu laden" in answer.text
+    assert "dQw4w9WgXcQ" not in answer.text
+    assert client.get("/api/jobs").json()["counts"]["queued"] == 0
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "path", ["/api/magnet", "/api/youtube/download", "/api/subscriptions", "/api/alerts/ack-all"]
+)
+def test_other_posts_with_a_null_origin_are_still_refused(client, path):
+    answer = client.post(path, json={}, headers={"Origin": "null", "Sec-Fetch-Site": "same-origin"})
     assert answer.status_code == 403
+    assert "does not come from this site" in answer.text
 
 
 def test_the_scripts_stop_a_native_submit_before_anything_else_can_fail():
