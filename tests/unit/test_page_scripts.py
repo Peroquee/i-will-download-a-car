@@ -707,7 +707,12 @@ def test_the_subscriptions_view_shows_the_list_and_not_the_form():
     out = page(
         "/",
         "#subscriptions",
-        steps=[{"read": "#form"}, {"read": "#subscriptions"}, {"read": "#jobs-mini"}, {"read": "#nav-subs"}],
+        steps=[
+            {"read": "#form"},
+            {"read": "#subscriptions"},
+            {"read": "#jobs-mini"},
+            {"read": "#nav-subs"},
+        ],
     )
     assert out["errors"] == [], out["errors"]
     assert out["reads"]["#form"]["hidden"] is True
