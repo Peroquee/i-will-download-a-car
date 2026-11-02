@@ -40,14 +40,17 @@
 	}
 	route {
 		import guard
-		reverse_proxy app:8000
+		# The browser's basic-auth header is the PROXY's login: the upstream must never see it.
+		reverse_proxy app:8000 {
+			header_up -Authorization
+		}
 	}
 }
 
 # qBittorrent's Web UI, which lives in gluetun's network namespace and is therefore
 # reached as gluetun:8080 over the bridge. Its own login stays on as a second layer.
 # The Host header is passed through unchanged, which is what qBittorrent's CSRF check
-# (Origin against Host) needs. qBittorrent's separate Host header validation is switched off
+# (Origin against Host) needs; the Authorization header is removed (below). qBittorrent's separate Host header validation is switched off
 # (seed_config.py): with it on, a Host with port 8081 on a Web UI at 8080 gets a 401.
 :8081 {
 	log {
@@ -56,7 +59,11 @@
 	}
 	route {
 		import guard
-		reverse_proxy gluetun:8080
+		# qBittorrent 5.3 answers 401 to ANY request that carries an Authorization header (it
+		# reads one as API-key auth), so the proxy's basic-auth header must not be forwarded.
+		reverse_proxy gluetun:8080 {
+			header_up -Authorization
+		}
 	}
 }
 

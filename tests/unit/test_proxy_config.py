@@ -157,8 +157,10 @@ def test_the_lan_check_uses_the_connections_own_address_not_a_header():
     assert "remote_ip {$LAN_SUBNET}" in CODE
     # client_ip honours X-Forwarded-For when trusted_proxies is set; trusted_proxies must stay
     # unset so the header is never believed, and nothing here may switch it on.
-    for word in ("client_ip", "trusted_proxies", "X-Forwarded-For", "X-Real-IP", "header_up"):
+    for word in ("client_ip", "trusted_proxies", "X-Forwarded-For", "X-Real-IP"):
         assert word not in CODE, word
+    # the only header rewriting is the removal of the proxy's own login (see the next test)
+    assert set(re.findall(r"header_up.*", CODE)) == {"header_up -Authorization"}
 
 
 @pytest.mark.security
@@ -225,3 +227,16 @@ def test_the_qbittorrent_upstream_is_the_service_that_publishes_its_web_ui():
 def test_the_app_upstream_is_the_apps_port():
     dockerfile = (REPO_ROOT / "app" / "Dockerfile").read_text(encoding="utf-8")
     assert "8000" in dockerfile
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    ("address", "upstream"), [(":8080", "app:8000"), (":8081", "gluetun:8080")]
+)
+def test_the_proxy_login_is_never_forwarded_to_the_upstream(address, upstream):
+    """The browser's basic-auth header is the proxy's login. qBittorrent 5.3 even answers 401 to
+    any request with an Authorization header, and no backend has a use for the proxy password."""
+    block = site_block(address)
+    proxy = re.search(rf"reverse_proxy {re.escape(upstream)} \{{\n(.*?)\n\t\t\}}", block, re.S)
+    assert proxy, "the reverse_proxy needs a block"
+    assert re.findall(r"header_up.*", proxy.group(1)) == ["header_up -Authorization"]
