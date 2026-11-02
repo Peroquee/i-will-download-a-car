@@ -23,13 +23,44 @@ def step(text: str) -> None:
     print(f"ok  {text}", flush=True)
 
 
+def watch(page, label: str, problems: list[str]) -> None:
+    """Print every script error, console error, failed request and bad /static/ answer of a page
+    the moment it happens, from its very first navigation: a failing check then comes with the
+    exact exception (and its line) that explains it."""
+
+    def report(kind: str, text: str) -> None:
+        line = f"{kind} [{label}]: {text}"
+        problems.append(line)
+        print(line, flush=True)
+
+    page.on(
+        "pageerror", lambda error: report("PAGE ERROR", f"{error} | {getattr(error, 'stack', '')}")
+    )
+    page.on(
+        "console",
+        lambda message: report("CONSOLE ERROR", f"{message.text} @ {message.location}")
+        if message.type == "error"
+        else None,
+    )
+    page.on(
+        "requestfailed",
+        lambda request: report("REQUEST FAILED", f"{request.url} {request.failure}"),
+    )
+    page.on(
+        "response",
+        lambda response: report("BAD RESPONSE", f"{response.status} {response.url}")
+        if response.status >= 400 and "/static/" in response.url
+        else None,
+    )
+
+
 def main() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         context = browser.new_context(locale="en-US", viewport={"width": 1200, "height": 900})
         page = context.new_page()
         problems: list[str] = []
-        page.on("pageerror", lambda error: problems.append(str(error)))
+        watch(page, "main", problems)
         page.goto(BASE + "/")
 
         # 1. the scripts are alive, and the page names versioned files
@@ -129,7 +160,7 @@ def main() -> None:
         step("a new server version makes the open page offer a reload")
 
         assert not problems, problems
-        step("no JavaScript errors on the page")
+        step("no JavaScript errors, failed requests or bad static answers on the main page")
         browser.close()
 
 

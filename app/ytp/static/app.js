@@ -45,7 +45,6 @@
     refreshVpnText();
     renderJobs();
     renderSubs();
-    renderHowtoSources();
     if (dash) dash.render();
   }
 
