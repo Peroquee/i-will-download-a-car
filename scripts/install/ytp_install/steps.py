@@ -267,31 +267,6 @@ def qbit_has_login(root: Path) -> bool:
         return False
 
 
-def qbit_host_header_ok(root: Path) -> bool:
-    """Has qBittorrent's config the proxy settings (host header check off, CSRF on)? A missing
-    config counts as fine: seed_config.py writes them together with the login."""
-    try:
-        text = qbit_conf(root).read_text(encoding="utf-8")
-    except OSError:
-        return True
-    lines = {ln.strip() for ln in text.splitlines()}
-    return "WebUI\\HostHeaderValidation=false" in lines and "WebUI\\CSRFProtection=true" in lines
-
-
-def ensure_qbit_proxy_settings(ctx: Context) -> None:
-    """An EXISTING qBittorrent.conf from before the proxy on :8081 lacks the settings that let the
-    Web UI answer a Host header with another port (it answered 401). qBittorrent rewrites its
-    config when it exits, so it is stopped first; the next `docker compose up` starts it again."""
-    if qbit_host_header_ok(ctx.root):
-        return
-    ctx.say(ctx.tr("qbit.proxy_fix"))
-    ctx.runner.run(["docker", "compose", "stop", "qbittorrent"])
-    need(
-        ctx.runner.run([ctx.script("qbittorrent", "seed_config.py"), "--fix-host-header"]),
-        "step.logins.hint",
-    )
-
-
 def step_logins(ctx: Context) -> None:
     a = ctx.answers
     env = parse_env(ctx.env_path.read_text(encoding="utf-8")) if ctx.env_path.exists() else {}
@@ -320,7 +295,6 @@ def step_logins(ctx: Context) -> None:
             ),
             "step.logins.hint",
         )  # fmt: skip
-    ensure_qbit_proxy_settings(ctx)
     need(
         ctx.runner.run([ctx.script("watchdog", "setup_key.py"), "--env-file", ".env"]),
         "step.logins.hint",

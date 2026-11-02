@@ -8,6 +8,7 @@ program; the unit tests can only check them against our own reading of the forma
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -23,6 +24,7 @@ from tests.helpers.compose_cli import ENV_EXAMPLE, REPO_ROOT
 pytestmark = [pytest.mark.docker, pytest.mark.network, pytest.mark.slow, pytest.mark.security]
 
 SEED_SCRIPT = REPO_ROOT / "scripts" / "qbittorrent" / "seed_config.py"
+CATEGORIES_SCRIPT = REPO_ROOT / "scripts" / "qbittorrent" / "setup_categories.py"
 IMAGE = "lscr.io/linuxserver/qbittorrent:" + parse_env_file(ENV_EXAMPLE)["QBITTORRENT_TAG"]
 PASSWORD = "a long test password"  # a test value, not a secret
 USER = "tester"
@@ -42,10 +44,10 @@ def seed(config_dir: Path, *extra: str) -> None:
             str(SEED_SCRIPT),
             "--config",
             str(config_dir / "qBittorrent" / "qBittorrent.conf"),
-            # the password comes in through stdin (as the installer does); the fix mode has none
-            *(extra if "--fix-host-header" in extra else ("--password-stdin", *extra)),
+            "--password-stdin",  # the password comes in through stdin, as the installer does it
+            *extra,
         ],
-        input=None if "--fix-host-header" in extra else PASSWORD + "\n",
+        input=PASSWORD + "\n",
         text=True,
         check=True,
         capture_output=True,
@@ -184,9 +186,27 @@ def test_csrf_protection_is_still_on_a_foreign_origin_is_refused(qbittorrent):
     assert login(qbittorrent, PASSWORD, headers=(PROXY_HOST, "Origin: http://192.168.178.123:8081"))
 
 
-def test_an_existing_config_without_the_setting_is_repaired(tmp_path: Path):
-    """The installer's repair path: an old qBittorrent.conf answers 401 to the proxy's Host header
-    (the bug), `seed_config.py --fix-host-header` on the stopped container's config fixes it."""
+def container_ip(name: str) -> str:
+    return docker.run(["inspect", "-f", "{{.NetworkSettings.IPAddress}}", name]).stdout.strip()
+
+
+def effective_settings(container: str) -> str:
+    """What qBittorrent really uses and what its file says (for the message of a failing test)."""
+    login(container, PASSWORD, keep_session=True)
+    prefs = sh(container, *CURL, "http://localhost:8080/api/v2/app/preferences")
+    wanted = ("web_ui_host_header_validation_enabled", "web_ui_csrf_protection_enabled")
+    lines = sh(
+        container, "grep", "-E", "HostHeaderValidation|CSRFProtection|^\\[",
+        "/config/qBittorrent/qBittorrent.conf",
+    )  # fmt: skip
+    shown = {k: v for k, v in json.loads(prefs).items() if k in wanted}
+    return f"preferences: {shown}\nconf:\n{lines}"
+
+
+def test_an_existing_config_without_the_setting_is_repaired_through_the_api(tmp_path: Path):
+    """The owner's case: a qBittorrent.conf from before the proxy answers 401 to the proxy's Host
+    header. `setup_categories.py` sets the preferences through the Web API (no stop, no file
+    editing), and the setting survives a restart of the container."""
     config_dir = tmp_path / "old-config"
     seed(config_dir, "--user", USER)
     conf = config_dir / "qBittorrent" / "qBittorrent.conf"
@@ -200,11 +220,20 @@ def test_an_existing_config_without_the_setting_is_repaired(tmp_path: Path):
     try:
         assert login(name, PASSWORD), "the plain login works"
         assert not login(name, PASSWORD, headers=(PROXY_HOST,)), "this is the 401 of the bug"
-        assert docker.run(["stop", name], timeout=120).returncode == 0
-        seed(config_dir, "--fix-host-header")
-        assert docker.run(["start", name], timeout=120).returncode == 0
+        done = subprocess.run(
+            [
+                sys.executable, "-I", str(CATEGORIES_SCRIPT), "--url", f"http://{container_ip(name)}:8080",
+                "--user", USER, "--password-stdin",
+            ],
+            input=PASSWORD + "\n", text=True, capture_output=True, check=False,
+        )  # fmt: skip
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "web_ui_host_header_validation_enabled" in done.stdout
+        assert login(name, PASSWORD, headers=(PROXY_HOST,)), effective_settings(name)
+        assert not login(name, PASSWORD, headers=("Origin: http://evil.example",)), "CSRF is on"
+        # persisted: a restart of the container keeps it
+        assert docker.run(["restart", name], timeout=180).returncode == 0
         wait_ready(name)
-        assert login(name, PASSWORD, headers=(PROXY_HOST,))
-        assert not login(name, PASSWORD, headers=("Origin: http://evil.example",))
+        assert login(name, PASSWORD, headers=(PROXY_HOST,)), effective_settings(name)
     finally:
         docker.run(["rm", "-f", name])

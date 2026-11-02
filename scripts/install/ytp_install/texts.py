@@ -618,10 +618,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "de": "Automatische Updates sind ausgeschaltet.",
         "en": "Automatic updates are switched off.",
     },
-    "qbit.proxy_fix": {
-        "de": "qBittorrent bekommt eine Einstellung, damit seine Weboberfläche über den Proxy (Port 8081) erreichbar ist. Es wird dafür kurz angehalten und danach neu gestartet.",
-        "en": "qBittorrent gets a setting so that its web page can be reached through the proxy (port 8081). It is stopped briefly for that and started again afterwards.",
-    },
     "step.autodeploy.title": {
         "de": "Automatische Updates",
         "en": "Automatic updates",

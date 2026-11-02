@@ -94,11 +94,7 @@ class FakeRunner(Runner):
         if "seed_config.py" in joined:  # the real script writes the login into qBittorrent's config
             conf = self.root / "config" / "qbittorrent" / "qBittorrent" / "qBittorrent.conf"
             conf.parent.mkdir(parents=True, exist_ok=True)
-            proxy = "WebUI\\HostHeaderValidation=false\nWebUI\\CSRFProtection=true\n"
-            if "--fix-host-header" in argv:  # only the two proxy keys, into the existing file
-                conf.write_text(conf.read_text() + proxy)
-            else:
-                conf.write_text('[Preferences]\nWebUI\\Password_PBKDF2="@ByteArray(x:y)"\n' + proxy)
+            conf.write_text('[Preferences]\nWebUI\\Password_PBKDF2="@ByteArray(x:y)"\n')
         if "set_password.py" in joined:  # the real script stores a hash in .env
             env = self.root / ".env"
             env.write_text(

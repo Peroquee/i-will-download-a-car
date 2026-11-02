@@ -44,9 +44,9 @@ Each step uses the project's own script and is safe to run again.
 | 2 | Write the settings file .env | The template `.env.example` plus the answers; mode 600; a backup of an older file first. Settings new in the template are added with their defaults |
 | 3 | Create and check the media folders | `scripts/host/create-layout.sh`, then `check-host.sh --only layout` (proves hardlinks work) |
 | 4 | Prepare the VPN file | ExpressVPN-style `.ovpn`: copied to `config/expressvpn.ovpn` (mode 600) and `scripts/vpn/render_ovpn.py`; nothing for a built-in provider |
-| 5 | Set up the logins (web page, qBittorrent, watchdog) | `scripts/proxy/set_password.py` (the web password becomes a bcrypt hash), `scripts/qbittorrent/seed_config.py` (also `--fix-host-header` for an existing config, see [proxy.md](proxy.md)), `scripts/watchdog/setup_key.py`. All before the first start: qBittorrent rewrites its config on exit and gluetun reads its auth file only at start |
+| 5 | Set up the logins (web page, qBittorrent, watchdog) | `scripts/proxy/set_password.py` (the web password becomes a bcrypt hash), `scripts/qbittorrent/seed_config.py`, `scripts/watchdog/setup_key.py`. All before the first start: qBittorrent rewrites its config on exit and gluetun reads its auth file only at start |
 | 6 | Build and start the services, wait until everything runs | `docker compose up -d --build`, then waits (up to 10 minutes) until gluetun, qbittorrent, app, proxy and watchdog are all running and healthy |
-| 7 | Set up qBittorrent (categories) | `scripts/qbittorrent/setup_categories.py` |
+| 7 | Set up qBittorrent (categories) and the Web UI settings the proxy needs (host header validation off, CSRF protection on, see [proxy.md](proxy.md)) | `scripts/qbittorrent/setup_categories.py` (an update runs it again, so an older installation gets the settings) |
 | 8 | Check everything | `check-host.sh`, `verify_proxy.py` (asks the web password once more, Enter skips), Jellyfin's address, and optionally `killswitch-test.sh` |
 
 ## Running it again

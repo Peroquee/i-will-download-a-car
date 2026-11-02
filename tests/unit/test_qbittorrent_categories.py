@@ -190,6 +190,27 @@ def test_sets_default_and_incomplete_paths_and_automatic_management(server):
     assert fake.preferences["category_changed_tmm_enabled"] is True
 
 
+def test_the_web_ui_settings_for_the_proxy_are_set_host_header_off_and_csrf_on(server):
+    fake, url = server
+    fake.preferences["web_ui_host_header_validation_enabled"] = True  # qBittorrent's default
+    fake.preferences["web_ui_csrf_protection_enabled"] = False
+    result = run(url)
+    assert fake.preferences["web_ui_host_header_validation_enabled"] is False
+    assert fake.preferences["web_ui_csrf_protection_enabled"] is True
+    assert "set web_ui_host_header_validation_enabled = False" in result.stdout
+
+
+def test_csrf_protection_is_never_switched_off(server):
+    fake, url = server
+    run(url)
+    sent = [
+        json.loads(body.split("|", 1)[1])["json"]
+        for p, body in fake.requests
+        if p == "app/setPreferences"
+    ]
+    assert all(json.loads(j).get("web_ui_csrf_protection_enabled", True) is True for j in sent)
+
+
 def test_a_second_run_changes_nothing(server):
     fake, url = server
     run(url)

@@ -10,7 +10,6 @@ network namespace: if the tunnel is down there is no tun0 and nothing connects.
 Usage:
     scripts/qbittorrent/seed_config.py [--user NAME] [--config PATH] [--port N] [--dry-run]
                                        [--password-stdin]
-    scripts/qbittorrent/seed_config.py --fix-host-header [--config PATH] [--dry-run]
 
 The password is asked for twice on the terminal, or read from stdin with
 --password-stdin (for automation; never put it on the command line). Run it on
@@ -23,9 +22,9 @@ header names another port than its own (8080 inside gluetun). Through the proxy 
 browser's `Host` is `<lan address>:8081`, so the Web UI could never be reached that way. The key
 `WebUI\\HostHeaderValidation` is therefore set to false, and `WebUI\\CSRFProtection` is set to
 true explicitly. Only Caddy (LAN check, then login) and localhost on the VM can reach the port;
-see docs/proxy.md. `--fix-host-header` applies just these two keys to an EXISTING config (no
-password asked, nothing else touched); stop the qbittorrent container first, it rewrites the file
-when it exits.
+see docs/proxy.md. This covers a NEW config. For one that already exists (and may be rewritten by
+a running qBittorrent), `scripts/qbittorrent/setup_categories.py` sets the same two preferences
+through the Web API, which needs no stop and no file editing.
 
 Test hook: none needed, --config points it at any file.
 """
@@ -139,29 +138,6 @@ def write_private(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def host_header_fixed(text: str) -> bool:
-    """Does this config already have the proxy settings (as written by this script)?"""
-    lines = {ln.strip() for ln in text.splitlines()}
-    return all(f"{key}={value}" in lines for key, value in PROXY_SETTINGS.items())
-
-
-def fix_host_header(config: Path, dry_run: bool) -> int:
-    """Set the proxy keys in an existing config and nothing else. 0 also if it was fine already."""
-    if not config.exists():
-        print(f"error: {config} does not exist (run the script without --fix-host-header)")
-        return 1
-    existing = config.read_text(encoding="utf-8")
-    if host_header_fixed(existing):
-        print(f"{config} already has the proxy settings, nothing to do")
-        return 0
-    if dry_run:
-        print(f"dry run: would set {', '.join(PROXY_SETTINGS)} in {config}")
-        return 0
-    write_private(config, apply_settings(existing, {"Preferences": PROXY_SETTINGS}))
-    print(f"set {', '.join(PROXY_SETTINGS)} in {config}")
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Seed qBittorrent's Web UI login and VPN binding.")
     parser.add_argument("--user", default="admin", help="Web UI user name (default: admin)")
@@ -180,15 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--password-stdin", action="store_true", help="read the password from stdin"
     )
-    parser.add_argument(
-        "--fix-host-header",
-        action="store_true",
-        help="only set the two proxy-related keys in an existing config (no password asked)",
-    )
     args = parser.parse_args(argv)
-
-    if args.fix_host_header:
-        return fix_host_header(args.config, args.dry_run)
 
     if not USER_PATTERN.fullmatch(args.user):
         raise SystemExit("error: --user must be 3 to 64 characters of A-Z a-z 0-9 . _ -")

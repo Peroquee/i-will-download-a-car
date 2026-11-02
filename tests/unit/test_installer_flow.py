@@ -646,73 +646,53 @@ def test_no_warning_about_the_vpn_type_that_is_not_used(repo, tmp_path, ovpn):
     assert "WIREGUARD" not in term.text
 
 
-# --- qBittorrent behind the proxy: an existing config gets the host header setting -------------
+# --- qBittorrent behind the proxy: the Web UI settings go in through its API ---------------------
 
 
-OLD_QBIT_CONF = '[Preferences]\nWebUI\\Password_PBKDF2="@ByteArray(x:y)"\n'
-
-
-def old_qbit_conf(path: Path, text: str = OLD_QBIT_CONF) -> Path:
-    conf = path / "config" / "qbittorrent" / "qBittorrent" / "qBittorrent.conf"
-    conf.parent.mkdir(parents=True, exist_ok=True)
-    conf.write_text(text)
-    return conf
-
-
-def test_a_new_installation_gets_the_proxy_settings_from_the_seed_script_alone(
+def test_the_settings_for_the_proxy_are_applied_through_the_api_without_stopping_qbittorrent(
     repo, tmp_path, ovpn
 ):
     _, _, runner = play(repo, tmp_path, new_install_rules(ovpn))
-    assert [c for c in runner.ran("seed_config.py") if "--fix-host-header" in c] == []
-    assert (
-        "WebUI\\HostHeaderValidation=false"
-        in (repo / "config/qbittorrent/qBittorrent/qBittorrent.conf").read_text()
-    )
+    assert runner.ran("setup_categories.py")
+    assert not runner.ran("compose stop qbittorrent")
+    assert not runner.ran("--fix-host-header")
 
 
-def test_repair_stops_qbittorrent_patches_an_old_config_and_starts_it_again(repo, tmp_path, ovpn):
-    play(repo, tmp_path, new_install_rules(ovpn))
-    conf = old_qbit_conf(repo)  # a config from before the proxy settings existed
-    code, term, runner = play(repo, tmp_path, [("1 = Change settings", "3")])
-    assert code == 0, term.text
-    stop = runner.index("compose stop qbittorrent")
-    fix = runner.index("seed_config.py --fix-host-header")
-    start = max(
-        i for i, c in enumerate(runner.commands) if c[:4] == ["docker", "compose", "up", "-d"]
-    )
-    assert stop < fix < start, "stopped before the patch, started after"
-    assert len(runner.ran("--fix-host-header")) == 1
-    assert "WebUI\\HostHeaderValidation=false" in conf.read_text()
-    assert "stopped briefly" in term.text
-
-
-def test_repair_leaves_a_config_that_is_already_right_alone(repo, tmp_path, ovpn):
+def test_repair_applies_them_again_after_the_stack_is_up(repo, tmp_path, ovpn):
     play(repo, tmp_path, new_install_rules(ovpn))
     _, _, runner = play(repo, tmp_path, [("1 = Change settings", "3")])
-    assert not runner.ran("--fix-host-header")
+    assert runner.index("docker compose up -d --build") < runner.index("setup_categories.py")
     assert not runner.ran("compose stop qbittorrent")
 
 
-def test_update_patches_an_old_config_before_the_stack_is_started(repo, tmp_path, ovpn):
+def test_update_applies_them_after_the_new_version_is_up_and_before_the_host_checks(
+    repo, tmp_path, ovpn
+):
     play(repo, tmp_path, new_install_rules(ovpn))
-    old_qbit_conf(repo)
     _, _, runner = play(repo, tmp_path, [], argv=["--update"])
-    assert runner.index("compose stop qbittorrent") < runner.index("--fix-host-header")
-    assert runner.index("--fix-host-header") < runner.index("docker compose up -d --build")
+    up = max(i for i, c in enumerate(runner.commands) if c[:4] == ["docker", "compose", "up", "-d"])
+    api = max(i for i, c in enumerate(runner.commands) if "setup_categories.py" in " ".join(c))
+    checks = runner.index("check-host.sh --env-file")
+    assert up < api < checks
+    stdin = [text for argv, text in runner.inputs if "setup_categories.py" in " ".join(argv)]
+    assert stdin
+    assert stdin[-1].strip() == SECRETS["qbit"], "the password goes in through stdin"
 
 
-def test_update_without_a_qbittorrent_config_yet_does_nothing_about_it(repo, tmp_path, ovpn):
+def test_update_without_a_qbittorrent_password_skips_the_step_instead_of_failing(
+    repo, tmp_path, ovpn
+):
     play(repo, tmp_path, new_install_rules(ovpn))
-    (repo / "config/qbittorrent/qBittorrent/qBittorrent.conf").unlink()
-    _, _, runner = play(repo, tmp_path, [], argv=["--update"])
-    assert not runner.ran("--fix-host-header")
+    env = (repo / ".env").read_text().replace(f"QBIT_PASSWORD={SECRETS['qbit']}", "QBIT_PASSWORD=")
+    (repo / ".env").write_text(env)
+    code, term, runner = play(repo, tmp_path, [], argv=["--update"])
+    assert code == 0, term.text
+    assert len(runner.ran("setup_categories.py")) == 0
 
 
-def test_a_failing_patch_stops_the_step_with_the_logins_hint(repo, tmp_path, ovpn):
+def test_a_failing_api_step_stops_the_update_with_its_hint(repo, tmp_path, ovpn):
     play(repo, tmp_path, new_install_rules(ovpn))
-    old_qbit_conf(repo)
     runner = FakeRunner(repo)
-    runner.fail("--fix-host-header", 1, "boom")
-    code, term, _ = play(repo, tmp_path, [("1 = Change settings", "3")], runner=runner)
+    runner.fail("setup_categories.py", 1, "boom")
+    code, _, _ = play(repo, tmp_path, [], argv=["--update"], runner=runner)
     assert code == 1
-    assert 'The step "' in term.text
