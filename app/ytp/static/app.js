@@ -28,6 +28,9 @@
   function applyLanguage() {
     document.documentElement.lang = lang === "de" ? "de" : "en-GB";
     document.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-label]").forEach(function (el) {
+      el.setAttribute("aria-label", t(el.dataset.i18nLabel));
+    });
     document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
@@ -37,6 +40,7 @@
     refreshVpnText();
     renderJobs();
     renderSubs();
+    renderHowtoSources();
   }
 
   /* ---------------------------------------------------------------- state */
@@ -810,6 +814,32 @@
     });
   }
 
+  /* ---------------------------------------------------------------- How to guide (#33) */
+
+  function openHowto() {
+    var dialog = $("howto");
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();   // Esc closes it, focus stays inside, then returns here
+    } else {
+      dialog.setAttribute("open", "");
+    }
+  }
+
+  function closeHowto() {
+    var dialog = $("howto");
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+
+  function startHowto() {
+    $("howto-open").addEventListener("click", openHowto);
+    $("howto-close").addEventListener("click", closeHowto);
+    // A click on the dark area around the guide (the dialog element itself) closes it.
+    $("howto").addEventListener("click", function (event) {
+      if (event.target === $("howto")) closeHowto();
+    });
+  }
+
   /* ---------------------------------------------------------------- wiring */
 
   function onLinkChanged() {
@@ -854,6 +884,7 @@
     });
     startJobPolling();
     startSubs();
+    startHowto();
   }
 
   init();

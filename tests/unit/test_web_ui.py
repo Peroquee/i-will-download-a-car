@@ -343,7 +343,7 @@ def test_no_translation_is_empty_and_german_differs_from_english():
 
 def test_every_key_used_in_the_page_and_the_script_exists():
     t = translations()["en"]
-    used = set(re.findall(r'data-i18n(?:-placeholder)?="([\w.]+)"', HTML))
+    used = set(re.findall(r'data-i18n(?:-placeholder|-label)?="([\w.-]+)"', HTML))
     used |= {k for k in re.findall(r'\bt\("([\w.]+)"', APP_JS) if not k.endswith(".")}
     used |= {
         f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch", "stale")
@@ -618,6 +618,82 @@ def test_the_page_has_the_subscription_view_built_without_innerhtml():
     assert "innerHTML" not in APP_JS
     assert 'method: "DELETE"' in APP_JS or '"DELETE"' in APP_JS
     assert "window.confirm" not in APP_JS, "the two-step button is used instead of a dialog"
+
+
+# --- the How to guide (#33) ----------------------
+
+
+def test_the_guide_is_a_dialog_with_a_close_button_and_a_visible_opener():
+    assert re.search(r'<dialog id="howto"[^>]*aria-labelledby="howto-title"', HTML)
+    assert 'id="howto-title"' in HTML
+    assert re.search(r'<button type="button" id="howto-open"[^>]*aria-haspopup="dialog"', HTML)
+    assert 'id="howto-close"' in HTML
+    assert HTML.index('id="howto-open"') < HTML.index('id="lang"'), "next to the language button"
+    assert "showModal" in APP_JS, "the native dialog gives Esc and a focus trap"
+
+
+def test_every_illustration_has_a_text_alternative_in_both_languages():
+    illustrations = re.findall(r"<svg class=\"ill\"[^>]*>", HTML)
+    assert len(illustrations) == 6, "five steps and the YouTube part"
+    translations_ = translations()
+    for tag in illustrations:
+        assert 'role="img"' in tag
+        key = re.search(r'data-i18n-label="([\w.]+)"', tag).group(1)
+        for lang in ("de", "en"):
+            assert len(translations_[lang][key]) > 20, (lang, key)
+
+
+def test_the_guide_covers_the_five_steps_and_youtube_and_magnet_links():
+    t = translations()["en"]
+    for key in ("howto.s1.title", "howto.s2.title", "howto.s3.title", "howto.s4.title",
+                "howto.s5.title", "howto.yt.title", "howto.find.title", "howto.find.legal"):  # fmt: skip
+        assert key in t
+    assert "magnet:?xt=urn:btih:" in HTML, "an example of what a magnet link looks like"
+    assert "allowed to download" in t["howto.find.legal"]
+
+
+def test_the_guide_loads_nothing_from_another_site():
+    start = HTML.index('<dialog id="howto"')
+    dialog = HTML[start : HTML.index("</dialog>", start)]
+    assert not re.search(r"(?:src|href|xlink:href)\s*=", dialog), (
+        "no links, images or scripts inside"
+    )
+    assert "http://" not in dialog.replace("http://www.w3.org/2000/svg", "")
+    assert "https://" not in dialog
+
+
+def test_the_guide_has_no_list_of_sources():
+    """The owner decided: the guide explains what a magnet link looks like and where the button
+    usually is, and that only things one may download belong here. No list of places to get
+    torrents, no data file for one."""
+    assert not (STATIC_DIR / "howto-sources.json").exists()
+    assert 'id="howto-sources"' not in HTML
+    for text in (HTML, APP_JS, CSS):
+        assert "howto-sources" not in text
+        assert "howto.source" not in text
+    t = translations()
+    for lang in ("de", "en"):
+        assert not [k for k in t[lang] if k.startswith("howto.source") or k == "howto.find.sources"]
+
+
+def test_the_sources_file_is_not_served(client):
+    assert client.get("/static/howto-sources.json").status_code == 404
+
+
+def test_the_guide_button_is_called_anleitung_and_how_to():
+    t = translations()
+    assert t["de"]["howto.button"] == "Anleitung"
+    assert t["en"]["howto.button"] == "How to"
+    assert t["de"]["howto.title"] == "Anleitung"
+    assert t["en"]["howto.title"] == "How to"
+
+
+def test_the_guide_explains_the_magnet_link_and_the_legal_notice():
+    t = translations()
+    assert "magnet:?xt=urn:btih:" in t["en"]["howto.find.looks"]
+    assert "magnet symbol" in t["en"]["howto.find.where"]
+    assert "allowed to download" in t["en"]["howto.find.legal"]
+    assert "herunterladen darfst" in t["de"]["howto.find.legal"]
 
 
 # --- podcasts (#34) -------------------------------------------------------------------------

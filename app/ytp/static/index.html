@@ -36,6 +36,7 @@
         <p class="subtitle" data-i18n="subtitle"></p>
       </div>
       <div class="tools">
+        <button type="button" id="howto-open" class="howto-button" aria-haspopup="dialog" data-i18n="howto.button"></button>
         <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
       </div>
     </header>
@@ -267,6 +268,91 @@
   </main>
 </div>
 
+<dialog id="howto" class="howto" aria-labelledby="howto-title">
+  <div class="howto-head">
+    <h2 id="howto-title" class="jobs-title" data-i18n="howto.title"></h2>
+    <button type="button" id="howto-close" class="ghost small" data-i18n="howto.close"></button>
+  </div>
+  <p class="note" data-i18n="howto.intro"></p>
+  <ol class="howto-steps">
+    <li><h3 data-i18n="howto.s1.title"></h3><svg class="ill" viewBox="0 0 240 130" role="img" data-i18n-label="howto.s1.alt" xmlns="http://www.w3.org/2000/svg">
+<rect class="ill-win" x="10" y="8" width="220" height="114" rx="8"/>
+<rect class="ill-bar" x="10" y="8" width="220" height="18" rx="8"/>
+<rect class="ill-line" x="22" y="40" width="110" height="9" rx="3"/>
+<rect class="ill-line" x="22" y="56" width="150" height="6" rx="3"/>
+<rect class="ill-line" x="22" y="68" width="130" height="6" rx="3"/>
+<rect class="ill-btn" x="22" y="88" width="62" height="22" rx="5"/>
+<rect class="ill-hi" x="96" y="84" width="76" height="30" rx="6"/>
+<path class="ill-magnet" d="M118 92 v8 a8 8 0 0 0 16 0 v-8 h-5 v8 a3 3 0 0 1 -6 0 v-8 z"/>
+<rect class="ill-red" x="118" y="92" width="5" height="4"/><rect class="ill-red" x="129" y="92" width="5" height="4"/>
+<text class="ill-text" x="142" y="104">Magnet</text></svg><p data-i18n="howto.s1.text"></p></li>
+    <li><h3 data-i18n="howto.s2.title"></h3><svg class="ill" viewBox="0 0 240 130" role="img" data-i18n-label="howto.s2.alt" xmlns="http://www.w3.org/2000/svg">
+<rect class="ill-win" x="10" y="8" width="220" height="114" rx="8"/>
+<rect class="ill-hi" x="28" y="24" width="64" height="22" rx="5"/>
+<text class="ill-text" x="38" y="39">Magnet</text>
+<rect class="ill-menu" x="70" y="40" width="150" height="76" rx="6"/>
+<rect class="ill-line" x="80" y="50" width="100" height="8" rx="3"/>
+<rect class="ill-pick" x="76" y="64" width="138" height="20" rx="4"/>
+<text class="ill-text-on" x="84" y="78" data-i18n="howto.ill.copy"></text>
+<rect class="ill-line" x="80" y="94" width="90" height="8" rx="3"/>
+<path class="ill-cursor" d="M62 36 l0 22 l6 -5 l4 9 l4 -2 l-4 -9 l8 0 z"/></svg><p data-i18n="howto.s2.text"></p></li>
+    <li><h3 data-i18n="howto.s3.title"></h3><svg class="ill" viewBox="0 0 240 130" role="img" data-i18n-label="howto.s3.alt" xmlns="http://www.w3.org/2000/svg">
+<rect class="ill-win" x="10" y="8" width="220" height="114" rx="8"/>
+<rect class="ill-field" x="22" y="20" width="196" height="22" rx="5"/>
+<text class="ill-mono" x="30" y="35">magnet:?xt=urn:btih:…</text>
+<rect class="ill-field" x="22" y="52" width="96" height="20" rx="5"/>
+<text class="ill-text" x="30" y="66" data-i18n="type.movies"></text>
+<rect class="ill-field" x="124" y="52" width="94" height="20" rx="5"/>
+<text class="ill-text" x="132" y="66" data-i18n="howto.ill.titleyear"></text>
+<rect class="ill-primary" x="140" y="90" width="78" height="22" rx="6"/>
+<text class="ill-text-on" x="152" y="105" data-i18n="btn.submit"></text></svg><p data-i18n="howto.s3.text"></p></li>
+    <li><h3 data-i18n="howto.s4.title"></h3><svg class="ill" viewBox="0 0 240 130" role="img" data-i18n-label="howto.s4.alt" xmlns="http://www.w3.org/2000/svg">
+<rect class="ill-win" x="10" y="8" width="220" height="114" rx="8"/>
+<rect class="ill-row" x="22" y="20" width="196" height="38" rx="6"/>
+<text class="ill-text" x="30" y="35">Big Buck Bunny (2008)</text>
+<rect class="ill-track" x="30" y="43" width="150" height="7" rx="3"/>
+<rect class="ill-fill" x="30" y="43" width="90" height="7" rx="3"/>
+<text class="ill-small" x="188" y="49">60 %</text>
+<rect class="ill-row ill-rowbad" x="22" y="66" width="196" height="46" rx="6"/>
+<text class="ill-text" x="30" y="81" data-i18n="type.music"></text>
+<text class="ill-bad" x="30" y="95" data-i18n="status.failed"></text>
+<rect class="ill-btn" x="118" y="86" width="92" height="18" rx="5"/>
+<text class="ill-small" x="126" y="99" data-i18n="jobs.retry"></text></svg><p data-i18n="howto.s4.text"></p></li>
+    <li><h3 data-i18n="howto.s5.title"></h3><svg class="ill" viewBox="0 0 240 130" role="img" data-i18n-label="howto.s5.alt" xmlns="http://www.w3.org/2000/svg">
+<rect class="ill-win" x="10" y="8" width="220" height="114" rx="8"/>
+<rect class="ill-tile" x="24" y="24" width="48" height="70" rx="5"/>
+<rect class="ill-tile" x="82" y="24" width="48" height="70" rx="5"/>
+<rect class="ill-tile ill-new" x="140" y="24" width="48" height="70" rx="5"/>
+<path class="ill-play" d="M158 52 l14 8 l-14 8 z"/>
+<text class="ill-small" x="24" y="110" data-i18n="type.movies"></text><text class="ill-small" x="82" y="110" data-i18n="type.series"></text>
+<text class="ill-small" x="140" y="110" data-i18n="howto.ill.new"></text></svg><p data-i18n="howto.s5.text"></p></li>
+  </ol>
+  <section class="howto-part">
+    <h3 data-i18n="howto.yt.title"></h3>
+    <svg class="ill" viewBox="0 0 240 130" role="img" data-i18n-label="howto.yt.alt" xmlns="http://www.w3.org/2000/svg">
+<rect class="ill-win" x="10" y="8" width="220" height="114" rx="8"/>
+<rect class="ill-field" x="22" y="20" width="196" height="22" rx="5"/>
+<text class="ill-mono" x="30" y="35">youtube.com/watch?v=…</text>
+<rect class="ill-check" x="24" y="56" width="16" height="16" rx="3"/>
+<path class="ill-tick" d="M27 64 l4 4 l7 -9"/>
+<text class="ill-text" x="48" y="69" data-i18n="yt.subscribe"></text>
+<rect class="ill-primary" x="140" y="90" width="78" height="22" rx="6"/>
+<text class="ill-text-on" x="152" y="105" data-i18n="btn.submit"></text></svg>
+    <ul>
+      <li data-i18n="howto.yt.video"></li>
+      <li data-i18n="howto.yt.subscribe"></li>
+      <li data-i18n="howto.yt.unsubscribe"></li>
+    </ul>
+  </section>
+  <section class="howto-part">
+    <h3 data-i18n="howto.find.title"></h3>
+    <p data-i18n="howto.find.looks"></p>
+    <p><code class="howto-code">magnet:?xt=urn:btih:0123456789abcdef&amp;dn=Beispiel</code></p>
+    <p data-i18n="howto.find.where"></p>
+    <p class="howto-legal" data-i18n="howto.find.legal"></p>
+  </section>
+</dialog>
+
 <script type="application/json" id="i18n">
 {
   "de": {
@@ -448,6 +534,37 @@
     "subs.remove_failed": "Das Entfernen hat nicht geklappt.",
     "subs.removed_note": "Bereits geladene Dateien bleiben erhalten.",
     "err.int_out_of_range": "Eine Zahl von 0 bis 15.",
+    "howto.button": "Anleitung",
+    "howto.title": "Anleitung",
+    "howto.close": "Schließen",
+    "howto.intro": "In fünf Schritten kommt ein Film, eine Serie, ein Hörbuch oder Musik auf diese Seite und danach in Jellyfin.",
+    "howto.s1.title": "1. Magnet-Link finden",
+    "howto.s1.alt": "Eine Webseite mit einem Knopf „Magnet“ neben dem Download-Knopf.",
+    "howto.s1.text": "Auf der Seite, von der du etwas laden willst, suchst du einen Knopf oder Link mit dem Wort „Magnet“ oder einem kleinen Magneten. Er steht meistens neben „Download“.",
+    "howto.s2.title": "2. Link kopieren",
+    "howto.s2.alt": "Ein Menü am Magnet-Knopf mit dem Eintrag „Link kopieren“.",
+    "howto.s2.text": "Am Computer: mit der rechten Maustaste auf den Magnet-Knopf klicken und „Linkadresse kopieren“ wählen. Am Handy: den Knopf lange gedrückt halten und „Link kopieren“ wählen. Du siehst nichts passieren, der Link liegt jetzt nur in der Zwischenablage.",
+    "howto.s3.title": "3. Hier einfügen",
+    "howto.s3.alt": "Das Formular: oben der eingefügte Link, darunter die Art und die Felder, unten der Knopf „Hinzufügen“.",
+    "howto.s3.text": "Den Link oben in das Feld „Link“ einfügen. Die Seite erkennt den Magnet-Link selbst. Dann die Art wählen (Film, Serie, Hörbuch oder Musik) und die Felder ausfüllen, zum Beispiel Titel und Jahr. Zum Schluss auf „Hinzufügen“ tippen.",
+    "howto.s4.title": "4. Zuschauen",
+    "howto.s4.alt": "Die Liste der Aufträge: einer lädt mit einem Fortschrittsbalken, einer ist rot fehlgeschlagen und hat den Knopf „Nochmal versuchen“.",
+    "howto.s4.text": "Unter „Aufträge“ siehst du, wie weit es ist: wartet, lädt, wird einsortiert, fertig. Geht etwas schief, steht der Grund in Rot da, und „Nochmal versuchen“ startet es neu. Das Laden kann eine Weile dauern.",
+    "howto.s5.title": "5. In Jellyfin ansehen",
+    "howto.s5.alt": "Jellyfin mit Kacheln für die Bibliotheken; eine neue Kachel mit einem Abspiel-Zeichen.",
+    "howto.s5.text": "Ist der Auftrag „fertig“, erscheint der Titel nach kurzer Zeit in Jellyfin, in der passenden Bibliothek (Filme, Serien, Hörbücher, Musik oder Youtube). Wenn nicht: kurz warten und die Seite in Jellyfin neu laden.",
+    "howto.yt.title": "YouTube-Videos und Kanäle",
+    "howto.yt.alt": "Das Formular mit einem YouTube-Link und dem Haken „Kanal abonnieren“.",
+    "howto.yt.video": "Ein Video: den Link des Videos oben einfügen. Kanal und Titel erscheinen von selbst und lassen sich ändern. Dann auf „Hinzufügen“ tippen.",
+    "howto.yt.subscribe": "Einem Kanal folgen: vor dem Hinzufügen den Haken „Kanal abonnieren“ setzen. Oder weiter unten bei „Abonnements“ den Namen mit @ eintragen. Neue Videos des Kanals werden dann von selbst geladen (etwa stündlich geprüft). Es zählen nur Videos, die nach dem Abonnieren erscheinen.",
+    "howto.yt.unsubscribe": "Nicht mehr folgen: bei „Abonnements“ auf „Entfernen“ tippen. Schon geladene Videos bleiben.",
+    "howto.find.title": "Wo findet man Magnet-Links?",
+    "howto.find.looks": "So sieht ein Magnet-Link aus. Er beginnt immer mit „magnet:?xt=urn:btih:“:",
+    "howto.find.where": "Du findest ihn auf der Seite eines Torrents, meist als Magnet-Zeichen neben dem Download-Knopf. Ein Link, der mit „http“ oder „https“ anfängt, ist kein Magnet-Link.",
+    "howto.find.legal": "Wichtig: Füge nur Dinge hinzu, die du herunterladen darfst, zum Beispiel freie Filme und Musik, Hörbücher gemeinfreier Werke oder Linux-Programme. Im Zweifel nicht hinzufügen und die Person fragen, die diese Seite betreut.",
+    "howto.ill.copy": "Linkadresse kopieren",
+    "howto.ill.titleyear": "Titel, Jahr",
+    "howto.ill.new": "neu",
     "err.int_out_of_range_20": "Eine Zahl von 0 bis 20.",
     "help.title": "Hilfe",
     "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Die Adresse eines Podcast-Feeds einfügen: eine einzelne Folge wählen oder den Podcast abonnieren. Das Ergebnis erscheint später in Jellyfin."
@@ -631,6 +748,37 @@
     "subs.remove_failed": "Removing did not work.",
     "subs.removed_note": "Files that were already downloaded stay.",
     "err.int_out_of_range": "A number from 0 to 15.",
+    "howto.button": "How to",
+    "howto.title": "How to",
+    "howto.close": "Close",
+    "howto.intro": "In five steps a film, a series, an audiobook or music gets onto this page and then into Jellyfin.",
+    "howto.s1.title": "1. Find a magnet link",
+    "howto.s1.alt": "A web page with a \"Magnet\" button next to the download button.",
+    "howto.s1.text": "On the page you want to download from, look for a button or link with the word \"Magnet\" or a small magnet. It is usually next to \"Download\".",
+    "howto.s2.title": "2. Copy the link",
+    "howto.s2.alt": "A menu on the magnet button with the entry \"Copy link\".",
+    "howto.s2.text": "On a computer: right-click the magnet button and choose \"Copy link address\". On a phone: press and hold the button and choose \"Copy link\". Nothing visible happens; the link is now just on the clipboard.",
+    "howto.s3.title": "3. Paste it here",
+    "howto.s3.alt": "The form: the pasted link on top, below it the kind and the fields, at the bottom the \"Add\" button.",
+    "howto.s3.text": "Paste the link into the \"Link\" field at the top. The page recognises the magnet link by itself. Then choose the kind (movie, series, audiobook or music) and fill in the fields, for example title and year. Finally tap \"Add\".",
+    "howto.s4.title": "4. Watch it work",
+    "howto.s4.alt": "The job list: one is downloading with a progress bar, one has failed in red and has a \"Try again\" button.",
+    "howto.s4.text": "Under \"Jobs\" you see how far it is: queued, downloading, being filed, done. If something goes wrong the reason is shown in red, and \"Try again\" starts it again. Downloading can take a while.",
+    "howto.s5.title": "5. Watch it in Jellyfin",
+    "howto.s5.alt": "Jellyfin with tiles for the libraries; a new tile with a play symbol.",
+    "howto.s5.text": "When the job says \"done\", the title shows up in Jellyfin after a short while, in the matching library (Movies, Series, Audiobooks, Music or Youtube). If not: wait a little and reload the page in Jellyfin.",
+    "howto.yt.title": "YouTube videos and channels",
+    "howto.yt.alt": "The form with a YouTube link and the tick box \"Subscribe to the channel\".",
+    "howto.yt.video": "One video: paste the video's link at the top. Channel and title appear by themselves and can be changed. Then tap \"Add\".",
+    "howto.yt.subscribe": "Follow a channel: tick \"Subscribe to the channel\" before adding. Or enter the channel name with @ further down under \"Subscriptions\". New videos of the channel are then downloaded automatically (checked about hourly). Only videos published after subscribing count.",
+    "howto.yt.unsubscribe": "Stop following: tap \"Remove\" under \"Subscriptions\". Videos that were already downloaded stay.",
+    "howto.find.title": "Where do you find magnet links?",
+    "howto.find.looks": "This is what a magnet link looks like. It always starts with \"magnet:?xt=urn:btih:\":",
+    "howto.find.where": "You find it on a torrent's page, usually as a magnet symbol next to the download button. A link that starts with \"http\" or \"https\" is not a magnet link.",
+    "howto.find.legal": "Important: only add things you are allowed to download, for example free films and music, audiobooks of works in the public domain, or Linux programs. If in doubt, do not add it and ask the person who looks after this site.",
+    "howto.ill.copy": "Copy link address",
+    "howto.ill.titleyear": "Title, year",
+    "howto.ill.new": "new",
     "err.int_out_of_range_20": "A number from 0 to 20.",
     "help.title": "Help",
     "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. Paste the address of a podcast feed: choose a single episode or subscribe to the podcast. The result appears in Jellyfin later."

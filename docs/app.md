@@ -392,6 +392,28 @@ a warning sign and the icon turns red (`favicon-alert.svg`), so it is visible fr
 and the bar gets `role="alert"` for screen readers. No sound or animation. The exit country is the
 only detail from the egress check shown; addresses are never sent to the page.
 
+## The "How to" guide (issue #33)
+
+A button **"Anleitung" / "How to"** at the top right of the page (next to the language switch)
+opens a guide for the household: five illustrated steps (find a magnet link, copy it, paste it and
+fill in the fields, watch the job list, find the result in Jellyfin), a part on YouTube videos and
+channel subscriptions, and "Where do you find magnet links?" with what such a link looks like and
+where the magnet button usually is, plus a notice that only things you are allowed to download
+belong here. There is deliberately **no list of places to get torrents** (the owner decided that
+the guide must not recommend sources).
+
+- It is a native `<dialog>` opened with `showModal()`: **Esc** and the **Close** button close it
+  (so does a click on the dark area), the keyboard focus stays inside while it is open and returns
+  to the button afterwards. Each illustration is an inline SVG with a text alternative
+  (`aria-label`) in both languages; the words inside the pictures follow the language switch.
+- **No external requests and no links:** the pictures are inline, the page loads nothing from other
+  sites, and the guide contains no addresses to click (a test checks the dialog for `href`, `src`
+  and `http`).
+- **The wording** is in `index.html` with the other texts (keys `howto.*`, German first, simple
+  words, English next to it).
+- The app takes **magnet links only**, not .torrent files; the guide says what a magnet link looks
+  like ("starts with `magnet:?xt=urn:btih:`") and that a link starting with `http` is not one.
+
 ## Subscription view (issue #27)
 
 Below the job list: **Subscribed channels**.
