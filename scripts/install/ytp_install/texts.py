@@ -559,6 +559,73 @@ TEXTS: dict[str, dict[str, str]] = {
         "de": "Damit `docker` ohne `sudo` geht, melde dich einmal ab und wieder an.",
         "en": "To use `docker` without `sudo`, log out and in again once.",
     },
+    # ------------------------------------------------------------------ automatic updates (#42)
+    "autodeploy.why": {
+        "de": (
+            "Automatische Updates: Die App kann sich selbst auf den neuesten Stand bringen. Alle 5 Minuten\n"
+            "schaut sie in GitLab nach einer neuen Version. Sie installiert sie nur, wenn die Tests dort grün\n"
+            "sind und alles gesund läuft, macht vorher ein Backup und rollt zurück, wenn etwas schiefgeht.\n"
+            "Dafür braucht sie ein nur lesendes Zugangs-Token (siehe docs/autodeploy.md)."
+        ),
+        "en": (
+            "Automatic updates: the app can bring itself up to date. Every 5 minutes it looks in GitLab\n"
+            "for a new version. It installs it only if the tests there are green and everything is healthy,\n"
+            "makes a backup first and rolls back if something goes wrong. It needs a read-only access\n"
+            "token for that (see docs/autodeploy.md)."
+        ),
+    },
+    "autodeploy.ask": {
+        "de": "Automatische Updates einschalten?",
+        "en": "Switch on automatic updates?",
+    },
+    "autodeploy_remote.ask": {
+        "de": "Adresse des Repositorys in GitLab (http://…/gruppe/projekt.git)",
+        "en": "Address of the repository in GitLab (http://…/group/project.git)",
+    },
+    "autodeploy_token.ask": {
+        "de": "Zugangs-Token (Rolle Reporter, Rechte read_api und read_repository; wird nicht angezeigt)",
+        "en": "Access token (role Reporter, scopes read_api and read_repository; not shown)",
+    },
+    "err.remote": {
+        "de": "Das muss eine Adresse wie http://gitlab.lan/gruppe/projekt.git sein, ohne Benutzer und Passwort darin.",
+        "en": "This must be an address like http://gitlab.lan/group/project.git, without a user name or password in it.",
+    },
+    "err.token": {
+        "de": "Das sieht nicht wie ein GitLab-Token aus (8 bis 200 Zeichen: Buchstaben, Ziffern, _ . = -).",
+        "en": "This does not look like a GitLab token (8 to 200 characters: letters, digits, _ . = -).",
+    },
+    "autodeploy.title": {
+        "de": "Automatische Updates einrichten",
+        "en": "Setting up automatic updates",
+    },
+    "autodeploy.token_saved": {
+        "de": "Das Token liegt jetzt in config/autodeploy/token (nur für dich lesbar).",
+        "en": "The token is now in config/autodeploy/token (readable only by you).",
+    },
+    "autodeploy.token_missing": {
+        "de": "Es gibt kein Token. Lege es in config/autodeploy/token ab (Datei nur für dich lesbar) und starte den Assistenten noch einmal. Siehe docs/autodeploy.md.",
+        "en": "There is no token. Put it in config/autodeploy/token (file readable only by you) and run the assistant again. See docs/autodeploy.md.",
+    },
+    "autodeploy.check_failed": {
+        "de": "Die Zeitschaltung ist eingerichtet, aber die Prüfung meldet ein Problem (siehe oben). Nach dem Beheben: sudo -u {user} python3 scripts/ops/autodeploy.py check",
+        "en": "The timer is set up, but the check reports a problem (see above). After fixing it: sudo -u {user} python3 scripts/ops/autodeploy.py check",
+    },
+    "autodeploy.on": {
+        "de": "Automatische Updates sind an: alle 5 Minuten wird nachgesehen. Pausieren: python3 scripts/ops/autodeploy.py pause",
+        "en": "Automatic updates are on: a check every 5 minutes. To pause: python3 scripts/ops/autodeploy.py pause",
+    },
+    "autodeploy.off": {
+        "de": "Automatische Updates sind ausgeschaltet.",
+        "en": "Automatic updates are switched off.",
+    },
+    "step.autodeploy.title": {
+        "de": "Automatische Updates",
+        "en": "Automatic updates",
+    },
+    "step.autodeploy.hint": {
+        "de": "Die automatischen Updates konnten nicht eingerichtet werden. Der Rest ist fertig und läuft. Mehr dazu in docs/autodeploy.md und config/installer.log.",
+        "en": "Automatic updates could not be set up. Everything else is finished and running. More in docs/autodeploy.md and config/installer.log.",
+    },
     "done.jellyfin": {
         "de": 'In Jellyfin: lege eine Bibliothek pro Ordner an (z. B. {example}). Für Podcasts den Typ "Musik" wählen.',
         "en": 'In Jellyfin: create one library per folder (for example {example}). Choose the type "Music" for podcasts.',

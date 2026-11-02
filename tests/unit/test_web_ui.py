@@ -919,6 +919,8 @@ DASH_JS = (STATIC_DIR / "dashboard.js").read_text(encoding="utf-8")
 ALERT_KINDS = (
     "vpn_down", "vpn_blind", "egress_mismatch", "watchdog_silent", "vpn_recovered",
     "job_failed", "feed_error", "disk_low",
+    "update_done", "update_blocked", "update_rolled_back", "update_rolled_back_db",
+    "update_halted", "update_checks",
 )  # fmt: skip
 
 
@@ -957,6 +959,13 @@ def test_alert_texts_only_use_values_the_monitor_provides():
         "job_failed": {"label", "reason", "job_id", "type"},
         "feed_error": {"source", "name", "reason"},
         "disk_low": {"free_percent", "free_gb"},
+        # the automatic update (#42, scripts/ops/autodeploy.py)
+        "update_done": {"sha", "from_sha", "migrations"},
+        "update_blocked": {"sha", "reason"},
+        "update_rolled_back": {"sha", "from_sha", "reason"},
+        "update_rolled_back_db": {"sha", "from_sha", "reason"},
+        "update_halted": {"sha", "reason"},
+        "update_checks": {"sha"},
     }
     t = translations()
     for lang in ("de", "en"):
@@ -1177,3 +1186,40 @@ def test_retry_on_the_dashboard_uses_the_existing_retry_endpoint_and_reloads():
     out = smoke("/dashboard", "", ANSWERS, click="retry")
     assert ["RETRY", 3] in out["calls"]
     assert out["calls"].count(["GET", "/api/dashboard"]) == 2
+
+
+@needs_node
+def test_the_dashboard_line_for_automatic_updates_is_shown_only_when_there_is_a_status():
+    shown = dict(
+        DASHBOARD,
+        deploy={"deployed": "abc123def456", "result": "deployed", "paused": False, "halted": False},
+    )
+    out = smoke("/dashboard", "", {**ANSWERS, "/api/dashboard": shown})
+    line = out["nodes"]["dash-deploy"]
+    assert line["hidden"] is False
+    assert line["text"] == "Automatic updates: version abc123def456 \u00b7 last run: updated"
+    paused = dict(
+        DASHBOARD, deploy={"deployed": "abc", "result": "paused", "paused": True, "halted": False}
+    )
+    assert (
+        "paused"
+        in smoke("/dashboard", "", {**ANSWERS, "/api/dashboard": paused})["nodes"]["dash-deploy"][
+            "text"
+        ]
+    )
+    halted = dict(
+        DASHBOARD, deploy={"deployed": "abc", "result": "halted", "paused": False, "halted": True}
+    )
+    assert (
+        "STOPPED"
+        in smoke("/dashboard", "", {**ANSWERS, "/api/dashboard": halted})["nodes"]["dash-deploy"][
+            "text"
+        ]
+    )
+    none = dict(DASHBOARD, deploy=None)
+    assert (
+        smoke("/dashboard", "", {**ANSWERS, "/api/dashboard": none})["nodes"]["dash-deploy"][
+            "hidden"
+        ]
+        is True
+    )

@@ -29,7 +29,11 @@ def test_every_compose_variable_is_documented(name):
     )
 
 
-@pytest.mark.parametrize("name", sorted(ENV_EXAMPLE))
+# Read by host scripts, not by a container, so docker-compose.yml never mentions them.
+HOST_ONLY = {"AUTODEPLOY_REMOTE", "AUTODEPLOY_BRANCH", "AUTODEPLOY_HEALTH_WAIT"}  # #42
+
+
+@pytest.mark.parametrize("name", sorted(set(ENV_EXAMPLE) - HOST_ONLY))
 def test_no_stale_variables_in_env_example(name):
     assert name in REFERENCED, f"{name} is in .env.example but docker-compose.yml never uses it"
 
@@ -164,3 +168,10 @@ def test_git_really_ignores_env_but_tracks_example():
 
     assert ignored(".env")
     assert not ignored(".env.example")
+
+
+def test_the_host_only_settings_are_really_read_by_a_host_script():
+    script = (REPO_ROOT / "scripts" / "ops" / "autodeploy.py").read_text(encoding="utf-8")
+    for name in HOST_ONLY:
+        assert name in ENV_EXAMPLE
+        assert name in script, f"{name} is listed as host-only but no script reads it"

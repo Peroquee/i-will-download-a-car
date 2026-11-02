@@ -1,0 +1,21 @@
+# Installed by scripts/ops/autodeploy.py install-units (issue #42); @USER@ and @ROOT@ are filled in.
+[Unit]
+Description=youtube-premium: look for a new version and deploy it
+Documentation=file://@ROOT@/docs/autodeploy.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/python3 @ROOT@/scripts/ops/autodeploy.py run
+# A deploy builds images; give it room, but not forever.
+TimeoutStartSec=7200
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes

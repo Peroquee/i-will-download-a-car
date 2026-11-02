@@ -198,6 +198,20 @@
       $("dash-vpn-empty").hidden = vpn.history.length > 0;
     }
 
+    function renderDeploy(deploy) {
+      var line = $("dash-deploy");
+      line.hidden = !deploy;
+      if (!deploy) return;
+      var parts = [t("dash.deploy_version", { version: deploy.deployed || "?" })];
+      if (deploy.halted) parts.push(t("dash.deploy_halted"));
+      else if (deploy.paused) parts.push(t("dash.deploy_paused"));
+      else if (deploy.result) {
+        var key = "deploy.result." + deploy.result;
+        parts.push(t("dash.deploy_last", { result: has(key) ? t(key) : deploy.result }));
+      }
+      line.textContent = parts.join(" \u00b7 ");
+    }
+
     function renderDashboard() {
       $("dash-error").textContent = dashFailed ? t("dash.load_error") : "";
       if (!dashData) return;
@@ -210,6 +224,7 @@
       dashData.recent.forEach(function (job) { recent.appendChild(recentRow(job)); });
       $("dash-recent-empty").hidden = dashData.recent.length > 0;
       renderVpn(dashData.vpn);
+      renderDeploy(dashData.deploy);
       var disk = dashData.disk;
       $("dash-disk").textContent = disk
         ? t("dash.disk", { percent: disk.free_percent, free: L.formatBytes(disk.free_gb * 1e9, lang()), total: L.formatBytes(disk.total_gb * 1e9, lang()) })

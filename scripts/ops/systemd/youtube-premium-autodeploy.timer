@@ -1,0 +1,12 @@
+# Installed by scripts/ops/autodeploy.py install-units (issue #42).
+[Unit]
+Description=youtube-premium: check for a new version every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

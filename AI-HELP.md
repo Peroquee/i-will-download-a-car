@@ -93,6 +93,7 @@ Other commands: `./install.sh --dry-run` (shows what it would do, changes nothin
 | Jellyfin address and API key (optional) | so Jellyfin rescans after a download | `JELLYFIN_URL`, `JELLYFIN_API_KEY` |
 | Address for alerts (optional) | message when the VPN drops | `ALERT_URL` |
 | Public address / IPv6 prefix of the internet line (optional) | extra check: it must never show up in VPN traffic | `HOME_PUBLIC_IP` |
+| Repository address for automatic updates (optional) | the app looks there for new versions every 5 minutes and installs green ones (token in `config/autodeploy/token`, see docs/autodeploy.md) | `AUTODEPLOY_REMOTE` |
 | Time zone | log times | `TZ` |
 | (not asked) | the media files belong to user and group 1000; no VPN city is chosen | `PUID`, `PGID`, `VPN_SERVER_CITIES` |
 

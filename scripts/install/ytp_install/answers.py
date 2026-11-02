@@ -61,6 +61,10 @@ class Answers:
     jellyfin_key: str = ""
     alert_url: str = ""
     home_prefix: str = ""
+    # Automatic updates (#42): the GitLab repository to watch (empty = off) and the read-only token
+    # for it. The token is written to config/autodeploy/token (mode 600), never into .env.
+    autodeploy_remote: str = ""
+    autodeploy_token: str = ""
 
     def env_values(self) -> dict[str, str]:
         """The .env settings this installer owns, in a stable order. Settings that do not apply
@@ -80,6 +84,7 @@ class Answers:
             "JELLYFIN_API_KEY": self.jellyfin_key,
             "ALERT_URL": self.alert_url,
             "HOME_PUBLIC_IP": self.home_prefix,
+            "AUTODEPLOY_REMOTE": self.autodeploy_remote,
         }
         if self.vpn_kind == "ovpn":
             values["VPN_SERVICE_PROVIDER"] = "custom"
@@ -128,6 +133,7 @@ class Answers:
         answers.jellyfin_key = get("JELLYFIN_API_KEY")
         answers.alert_url = get("ALERT_URL")
         answers.home_prefix = get("HOME_PUBLIC_IP")
+        answers.autodeploy_remote = get("AUTODEPLOY_REMOTE")
         provider = get("VPN_SERVICE_PROVIDER", "custom")
         answers.vpn_kind = "ovpn" if provider == "custom" else "builtin"
         answers.vpn_provider = "" if provider == "custom" else provider
@@ -259,6 +265,32 @@ def check_http_url(value: str) -> str | None:
 
 def check_jellyfin_key(value: str) -> str | None:
     return None if re.fullmatch(r"[0-9a-fA-F]{32}", value) else "err.jellyfin_key"
+
+
+GITLAB_TOKEN = re.compile(r"[A-Za-z0-9_.=-]{8,200}")
+DEFAULT_REMOTE = "http://192.168.178.194/web-projects/youtube-premium.git"
+
+
+def check_git_remote(value: str) -> str | None:
+    """The GitLab repository address for automatic updates: http(s), no login in it, and a
+    group/project path (the pipeline lookup needs both)."""
+    parts = urlparse(value)
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username
+        or parts.password
+        or parts.query
+        or parts.fragment
+        or re.search(r"\s", value)
+    ):
+        return "err.remote"
+    path = parts.path.strip("/").removesuffix(".git")
+    return None if re.fullmatch(r"[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+", path) else "err.remote"
+
+
+def check_gitlab_token(value: str) -> str | None:
+    return None if GITLAB_TOKEN.fullmatch(value) else "err.token"
 
 
 def check_prefixes(value: str) -> str | None:
