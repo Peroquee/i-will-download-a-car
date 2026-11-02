@@ -7,7 +7,8 @@ lookup and for the download so nothing leaves the machine). Headless Chromium ru
 container with the host's network and executes `browser/ui_checks.py`: the form makes a job, the
 navigation and the VPN bar go where they say, a page without its scripts ends on the reload page,
 and an update while a page is open gets a banner. Not part of the pipeline: the image is large; run
-it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (it must be one with Python and browsers).
+it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the browsers; the matching `playwright`
+package is installed with pip inside the container, `YTP_PLAYWRIGHT_VERSION` names its version).
 """
 
 from __future__ import annotations
@@ -37,7 +38,12 @@ pytestmark = [
     ),
 ]
 
-IMAGE = os.environ.get("YTP_PLAYWRIGHT_IMAGE", "mcr.microsoft.com/playwright/python:v1.49.1-jammy")
+# The image has the browsers, not the Python package: the same version is installed with pip
+# inside the container first (the browsers and the package must match).
+PLAYWRIGHT_VERSION = os.environ.get("YTP_PLAYWRIGHT_VERSION", "1.49.1")
+IMAGE = os.environ.get(
+    "YTP_PLAYWRIGHT_IMAGE", f"mcr.microsoft.com/playwright/python:v{PLAYWRIGHT_VERSION}-jammy"
+)
 CHECKS = Path(__file__).parent / "browser" / "ui_checks.py"
 ENV = {
     "MEDIA_DIR_MOVIES": "Filme",
@@ -102,11 +108,15 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
 
 def test_the_page_works_in_a_real_browser(base_url):
+    install_and_run = (
+        f"python -m pip install --quiet --disable-pip-version-check playwright=={PLAYWRIGHT_VERSION}"
+        ' && exec python /checks/ui_checks.py "$0"'
+    )
     result = docker.run(
         [
             "run", "--rm", "--network", "host", "--ipc", "host",
             "-v", f"{CHECKS}:/checks/ui_checks.py:ro",
-            IMAGE, "python", "/checks/ui_checks.py", base_url,
+            IMAGE, "sh", "-c", install_and_run, base_url,
         ],
         timeout=900,
     )  # fmt: skip
