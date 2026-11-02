@@ -6,7 +6,7 @@
 # Debian VM after bootstrap.sh, and after any host change. CI runs a subset as a smoke test.
 #
 # Usage:
-#   scripts/host/check-host.sh [--only virt,docker,compose,tun,media,layout] [--env-file PATH]
+#   scripts/host/check-host.sh [--only virt,docker,compose,tun,media,layout,backups] [--env-file PATH]
 #
 # Output: one line per check, "PASS|FAIL|SKIP <check> <detail>", then a summary.
 # Exit:   0 all selected checks passed (SKIP counts as pass), 1 any FAIL, 2 bad usage.
@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-readonly ALL_CHECKS="virt docker compose tun media layout"
+readonly ALL_CHECKS="virt docker compose tun media layout backups"
 readonly MIN_COMPOSE="2.17"   # depends_on.restart needs 2.17+
 readonly TUN_DEVNUM="a:c8"    # /dev/net/tun is char device 10:200 (hex a:c8)
 
@@ -295,6 +295,96 @@ check_layout() {
   pass layout "hardlinks work from downloads/ into ${names[0]}, ${names[1]}, ${names[2]}, ${names[3]} (link count 2)$note; ${names[4]} is on the same filesystem"
 }
 
+# The physical path of a folder that may not exist (then the path as given).
+resolved_path() {
+  if [ -d "$1" ]; then (cd -P "$1" && pwd -P); else printf '%s' "$1"; fi
+}
+
+# Is path $1 the folder $2 or below it?
+path_inside() {
+  case "$1/" in
+    "$2"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The backup folder (issue #41): DATA_ROOT/.youtube-premium-backups, or YTP_BACKUP_DIR from the env
+# file. Checked: it is a real folder, private (no group/other bits), its archives are private too,
+# it is not inside downloads/ or a library, and (default folder) it belongs to PUID:PGID and sits on
+# the same filesystem as the media, i.e. on the media drive and not on the VM's disk.
+check_backups() {
+  if [ ! -f "$ENV_FILE" ]; then
+    fail backups "env file $ENV_FILE not found (copy .env.example to .env)"
+    return
+  fi
+  local data_root custom dir puid pgid mode owner root name loose var real
+  data_root="$(env_value DATA_ROOT || true)"
+  custom="$(env_value YTP_BACKUP_DIR || true)"
+  if [ -z "$data_root" ]; then
+    fail backups "DATA_ROOT missing in $ENV_FILE"
+    return
+  fi
+  root="${CHECK_ROOT}${data_root}"
+  if [ -n "$custom" ]; then dir="${CHECK_ROOT}${custom}"; else dir="$root/.youtube-premium-backups"; fi
+  if [ -L "$dir" ]; then
+    fail backups "$dir is a symbolic link; the backups belong in a real folder"
+    return
+  fi
+  if [ ! -d "$dir" ]; then
+    fail backups "$dir does not exist (run: sudo scripts/host/create-layout.sh)"
+    return
+  fi
+  mode="$(stat -c '%a' "$dir")"
+  if (( 8#$mode & 8#077 )); then
+    fail backups "$dir has mode $mode: group and others must not read the backups (chmod 700 $dir)"
+    return
+  fi
+  # Plain bash and stat only (no find/realpath): the dot-files too (partial archives, work folders).
+  loose=""
+  local entry
+  shopt -s nullglob dotglob
+  for entry in "$dir"/*; do
+    if [ -f "$entry" ] && (( 8#$(stat -c '%a' "$entry") & 8#077 )); then
+      loose="$entry"
+      break
+    fi
+  done
+  shopt -u nullglob dotglob
+  if [ -n "$loose" ]; then
+    fail backups "$loose is readable by group or others; archives must be mode 600 (chmod 600)"
+    return
+  fi
+  real="$(cd -P "$dir" && pwd -P)"
+  for var in MEDIA_DIR_MOVIES MEDIA_DIR_SERIES MEDIA_DIR_AUDIOBOOKS MEDIA_DIR_MUSIC MEDIA_DIR_PODCASTS MEDIA_DIR_YOUTUBE; do
+    name="$(env_value "$var" || true)"
+    [ -n "$name" ] || continue
+    if path_inside "$real" "$(resolved_path "$root/$name")"; then
+      fail backups "$dir is inside the library $name: Jellyfin would index the backups"
+      return
+    fi
+  done
+  if path_inside "$real" "$(resolved_path "$root/downloads")"; then
+    fail backups "$dir is inside downloads/"
+    return
+  fi
+  if [ -z "$custom" ]; then
+    puid="$(env_value PUID || true)"
+    pgid="$(env_value PGID || true)"
+    owner="$(stat -c '%u:%g' "$dir")"
+    if [ "$owner" != "$puid:$pgid" ]; then
+      fail backups "$dir is owned by $owner, expected $puid:$pgid (run: sudo scripts/host/create-layout.sh, or chown)"
+      return
+    fi
+    if [ -d "$root" ] && [ "$(stat -c '%d' "$dir")" != "$(stat -c '%d' "$root")" ]; then
+      fail backups "$dir is on a different filesystem than $root: the backups would not be on the media drive"
+      return
+    fi
+    pass backups "$dir (mode $mode, owner $owner, on the media drive)"
+  else
+    pass backups "$dir (YTP_BACKUP_DIR; mode $mode, private, outside the libraries)"
+  fi
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -327,6 +417,7 @@ main() {
       tun) check_tun ;;
       media) check_media ;;
       layout) check_layout ;;
+      backups) check_backups ;;
       *) echo "no dispatch for check: $check" >&2; exit 2 ;;
     esac
   done

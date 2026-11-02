@@ -35,4 +35,4 @@ def test_backups_are_ignored_by_git():
 
 def test_the_default_backup_folder_is_inside_an_ignored_path():
     script = (ROOT / "scripts" / "ops" / "backup.py").read_text()
-    assert 'args.repo_root / "backups"' in script
+    assert 'root / "backups"' in script

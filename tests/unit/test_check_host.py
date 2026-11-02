@@ -100,6 +100,12 @@ else echo "{vm}"; [ "{vm}" != none ] || exit 1; fi""",
         ):
             if rel not in skip:
                 (data / rel).mkdir(parents=True, exist_ok=True)
+        if BACKUPS not in skip:
+            backups = data / BACKUPS
+            backups.mkdir(exist_ok=True)
+            backups.chmod(0o700)
+            if os.geteuid() == 0:
+                os.chown(backups, self.puid, self.pgid)
 
     def write_env(self, **overrides: str | None) -> None:
         values: dict[str, str | None] = {
@@ -158,6 +164,9 @@ def host(tmp_path: Path) -> Host:
     return h
 
 
+BACKUPS = ".youtube-premium-backups"
+
+
 def owner_of(h: Host) -> tuple[int, int] | None:
     return (h.puid, h.pgid) if os.geteuid() == 0 else None
 
@@ -184,8 +193,8 @@ def test_healthy_host_passes_everything(host):
     host.layout()
     result = host.run()
     assert result.returncode == 0, result.stdout + result.stderr
-    checks = ("virt", "docker", "compose", "tun", "media", "layout")
-    assert [status(result, c) for c in checks] == ["PASS"] * 6
+    checks = ("virt", "docker", "compose", "tun", "media", "layout", "backups")
+    assert [status(result, c) for c in checks] == ["PASS"] * 7
     assert result.stdout.rstrip().endswith("OK: all checks passed")
 
 
@@ -217,8 +226,8 @@ def test_a_check_without_a_dispatch_arm_fails_loudly(host):
     """A check added to ALL_CHECKS but not to main()'s case must not be skipped silently."""
     source = SCRIPT.read_text(encoding="utf-8")
     patched = source.replace(
-        'readonly ALL_CHECKS="virt docker compose tun media layout"',
-        'readonly ALL_CHECKS="virt docker compose tun media layout orphan"',
+        'readonly ALL_CHECKS="virt docker compose tun media layout backups"',
+        'readonly ALL_CHECKS="virt docker compose tun media layout backups orphan"',
     )
     assert patched != source, "ALL_CHECKS line changed; update this test"
     script = host.tmp / "check-host-orphan.sh"
@@ -607,3 +616,116 @@ def test_layout_fails_when_the_owner_cannot_use_the_state_folder(host):
 def test_layout_passes_with_a_correct_app_state_folder(host):
     host.layout()
     assert status(_layout(host), "layout") == "PASS"
+
+
+# --- the backup folder (issue #41) --------------------------------------------------------------
+
+
+def backups_host(host, **kw):
+    host.docker()
+    host.virt()
+    host.mounted()
+    host.tun("real")
+    host.data_dir(owner=owner_of(host))
+    host.layout(**kw)
+    return host
+
+
+def test_the_backup_folder_passes_when_private_and_on_the_media_drive(host):
+    backups_host(host)
+    result = host.run("--only", "backups")
+    assert result.returncode == 0, result.stdout
+    line = next(ln for ln in result.stdout.splitlines() if ln.startswith("PASS backups"))
+    assert "mode 700" in line
+    assert "on the media drive" in line
+
+
+def test_a_missing_backup_folder_says_how_to_create_it(host):
+    backups_host(host, skip=(BACKUPS,))
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "FAIL"
+    assert "create-layout.sh" in result.stdout
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("mode", [0o755, 0o750, 0o701, 0o777, 0o770])
+def test_a_backup_folder_others_can_read_fails(host, mode):
+    backups_host(host)
+    (host.root / "data" / BACKUPS).chmod(mode)
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "FAIL"
+    assert "chmod 700" in result.stdout
+
+
+@pytest.mark.security
+def test_an_archive_others_can_read_fails(host):
+    backups_host(host)
+    archive = host.root / "data" / BACKUPS / "ytp-backup-20261102T090000Z.tar.gz"
+    archive.write_text("x")
+    archive.chmod(0o644)
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "FAIL"
+    assert "chmod 600" in result.stdout
+    archive.chmod(0o600)
+    assert status(host.run("--only", "backups"), "backups") == "PASS"
+
+
+@pytest.mark.security
+def test_a_symlinked_backup_folder_fails(host):
+    backups_host(host, skip=(BACKUPS,))
+    elsewhere = host.tmp / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    (host.root / "data" / BACKUPS).symlink_to(elsewhere)
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "FAIL"
+    assert "symbolic link" in result.stdout
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to give the folder to another user")
+def test_a_backup_folder_of_the_wrong_owner_fails(host):
+    backups_host(host)
+    os.chown(host.root / "data" / BACKUPS, 0, 0)
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "FAIL"
+    assert "expected" in result.stdout
+
+
+def custom_dir(host, relative: str, mode: int = 0o700):
+    folder = host.root / relative.lstrip("/")
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(mode)
+    host.write_env(YTP_BACKUP_DIR="/" + relative.lstrip("/"))
+    return folder
+
+
+def test_a_custom_backup_folder_from_the_env_file_is_checked_instead(host):
+    backups_host(host, skip=(BACKUPS,))
+    custom_dir(host, "mnt/nas/ytp-backups")
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "PASS"
+    assert "YTP_BACKUP_DIR" in result.stdout
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "inside", ["data/Filme/backups", "data/downloads/movies/b", "data/Podcasts"]
+)
+def test_a_backup_folder_inside_a_library_or_the_downloads_fails(host, inside):
+    backups_host(host, skip=(BACKUPS,))
+    custom_dir(host, inside)
+    result = host.run("--only", "backups")
+    assert status(result, "backups") == "FAIL"
+    assert "inside" in result.stdout
+
+
+def test_a_custom_folder_with_loose_mode_fails_too(host):
+    backups_host(host, skip=(BACKUPS,))
+    custom_dir(host, "mnt/nas/ytp-backups", mode=0o755)
+    assert status(host.run("--only", "backups"), "backups") == "FAIL"
+
+
+def test_the_full_run_includes_the_backup_check(host):
+    backups_host(host)
+    result = host.run()
+    assert status(result, "backups") == "PASS"
+    assert "backups" in result.stdout

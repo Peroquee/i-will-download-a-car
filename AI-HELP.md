@@ -144,7 +144,7 @@ in **Jellyfin** creates one library per folder (type *Music* also for podcasts).
 - **Disk full**: `df -h` shows it. Media needs a lot of space; the downloads folder holds unfinished
   files.
 - **Updating**: `./update.sh` (backup, new version, rebuild, check). Backups: `sudo make backup`
-  (folder `backups/`, contains secrets, keep it private).
+  (folder `.youtube-premium-backups` inside the media folder, e.g. `/data/.youtube-premium-backups`; it contains secrets, keep it private).
 
 ## Where the documentation is
 

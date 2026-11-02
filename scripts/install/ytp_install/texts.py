@@ -548,8 +548,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "qBittorrent's own interface (rarely needed): {url}",
     },
     "done.backups": {
-        "de": "Sicherungen: `sudo make backup` legt sie im Ordner backups/ ab (Anleitung: docs/operations.md).",
-        "en": "Backups: `sudo make backup` puts them in the folder backups/ (guide: docs/operations.md).",
+        "de": "Sicherungen: `sudo make backup` legt sie im Ordner {folder} ab, auf der Medien-Platte (Anleitung: docs/operations.md).",
+        "en": "Backups: `sudo make backup` puts them in the folder {folder}, on the media drive (guide: docs/operations.md).",
     },
     "done.help": {
         "de": "Hilfe: Die Datei HILFE-MIT-KI.md kannst du in einen KI-Chat kopieren; die KI erklärt dir dann jeden Schritt. Schicke ihr nie Passwörter oder die Datei .env.",

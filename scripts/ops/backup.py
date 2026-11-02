@@ -12,10 +12,19 @@ What is lost if the media VM dies, and cannot be re-created from the repository:
 NOT included: the downloads and the media libraries (`/data`). They are large and live on the
 share, which has its own protection; this backup is the small, secret-bearing part.
 
-The archive therefore CONTAINS SECRETS. It is created with mode 600 in a folder with mode 700,
-the default folder `backups/` is ignored by Git, and it must never be committed or put on a
-share other people can read. Encrypting it (for example with `age` or `gpg`) before it leaves
-this machine is the owner's call; see docs/operations.md.
+The archive therefore CONTAINS SECRETS. It is created with mode 600 in a folder with mode 700.
+
+**Where the archives go (issue #41):** by default `<DATA_ROOT>/.youtube-premium-backups`, on the
+media drive, not on the VM's disk: that drive is a ZFS pool on the Proxmox host, so the backups
+survive the loss of the VM and are part of the pool's snapshots. The folder is hidden, outside
+`downloads/` and every library folder (so Jellyfin never indexes it), owned by PUID:PGID with mode
+700 (`scripts/host/create-layout.sh` creates it). Override with `$YTP_BACKUP_DIR` (in the
+environment or in `.env`) or `--target`. The script REFUSES a target that is readable by group or
+others, that lies inside `config/`, `downloads/` or a library folder, and it never creates missing
+parent folders (an unmounted media drive must not make it fill the system disk). Without a
+`DATA_ROOT` in `.env` it falls back to `<repo>/backups` (ignored by Git). Encrypting an archive
+(for example with `age` or `gpg`) before it leaves the machine is the owner's call; see
+docs/operations.md.
 
 Usage:
     scripts/ops/backup.py [create] [--target DIR] [--keep N] [--dry-run]
@@ -27,8 +36,8 @@ Usage:
 archive (written under a temporary name and renamed when finished and verified), then removes the
 oldest archives beyond `--keep` (default 14); it never touches other files in the folder.
 `--dry-run` shows what it would do and writes nothing. Run it as the user who owns `config/`
-(PUID:PGID of the stack), or with sudo. If a file cannot be read the backup FAILS instead of
-producing an incomplete archive.
+(PUID:PGID of the stack), or with sudo (archives are then handed to the folder's owner). If a
+file cannot be read the backup FAILS instead of producing an incomplete archive.
 
 `restore` unpacks an archive into an EMPTY folder (it never writes into the live installation)
 after checking every member's name and type, and checks the database. Putting the files back is
@@ -55,6 +64,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_KEEP = 14
+BACKUP_DIR_NAME = ".youtube-premium-backups"  # under DATA_ROOT; scripts/host/*.sh use the same name
+LIBRARY_VARS = (
+    "MEDIA_DIR_MOVIES",
+    "MEDIA_DIR_SERIES",
+    "MEDIA_DIR_AUDIOBOOKS",
+    "MEDIA_DIR_MUSIC",
+    "MEDIA_DIR_PODCASTS",
+    "MEDIA_DIR_YOUTUBE",
+)
 NAME_RE = re.compile(r"ytp-backup-\d{8}T\d{6}Z(?:-\d+)?\.tar\.gz")
 MANIFEST = "MANIFEST.json"
 TOP_LEVEL = ("db", "config", "env")  # the only folders an archive may contain, besides MANIFEST
@@ -73,6 +91,70 @@ class BackupError(Exception):
 
 
 # ------------------------------------------------------------------------------------ helpers
+
+
+def read_env(path: Path) -> dict[str, str]:
+    """KEY=VALUE lines of a dotenv file (quotes stripped); {} if there is no readable file."""
+    values: dict[str, str] = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        name, sep, value = line.strip().partition("=")
+        if sep and not name.startswith("#"):
+            values[name.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def default_target(root: Path, environ: dict[str, str] | None = None) -> Path:
+    """Where archives go when no --target is given (see the module description)."""
+    env = os.environ if environ is None else environ
+    if env.get("YTP_BACKUP_DIR"):
+        return Path(env["YTP_BACKUP_DIR"])
+    dotenv = read_env(root / ".env")
+    if dotenv.get("YTP_BACKUP_DIR"):
+        return Path(dotenv["YTP_BACKUP_DIR"])
+    data_root = dotenv.get("DATA_ROOT", "")
+    if data_root.startswith("/"):
+        return Path(data_root) / BACKUP_DIR_NAME
+    return root / "backups"
+
+
+def check_target(target: Path, root: Path) -> None:
+    """Refuse a backup folder that would be unsafe (raises BackupError with the fix).
+
+    * not inside `config/` (it would back itself up);
+    * not inside `downloads/` or a library folder under DATA_ROOT (Jellyfin and the organizer
+      work there, and the folder holds secrets);
+    * if it exists: a real folder (not a link), not readable by group or others."""
+    config = (root / "config").resolve()
+    resolved = target.resolve()
+    if resolved == config or config in resolved.parents:
+        raise BackupError(f"the target {target} is inside config/, which would back itself up")
+    dotenv = read_env(root / ".env")
+    data_root = dotenv.get("DATA_ROOT", "")
+    if data_root.startswith("/"):
+        base = Path(data_root).resolve()
+        names = ["downloads", *(dotenv[v] for v in LIBRARY_VARS if dotenv.get(v))]
+        for name in names:
+            protected = base / name
+            if resolved == protected or protected in resolved.parents:
+                raise BackupError(
+                    f"the target {target} is inside {protected}: backups hold secrets and must "
+                    f"not be in a library or the downloads (default: {base / BACKUP_DIR_NAME})"
+                )
+    if target.is_symlink():
+        raise BackupError(f"the target {target} is a symbolic link; use the real folder")
+    if target.exists():
+        if not target.is_dir():
+            raise BackupError(f"the target {target} exists but is not a folder")
+        mode = stat.S_IMODE(target.stat().st_mode)
+        if mode & 0o077:
+            raise BackupError(
+                f"the target {target} is readable by group or others (mode {mode:o}) and the "
+                f"archives hold secrets; fix it with: chmod 700 {target}"
+            )
 
 
 def fmt_size(size: int) -> str:
@@ -215,8 +297,7 @@ def create(args: argparse.Namespace) -> int:
         raise BackupError(
             f"{db} does not exist: the app has not started yet, so there is nothing to back up"
         )
-    if target == config or config in target.parents:
-        raise BackupError(f"the target {target} is inside config/, which would back itself up")
+    check_target(args.target, root)
 
     dirs, files, skipped = collect_config(config)
     size = sum((config / f).stat().st_size for f in files) + db.stat().st_size
@@ -242,9 +323,14 @@ def create(args: argparse.Namespace) -> int:
         return 0
 
     if not target.exists():
-        target.mkdir(parents=True, mode=0o700)
-    elif target.stat().st_mode & 0o077:
-        print(f"note: {target} is readable by others; the archives themselves are mode 600")
+        if not target.parent.is_dir():
+            raise BackupError(
+                f"{target.parent} does not exist: is the media drive mounted? (the backup folder "
+                "is created by scripts/host/create-layout.sh; missing parent folders are never "
+                "created here, so nothing lands on the system disk by mistake)"
+            )
+        target.mkdir(mode=0o700)
+        target.chmod(0o700)
     with tempfile.TemporaryDirectory(dir=target, prefix=".work-") as work_name:
         work = Path(work_name)
         work.chmod(0o700)
@@ -265,6 +351,7 @@ def create(args: argparse.Namespace) -> int:
                 raise BackupError("the new archive failed its own check: " + "; ".join(problems))
             partial.chmod(0o600)
             os.replace(partial, target / name)
+            hand_to_folder_owner(target / name, target)
         finally:
             partial.unlink(missing_ok=True)
     print(f"written {target / name} ({fmt_size((target / name).stat().st_size)}, mode 600)")
@@ -272,6 +359,16 @@ def create(args: argparse.Namespace) -> int:
         old.unlink()
         print(f"removed {old.name}")
     return 0
+
+
+def hand_to_folder_owner(path: Path, folder: Path) -> None:
+    """Run as root (sudo make backup) the archive belongs to root; give it to the folder's owner
+    (PUID:PGID), so the stack's user can read and prune it. Mode stays 600."""
+    if os.geteuid() != 0:
+        return
+    info = folder.stat()
+    if (info.st_uid, info.st_gid) != (0, 0):
+        os.chown(path, info.st_uid, info.st_gid)
 
 
 def write_archive(
@@ -459,7 +556,8 @@ def main(argv: list[str] | None = None) -> int:
             "--target",
             type=Path,
             default=None,
-            help="folder for the archives (default: $YTP_BACKUP_DIR, else <repo>/backups)",
+            help="folder for the archives (default: $YTP_BACKUP_DIR, else DATA_ROOT/"
+            f"{BACKUP_DIR_NAME}, else <repo>/backups)",
         )
 
     make = sub.add_parser("create", help="make a new backup (the default)")
@@ -487,8 +585,7 @@ def main(argv: list[str] | None = None) -> int:
         argv = [*argv[:position], "create", *argv[position:]]
     args = parser.parse_args(argv)
     if hasattr(args, "target") and args.target is None:
-        from_env = os.environ.get("YTP_BACKUP_DIR")
-        args.target = Path(from_env) if from_env else args.repo_root / "backups"
+        args.target = default_target(args.repo_root.resolve())
     try:
         return args.func(args)
     except BackupError as exc:

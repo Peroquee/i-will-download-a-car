@@ -444,7 +444,10 @@ def finish(conv: Conversation, a: Answers, env: dict[str, str], restart_hint: bo
     conv.say(conv.tr("done.open", url=base + "/", user=a.web_user))
     qbt_port = env.get("PROXY_QBT_PORT", "8081")
     conv.say(conv.tr("done.qbit", url=f"{proxy_url(a)}:{qbt_port}/"))
-    conv.say(conv.tr("done.backups"))
+    backup_folder = (
+        env.get("YTP_BACKUP_DIR") or f"{a.data_root.rstrip('/')}/.youtube-premium-backups"
+    )
+    conv.say(conv.tr("done.backups", folder=backup_folder))
     if a.jellyfin_url:
         conv.say(conv.tr("done.jellyfin", example=f"/media/jellyfin/{a.dirs['MEDIA_DIR_MOVIES']}"))
     conv.say(conv.tr("done.help"))

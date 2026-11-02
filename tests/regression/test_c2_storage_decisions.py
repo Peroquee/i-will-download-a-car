@@ -59,10 +59,16 @@ def test_c2_layout_script_never_touches_existing_folders_or_files():
 
     The one deliberate exception is the app's own state folder, see the next test."""
     rest, _ = split_app_config(script_code())
+    backup = re.search(r"^ensure_backup_dir\(\) \{\n(.*?)^\}\n", rest, re.S | re.M)
+    assert backup, "ensure_backup_dir() is gone"
+    rest = rest.replace(backup.group(0), "")
     for forbidden in ("chmod", "chown", "rm ", "mv ", "find ", " -R", " -r "):
         assert forbidden not in rest, forbidden
+        assert forbidden not in backup.group(1), forbidden
     # The only change it makes to the data tree is creating a folder, owned and moded as configured.
     assert len(re.findall(r"\binstall -d\b", rest)) == 1
+    # The backup folder (#41) is created the same way, once, private, and never touched afterwards.
+    assert len(re.findall(r"\binstall -d -m 700\b", backup.group(1))) == 1
 
 
 @pytest.mark.security
