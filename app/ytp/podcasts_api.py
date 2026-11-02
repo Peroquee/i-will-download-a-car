@@ -38,8 +38,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
 
-from . import jobs, podcast_subscriptions
-from .apiutil import problem
+from . import accounts, jobs, podcast_subscriptions
+from .apiutil import followed_view, may_use, problem
 from .metadata import Name, sanitize_name
 from .podcast_jobs import JOB_TYPE, PodcastWorker, episode_metadata
 from .podcasts import Podcast, PodcastError, PodcastFeedClient, normalise_feed_url
@@ -186,6 +186,7 @@ async def queue_episode(body: EpisodeRequest, request: Request) -> JSONResponse:
     job, outcome = await asyncio.to_thread(
         jobs.submit_job, db, JOB_TYPE, episode.key, metadata.model_dump_json()
     )
+    await asyncio.to_thread(accounts.add_job_owner, db, job.id, request.state.account.id)
     logger.info("podcast job", extra={"job_id": job.id, "outcome": outcome})
     summary = {"id": job.id, "type": JOB_TYPE, "status": job.status}
     if outcome == "duplicate":
@@ -213,9 +214,18 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
         return problem(
             409, f"At most {podcast_subscriptions.MAX_PODCASTS} podcasts can be subscribed."
         )
+    account = request.state.account
+    await asyncio.to_thread(accounts.follow, db, "podcast", subscription.id, account.id)
+    others = len(await asyncio.to_thread(accounts.followers, db, "podcast", subscription.id)) - 1
     logger.info("podcast subscription", extra={"podcast_id": subscription.id, "new": created})
     return JSONResponse(
-        {**subscription.as_dict(), "duplicate": not created}, status_code=201 if created else 200
+        {
+            **subscription.as_dict(),
+            "duplicate": not created,
+            "following": True,
+            "other_followers": others,
+        },
+        status_code=201 if created else 200,
     )
 
 
@@ -224,14 +234,23 @@ async def list_podcasts(request: Request) -> JSONResponse:
     if db is None:
         return problem(503, "The database is not available; see /health.")
     rows = await asyncio.to_thread(podcast_subscriptions.list_all, db)
-    return JSONResponse({"podcasts": [row.as_dict() for row in rows]})
+    return JSONResponse(
+        {"podcasts": await followed_view(db, "podcast", rows, request.state.account)}
+    )
 
 
-async def unsubscribe(subscription_id: int, request: Request) -> Response:
+async def unsubscribe(subscription_id: int, request: Request, everyone: int = 0) -> Response:
+    """Stop following; the subscription ends when nobody follows it. Admins: `?everyone=1`."""
     db = request.app.state.db
     if db is None:
         return problem(503, "The database is not available; see /health.")
-    if not await asyncio.to_thread(podcast_subscriptions.delete, db, subscription_id):
+    account = request.state.account
+    if everyone and account.is_admin:
+        if not await asyncio.to_thread(podcast_subscriptions.delete, db, subscription_id):
+            return problem(404, "no such podcast subscription")
+        return Response(status_code=204)
+    outcome = await asyncio.to_thread(accounts.unfollow, db, "podcast", subscription_id, account.id)
+    if outcome == "none":
         return problem(404, "no such podcast subscription")
     return Response(status_code=204)
 
@@ -242,7 +261,7 @@ async def poll_now(subscription_id: int, request: Request) -> JSONResponse:
     if db is None or poller is None:
         return problem(503, "The database is not available; see /health.")
     sub = await asyncio.to_thread(podcast_subscriptions.get, db, subscription_id)
-    if sub is None:
+    if sub is None or not await may_use(db, "podcast", subscription_id, request.state.account):
         return problem(404, "no such podcast subscription")
     try:
         queued = await asyncio.to_thread(poller.poll_now, sub)

@@ -49,8 +49,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import skipped_videos, subscriptions
-from .apiutil import PROBE_STATUS, problem
+from . import accounts, skipped_videos, subscriptions
+from .apiutil import PROBE_STATUS, followed_view, may_use, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
 from .feeds import FeedError
 from .metadata import Name, sanitize_name
@@ -115,9 +115,20 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
         return problem(
             409, f"At most {subscriptions.MAX_SUBSCRIPTIONS} channels can be subscribed."
         )
+    # One channel is one subscription however many people follow it: asking again only adds the
+    # asker as a follower (the settings stay those of the first one).
+    account = request.state.account
+    await asyncio.to_thread(accounts.follow, db, "channel", subscription.id, account.id)
+    others = len(await asyncio.to_thread(accounts.followers, db, "channel", subscription.id)) - 1
     logger.info("subscription", extra={"subscription_id": subscription.id, "new": created})
     return JSONResponse(
-        {**subscription.as_dict(), "duplicate": not created}, status_code=201 if created else 200
+        {
+            **subscription.as_dict(),
+            "duplicate": not created,
+            "following": True,
+            "other_followers": others,
+        },
+        status_code=201 if created else 200,
     )
 
 
@@ -126,25 +137,26 @@ async def list_subscriptions(request: Request) -> JSONResponse:
     if db is None:
         return problem(503, "The database is not available; see /health.")
     rows = await asyncio.to_thread(subscriptions.list_all, db)
-    return JSONResponse(
-        {
-            "subscriptions": [
-                {
-                    **row.as_dict(),
-                    "skipped": await asyncio.to_thread(skipped_videos.summary, db, row.id),
-                }
-                for row in rows
-            ]
-        }
-    )
+    entries = await followed_view(db, "channel", rows, request.state.account)
+    for entry in entries:
+        entry["skipped"] = await asyncio.to_thread(skipped_videos.summary, db, entry["id"])
+    return JSONResponse({"subscriptions": entries})
 
 
-async def unsubscribe(subscription_id: int, request: Request) -> Response:
+async def unsubscribe(subscription_id: int, request: Request, everyone: int = 0) -> Response:
+    """Stop following. The subscription ends when nobody follows it any more. An admin can end it
+    for everybody with `?everyone=1`."""
     db = request.app.state.db
     if db is None:
         return problem(503, "The database is not available; see /health.")
-    if not await asyncio.to_thread(subscriptions.delete, db, subscription_id):
-        return problem(404, "no such subscription")
+    account = request.state.account
+    if everyone and account.is_admin:
+        if not await asyncio.to_thread(subscriptions.delete, db, subscription_id):
+            return problem(404, "no such subscription")
+        return Response(status_code=204)
+    outcome = await asyncio.to_thread(accounts.unfollow, db, "channel", subscription_id, account.id)
+    if outcome == "none":
+        return problem(404, "no such subscription")  # not following it looks like not existing
     return Response(status_code=204)
 
 
@@ -158,7 +170,7 @@ async def poll_now(subscription_id: int, request: Request) -> JSONResponse:
     if db is None or poller is None:
         return problem(503, "The database is not available; see /health.")
     sub = await asyncio.to_thread(subscriptions.get, db, subscription_id)
-    if sub is None:
+    if sub is None or not await may_use(db, "channel", subscription_id, request.state.account):
         return problem(404, "no such subscription")
     try:
         queued = await asyncio.to_thread(poller.poll_now, sub)

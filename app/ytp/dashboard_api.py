@@ -32,7 +32,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import alertlog, jobs
-from .apiutil import problem
+from .apiutil import problem, visible_to
 from .clients.qbittorrent import Torrent
 from .jobs import Job
 from .jobs_api import job_label
@@ -44,6 +44,7 @@ RECENT = 20
 HISTORY = 30
 ETA_UNKNOWN = 8640000  # qBittorrent's "infinity"
 SAFE_VPN_KEYS = ("state", "since", "paused", "egress", "egress_country")
+USER_VPN_KEYS = ("state", "since", "paused")  # no exit country for a user
 
 
 DEPLOY_KEYS = ("deployed", "deployed_at", "result", "message", "paused", "halted", "checked_at")
@@ -116,8 +117,10 @@ async def dashboard(request: Request):
     if db is None:
         return problem(503, "The database is not available; see /health.")
     state = request.app.state
-    active = await asyncio.to_thread(jobs.active_jobs, db)
-    recent = await asyncio.to_thread(jobs.recent_finished, db, RECENT)
+    account = request.state.account
+    owner = visible_to(request)  # a user sees their own jobs, an admin all of them
+    active = await asyncio.to_thread(jobs.active_jobs, db, owner)
+    recent = await asyncio.to_thread(jobs.recent_finished, db, RECENT, owner)
     torrents: dict[str, Torrent] = {}
     if any(
         j.status == "downloading" and j.type not in (YOUTUBE_JOB_TYPE, PODCAST_JOB_TYPE)
@@ -132,17 +135,24 @@ async def dashboard(request: Request):
             details.update(worker.details)
     watchdog = state.watchdog_status
     status = await asyncio.to_thread(watchdog.fetch_status) if watchdog is not None else {}
-    current = {key: status[key] for key in SAFE_VPN_KEYS if key in status}
+    keys = SAFE_VPN_KEYS if account.is_admin else USER_VPN_KEYS
+    current = {key: status[key] for key in keys if key in status}
     current.setdefault("state", "unknown")
-    history = await asyncio.to_thread(alertlog.vpn_history, db, HISTORY)
-    disk = await asyncio.to_thread(disk_summary, state.settings.data_root)
+    # The history, the free space and the update status are the owner's business, not a user's.
+    history = []
+    disk = None
+    deploy = None
+    if account.is_admin:
+        history = await asyncio.to_thread(alertlog.vpn_history, db, HISTORY)
+        disk = await asyncio.to_thread(disk_summary, state.settings.data_root)
+        deploy = await asyncio.to_thread(deploy_status, state.settings.config_dir)
     return JSONResponse(
         {
             "active": [active_row(j, torrents, progress, details) for j in active],
             "recent": [recent_row(j) for j in recent],
             "vpn": {"current": current, "history": history},
             "disk": disk,
-            "deploy": await asyncio.to_thread(deploy_status, state.settings.config_dir),
+            "deploy": deploy,
         }
     )
 

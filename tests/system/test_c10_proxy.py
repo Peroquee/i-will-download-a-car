@@ -240,30 +240,45 @@ def test_the_caddyfile_is_valid(password_hash):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("port_name", ["app_port", "qbt_port"])
-class TestClientInsideTheLan:
-    def test_no_credentials_means_401_with_a_basic_challenge(self, inside, port_name):
-        status, headers = get(getattr(inside, port_name))
+class TestClientInsideTheLanAtTheQbittorrentPort:
+    """The qBittorrent port keeps the proxy's own basic auth (admin only)."""
+
+    def test_no_credentials_means_401_with_a_basic_challenge(self, inside):
+        status, headers = get(inside.qbt_port)
         assert status == 401
         assert headers["www-authenticate"].lower().startswith("basic")
 
-    def test_a_wrong_password_means_401(self, inside, port_name):
-        status, _ = get(getattr(inside, port_name), headers=basic(password="not the password"))
-        assert status == 401
+    def test_a_wrong_password_means_401(self, inside):
+        assert get(inside.qbt_port, headers=basic(password="not the password"))[0] == 401
 
-    def test_a_wrong_user_means_401(self, inside, port_name):
-        status, _ = get(getattr(inside, port_name), headers=basic(user="someone-else"))
-        assert status == 401
+    def test_a_wrong_user_means_401(self, inside):
+        assert get(inside.qbt_port, headers=basic(user="someone-else"))[0] == 401
 
-    def test_the_right_login_reaches_the_upstream(self, inside, port_name):
-        status, headers = get(getattr(inside, port_name), headers=basic())
+    def test_the_right_login_reaches_the_upstream(self, inside):
+        status, headers = get(inside.qbt_port, headers=basic())
         assert status == 200
         assert "server" not in headers, "the Server header is removed"
 
-    def test_forwarding_headers_from_the_client_change_nothing(self, inside, port_name):
-        port = getattr(inside, port_name)
+    def test_forwarding_headers_from_the_client_change_nothing(self, inside):
+        port = inside.qbt_port
         assert get(port, headers=SPOOFED_LAN_HEADERS)[0] == 401
         assert get(port, headers={**SPOOFED_LAN_HEADERS, **basic()})[0] == 200
+
+
+class TestClientInsideTheLanAtTheAppPort:
+    """#44: the app port has no proxy login; the app itself asks for the account login."""
+
+    def test_the_request_reaches_the_app_without_any_proxy_login(self, inside):
+        status, headers = get(inside.app_port)
+        assert status == 200
+        assert "www-authenticate" not in headers
+        assert "server" not in headers, "the Server header is removed"
+
+    def test_a_proxy_login_header_is_not_needed_and_not_forwarded(self, inside):
+        assert get(inside.app_port, headers=basic())[0] == 200
+
+    def test_forwarding_headers_from_the_client_change_nothing(self, inside):
+        assert get(inside.app_port, headers=SPOOFED_LAN_HEADERS)[0] == 200
 
 
 @pytest.mark.security
@@ -294,9 +309,8 @@ def test_refused_requests_never_reach_the_upstream(outside, upstream):
 @pytest.mark.security
 def test_unauthenticated_requests_never_reach_the_upstream(inside, upstream):
     before = upstream_requests(upstream)
-    for port in (inside.app_port, inside.qbt_port):
-        get(port)
-        get(port, headers=basic(password="wrong"))
+    get(inside.qbt_port)
+    get(inside.qbt_port, headers=basic(password="wrong"))
     assert upstream_requests(upstream) == before
 
 
@@ -346,7 +360,9 @@ def test_a_missing_setting_refuses_everyone_or_does_not_start(
     if proxy is None:
         return  # refused to start: closed
     try:
-        for port in (proxy.app_port, proxy.qbt_port):
+        # the app port only checks the LAN (#44); the login is the qBittorrent port's business
+        ports = (proxy.app_port, proxy.qbt_port) if denied == {403} else (proxy.qbt_port,)
+        for port in ports:
             assert get(port, headers=basic())[0] in denied
     finally:
         docker.run(["rm", "-f", proxy.name])

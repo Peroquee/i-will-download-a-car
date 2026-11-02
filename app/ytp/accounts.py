@@ -359,6 +359,15 @@ def followers(db: Database, kind: str, subscription_id: int) -> list[int]:
     return [r["account_id"] for r in rows]
 
 
+def followed_ids(db: Database, kind: str, account_id: int) -> set[int]:
+    table = FOLLOW_TABLES[kind]
+    rows = db.query(
+        f"SELECT subscription_id FROM {table} WHERE account_id = ?",
+        (account_id,),
+    )
+    return {r["subscription_id"] for r in rows}
+
+
 def follower_names(db: Database, kind: str, subscription_id: int) -> list[str]:
     table = FOLLOW_TABLES[kind]
     rows = db.query(

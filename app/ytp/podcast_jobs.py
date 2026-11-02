@@ -27,7 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from . import jobs, podcast_subscriptions
+from . import accounts, jobs, podcast_subscriptions
 from .clients.jellyfin import LibraryRefresher
 from .config import Settings
 from .db import Database
@@ -301,15 +301,18 @@ class PodcastPoller(SubscriptionPoller):
             self._record(sub, error.message)
             raise
         queued = 0
+        followers = accounts.followers(self.db, "podcast", sub.id)
         for episode in new_entries(sub, podcast.episodes):  # type: ignore[arg-type]
             metadata = episode_metadata(sub.title, episode, sub.feed_url, podcast.image_url)
-            _, outcome = jobs.submit_job(
+            job, outcome = jobs.submit_job(
                 self.db,
                 JOB_TYPE,
                 episode.key,
                 metadata.model_dump_json(),
                 retry_failed=False,
             )
+            for follower in followers:
+                accounts.add_job_owner(self.db, job.id, follower)
             queued += outcome == "created"
         self._record(sub, None)
         logger.info(

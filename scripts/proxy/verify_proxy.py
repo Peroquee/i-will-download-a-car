@@ -2,11 +2,10 @@
 """verify_proxy.py: prove the reverse proxy does its job from a machine on the LAN (issue #29).
 
 Checks, against the running stack:
-  1. the app port answers 401 (with a Basic challenge) without credentials,
-     and 401 with a wrong password,
-  2. with the right password the app answers (GET /health -> 200),
-  3. the qBittorrent port answers 401 without credentials and 200 with them,
-  4. the ports behind the proxy are NOT reachable on the VM's LAN address:
+  1. the app port passes requests on to the app (GET /health -> 200) and the app, not the
+     proxy, asks for the login (#44): /api/jobs answers 401 WITHOUT a Basic challenge,
+  2. the qBittorrent port still answers 401 without the proxy login and 200 with it,
+  3. the ports behind the proxy are NOT reachable on the VM's LAN address:
      the app's 8000 and qBittorrent's Web UI port (it is bound to 127.0.0.1).
 
 What it cannot show from one machine: that a client OUTSIDE the LAN is refused. That
@@ -19,7 +18,9 @@ Usage:
 
 Address, ports and user come from .env (PROXY_BIND, PROXY_PORT, PROXY_QBT_PORT, PROXY_USER).
 --host overrides the address (needed when PROXY_BIND is 0.0.0.0). The password is asked for
-on the terminal or read from stdin; it is never printed. Exit code 0 = all checks passed.
+on the terminal or read from stdin; it is never printed. User and password are the PROXY
+login of the qBittorrent port; the app's accounts are not needed here.
+Exit code 0 = all checks passed.
 """
 
 from __future__ import annotations
@@ -97,28 +98,28 @@ def verify(host: str, app_port: int, qbt_port: int, direct_qbt_port: int, user: 
         except OSError as error:
             return None, {"error": str(error)}
 
-    code, headers = status(app_port, None)
+    code, _ = status(app_port, None, "/health")
+    report.check(code == 200, "app /health through the proxy -> 200", f"got {code}")
+    code, headers = status(app_port, None, "/api/jobs")
     report.check(
-        code == 401, "app without credentials -> 401", f"got {code} {headers.get('error', '')}"
+        code == 401,
+        "app without a login -> 401 (from the app)",
+        f"got {code} {headers.get('error', '')}",
     )
     report.check(
-        headers.get("www-authenticate", "").lower().startswith("basic"),
-        "app asks for Basic authentication",
-        headers.get("www-authenticate", "no WWW-Authenticate header"),
-    )
-    code, _ = status(app_port, (user, password + "x"))
-    report.check(code == 401, "app with a wrong password -> 401", f"got {code}")
-    code, _ = status(app_port, login, "/health")
-    report.check(
-        code == 200,
-        "app /health with the login -> 200",
-        f"got {code}: if 401, run `make proxy-password` and `docker compose up -d`",
+        not headers.get("www-authenticate", "").lower().startswith("basic"),
+        "the app port no longer asks for Basic authentication",
+        headers.get("www-authenticate", ""),
     )
 
     code, _ = status(qbt_port, None)
     report.check(code == 401, "qBittorrent without credentials -> 401", f"got {code}")
     code, _ = status(qbt_port, login)
-    report.check(code == 200, "qBittorrent with the login -> 200", f"got {code}")
+    report.check(
+        code == 200,
+        "qBittorrent with the login -> 200",
+        f"got {code}: if 401, run `make proxy-password` and `docker compose up -d`",
+    )
 
     report.check(
         port_is_closed(host, APP_BACKEND_PORT),

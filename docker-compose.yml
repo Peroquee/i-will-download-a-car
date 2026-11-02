@@ -152,6 +152,9 @@ services:
       # .env to fetch directly. (No colon: unset = default.) How often feeds are checked, in minutes.
       PODCAST_PROXY: ${PODCAST_PROXY-http://gluetun:8888}
       PODCAST_POLL_MINUTES: ${PODCAST_POLL_MINUTES:-240}
+      # The first admin account (#44); the hash is made by scripts/app/set_admin.py.
+      APP_ADMIN_USER: ${APP_ADMIN_USER:-admin}
+      APP_ADMIN_PASSWORD_HASH: ${APP_ADMIN_PASSWORD_HASH:-}
       # Give up on a magnet link that shows no progress for this many days; 0 = never (#40).
       MAGNET_STALL_DAYS: ${MAGNET_STALL_DAYS:-7}
       # Networks podcast fetches never go to, besides the private ones: the home line's own global

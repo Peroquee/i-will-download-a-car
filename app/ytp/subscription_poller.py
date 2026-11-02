@@ -41,7 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from . import jobs, skipped_videos, subscriptions
+from . import accounts, jobs, skipped_videos, subscriptions
 from .db import Database
 from .feeds import FeedClient, FeedEntry, FeedError, parse_feed, parse_time
 from .metadata import sanitize_name
@@ -168,6 +168,7 @@ class SubscriptionPoller:
             subscriptions.record_poll(self.db, sub.id, error.message, self._now())
             raise
         queued = 0
+        followers = accounts.followers(self.db, "channel", sub.id)
         judge = _Judge(self, sub)
         for entry in new_entries(sub, entries):
             external_id = job_external_id(entry.video_id, sub.target)
@@ -181,13 +182,15 @@ class SubscriptionPoller:
                 audio_only=sub.audio_only,
                 published=(entry.published.date().isoformat() if sub.target == "podcast" else None),
             )
-            _, outcome = jobs.submit_job(
+            job, outcome = jobs.submit_job(
                 self.db,
                 JOB_TYPE,
                 external_id,
                 metadata.to_json(),
                 retry_failed=False,
             )
+            for follower in followers:  # everybody who follows the channel sees the job
+                accounts.add_job_owner(self.db, job.id, follower)
             queued += outcome == "created"
         subscriptions.record_poll(self.db, sub.id, None, self._now())
         logger.info(

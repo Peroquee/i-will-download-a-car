@@ -42,7 +42,7 @@ from .texts import t
 SERVICES = ("gluetun", "qbittorrent", "app", "proxy", "watchdog")
 PLACEHOLDER = "changeme"
 # Settings that are placeholders until their own step has run: not a reason to warn after `config`.
-LATER_SETTINGS = {"PROXY_PASSWORD_HASH", "GLUETUN_CONTROL_APIKEY"}
+LATER_SETTINGS = {"PROXY_PASSWORD_HASH", "GLUETUN_CONTROL_APIKEY", "APP_ADMIN_PASSWORD_HASH"}
 WAIT_SECONDS = 600
 POLL_SECONDS = 5
 

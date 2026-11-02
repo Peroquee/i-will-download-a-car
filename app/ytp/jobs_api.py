@@ -27,8 +27,8 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 
-from . import jobs
-from .apiutil import hand_to_qbittorrent, problem
+from . import accounts, jobs
+from .apiutil import hand_to_qbittorrent, problem, visible_to
 from .clients.qbittorrent import QbitClient, QbitError, Torrent
 from .jobs import Job
 from .podcast_jobs import JOB_TYPE as PODCAST_JOB_TYPE
@@ -158,8 +158,9 @@ async def list_jobs(request: Request, limit: int = DEFAULT_LIMIT, status: str | 
     if status is not None and status not in STATUSES:
         return problem(422, f"status must be one of: {', '.join(STATUSES)}")
     limit = max(1, min(limit, MAX_LIMIT))
-    rows = await asyncio.to_thread(jobs.list_jobs, db, limit=limit, status=status)
-    counts = await asyncio.to_thread(jobs.status_counts, db)
+    owner = visible_to(request)
+    rows = await asyncio.to_thread(jobs.list_jobs, db, limit=limit, status=status, owner_id=owner)
+    counts = await asyncio.to_thread(jobs.status_counts, db, owner)
     torrents: dict[str, int] = {}
     own_work = (YOUTUBE_JOB_TYPE, PODCAST_JOB_TYPE)
     if any(j.status == "downloading" and j.type not in own_work for j in rows):
@@ -177,7 +178,9 @@ async def retry_job(job_id: int, request: Request):
     if failure is not None:
         return failure
     job = await asyncio.to_thread(jobs.get_job, db, job_id)
-    if job is None:
+    owner = visible_to(request)
+    if job is None or (owner is not None and not accounts.owns_job(db, job_id, owner)):
+        # Somebody else's job looks exactly like one that does not exist.
         return problem(404, "no such job")
     if job.status != "failed":
         return problem(409, "only a failed job can be retried", job.id)

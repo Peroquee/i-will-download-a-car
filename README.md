@@ -93,6 +93,7 @@ HILFE-MIT-KI.md        dasselbe auf Deutsch
 docs/podcasts.md       podcasts: RSS feeds, episodes, the library, the SSRF-safe fetcher
 docs/dashboard.md      the dashboard, the alert strip, where alerts come from
 docs/autodeploy.md     automatic updates: pull-based timer, checks, rollback, pause
+docs/accounts.md       accounts, roles, who sees what, login security
 ```
 
 ## Quick start

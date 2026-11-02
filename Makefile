@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify install update
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories admin-password proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify install update
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -17,8 +17,9 @@ help:
 	@echo "killswitch-test   on the media VM: stop gluetun, prove qbittorrent has no network, check recovery"
 	@echo "layout            on the media VM: create missing download/library folders and config/app (owned by PUID:PGID), prove hardlinks"
 	@echo "categories        set up the qBittorrent categories and save paths (asks for the Web UI password)"
-	@echo "proxy-password  set the proxy login in .env (asks for the password, hashes it with Caddy)"
-	@echo "proxy-check     from a LAN machine: 401 without login, 200 with it, backend ports closed"
+	@echo "admin-password  set the app's admin account in .env (asks for the password, scrypt hash)"
+	@echo "proxy-password  set the qBittorrent port's proxy login in .env (asks for the password, hashes it with Caddy)"
+	@echo "proxy-check     from a LAN machine: proxy login on the qBittorrent port, app answers its own 401, backend ports closed"
 	@echo "watchdog-key    create the VPN watchdog's read-only gluetun key (.env and gluetun's auth file)"
 	@echo "vpn-abuse-test  on the VM: drop the VPN CYCLES times (default 5), check the watchdog, leaks and recovery"
 	@echo "backup           back up the database, config/ and .env to <DATA_ROOT>/.youtube-premium-backups (mode 600; DRY=1 to only show)"
@@ -73,6 +74,9 @@ layout:
 
 categories:
 	scripts/qbittorrent/setup_categories.py
+
+admin-password:
+	scripts/app/set_admin.py
 
 proxy-password:
 	scripts/proxy/set_password.py
