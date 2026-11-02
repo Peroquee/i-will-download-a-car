@@ -140,6 +140,14 @@ def test_the_unit_job_installs_the_apps_test_requirements():
     assert "pip install -q -r requirements-app.txt" in text
 
 
+def test_the_unit_job_installs_git_for_the_autodeploy_tests():
+    """tests/unit/test_autodeploy.py builds real repositories; without git they would be skipped
+    (and fail in CI on purpose), so the job must install it before pytest runs."""
+    text = script_text({"script": resolved(JOBS["test:unit"]).get("before_script")})
+    assert "apt-get install" in text
+    assert "git=1:2.39.*" in text
+
+
 def test_the_integration_job_does_not_need_the_apps_dependencies():
     # It runs on an Alpine image with a newer Python, where pydantic-core has no wheel.
     text = script_text({"script": resolved(JOBS["test:integration"]).get("before_script")})

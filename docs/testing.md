@@ -15,6 +15,7 @@ placed anywhere else.
 Cross-cutting markers, combinable with any level:
 
 - `security`: guards a ground rule (VPN-only traffic, LAN-only, no secrets in git). `pytest -m security` must always pass.
+- Tests that build real git repositories (`test_autodeploy.py`) need `git`: the `test:unit` job installs it (Debian's 2.39 series) and the tests **fail** in CI if it is missing; locally they skip with a loud reason.
 - `compose`, `docker`, `tun`, `network`: required capabilities. Missing ones **skip with a reason** locally and **fail** in CI (`REQUIRE_CAPABILITIES=1`), so a broken runner can't produce a green pipeline.
 - `slow`: more than ~10 s.
 
