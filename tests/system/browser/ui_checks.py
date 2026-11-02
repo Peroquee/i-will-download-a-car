@@ -122,7 +122,7 @@ def a_visitor_sees_only_the_sign_in_form_and_nothing_is_asked_of_the_app(ctx):
     page.on("request", lambda r: asked.append(r.url) if "/api/" in r.url else None)
     page.goto(BASE + "/")
     expect(page.locator("#login-form")).to_be_visible()
-    for hidden in ("#form", "#topnav", "#jobs-list", "#subs-list", "#vpn", "#account-open"):
+    for hidden in ("#form", "#topnav", "#jobs-mini", "#subs-list", "#vpn", "#account-open"):
         expect(page.locator(hidden)).to_be_hidden()
     page.wait_for_timeout(1500)
     others = [u for u in asked if not u.endswith("/api/auth/me") and not u.endswith("/api/version")]
@@ -214,7 +214,10 @@ def a_youtube_link_becomes_a_job(ctx):
     page.fill("#link", LINK)
     expect(page.locator("#f-yt-title")).not_to_have_value("", timeout=20000)
     page.click("#submit")
-    expect(page.locator("#jobs-list li")).to_have_count(1, timeout=20000)
+    expect(page.locator("#result")).to_contain_text("Job #", timeout=20000)
+    assert len(page.request.get(BASE + "/api/jobs").json()["jobs"]) == 1
+    # the input page has one line about the downloads, the jobs themselves are on the dashboard
+    expect(page.locator("#jobs-mini-text")).not_to_have_text("", timeout=15000)
     assert "link=" not in page.url, f"the link went into the address: {page.url}"
     assert page.url.rstrip("/") == BASE, f"the address changed: {page.url}"
 
@@ -253,6 +256,15 @@ def subscriptions_scrolls_and_the_guide_opens_and_closes(ctx):
     page.click("#nav-subs")
     expect(page).to_have_url(re.compile(r"/#subscriptions$"))
     expect(page.locator("#subscriptions")).to_be_in_viewport()
+    # a view for managing them: no form, no downloads line, and the tab is the current one
+    expect(page.locator("#form")).to_be_hidden()
+    expect(page.locator("#jobs-mini")).to_be_hidden()
+    expect(page.locator("#subscriptions input")).to_have_count(0)
+    expect(page.locator("#nav-subs")).to_have_attribute("aria-current", "page")
+    page.click("#nav-input")
+    expect(page.locator("#form")).to_be_visible()
+    expect(page.locator("#subscriptions")).to_be_hidden()
+    page.click("#nav-subs")
     page.click("#howto-open")
     expect(page.locator("#howto")).to_be_visible()
     page.keyboard.press("Escape")
@@ -276,7 +288,7 @@ def on_a_phone_the_navigation_is_touchable_and_the_page_does_not_scroll_sideways
         assert box["height"] >= 44, f"too small to touch: {box}"
     phone.locator("#nav-dashboard").tap()
     expect(phone).to_have_url(re.compile(r"/dashboard$"))
-    for path in ("/", "/dashboard", "/accounts"):
+    for path in ("/", "/#subscriptions", "/dashboard", "/accounts"):
         phone.goto(BASE + path)
         phone.wait_for_load_state()
         probe = phone.evaluate(OVERFLOW_PROBE)
@@ -338,7 +350,8 @@ def a_failed_youtube_lookup_says_why_and_channel_and_title_can_be_typed(ctx):
     page.fill("#f-channel", "Rick")
     page.fill("#f-yt-title", "Never")
     page.click("#submit")
-    expect(page.locator("#jobs-list li")).to_have_count(2, timeout=20000)
+    expect(page.locator("#result")).to_contain_text("Job #", timeout=20000)
+    assert len(page.request.get(BASE + "/api/jobs").json()["jobs"]) == 2
 
 
 @check
@@ -367,8 +380,8 @@ def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
     expect(page.locator("#nav-accounts")).to_be_hidden()
     expect(page.locator("#account-open")).to_have_text(USER)
     expect(page.locator("#alert-strip")).to_be_hidden()
-    expect(page.locator("#jobs-empty")).to_be_visible(timeout=15000)
-    expect(page.locator("#jobs-list li")).to_have_count(0)
+    expect(page.locator("#jobs-mini-text")).to_have_text("nothing running right now", timeout=15000)
+    assert page.request.get(BASE + "/api/jobs").json()["jobs"] == []
     page.goto(BASE + "/dashboard")
     expect(page.locator("#dashboard")).to_be_visible()
     for hidden in ("#alerts", "#dash-disk", "#dash-vpn-list"):

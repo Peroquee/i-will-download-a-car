@@ -669,6 +669,98 @@ def test_the_followers_of_a_subscription_show_for_the_admin_and_only_a_count_for
     assert "alice" not in user["reads"]["#subs-list"]["text"]
 
 
+# --- the input page, the subscriptions view and the downloads line ------------------------------
+
+JOBS = {
+    "jobs": [
+        {"id": 1, "status": "downloading", "progress": 30, "label": "A"},
+        {"id": 2, "status": "downloading", "progress": 50, "label": "B"},
+        {"id": 3, "status": "queued", "progress": None, "label": "C"},
+    ],
+    "counts": {"downloading": 2, "queued": 1, "failed": 1},
+}
+
+
+@needs_node
+def test_the_input_page_shows_the_downloads_in_one_line_with_the_progress():
+    out = page(
+        "/",
+        answers={"/api/jobs": JOBS},
+        steps=[{"read": "#jobs-mini-text"}, {"read": "#jobs-mini-bar"}, {"read": "#jobs-mini"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#jobs-mini-text"]["text"] == "running: 2 · waiting: 1 · failed: 1"
+    assert out["reads"]["#jobs-mini-bar"]["hidden"] is False
+    assert out["reads"]["#jobs-mini-bar"]["value"] == "40"
+    assert "jobs-mini-has-failed" in out["reads"]["#jobs-mini"]["cls"]
+
+
+@needs_node
+def test_with_nothing_running_the_line_says_so_and_has_no_bar():
+    out = page("/", steps=[{"read": "#jobs-mini-text"}, {"read": "#jobs-mini-bar"}])
+    assert out["reads"]["#jobs-mini-text"]["text"] == "nothing running right now"
+    assert out["reads"]["#jobs-mini-bar"]["hidden"] is True
+
+
+@needs_node
+def test_the_subscriptions_view_shows_the_list_and_not_the_form():
+    out = page(
+        "/",
+        "#subscriptions",
+        steps=[{"read": "#form"}, {"read": "#subscriptions"}, {"read": "#jobs-mini"}, {"read": "#nav-subs"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#form"]["hidden"] is True
+    assert out["reads"]["#jobs-mini"]["hidden"] is True
+    assert out["reads"]["#subscriptions"]["hidden"] is False
+
+
+@needs_node
+def test_the_input_page_shows_the_form_and_not_the_subscriptions():
+    out = page("/", steps=[{"read": "#form"}, {"read": "#subscriptions"}, {"read": "#jobs-mini"}])
+    assert out["reads"]["#form"]["hidden"] is False
+    assert out["reads"]["#jobs-mini"]["hidden"] is False
+    assert out["reads"]["#subscriptions"]["hidden"] is True
+
+
+SUBSCRIBED = {
+    "POST /api/subscriptions": {
+        "__status": 201,
+        "body": {"channel_name": "Blender", "duplicate": False, "other_followers": 0},
+    }
+}
+
+
+def subscribe_steps(backfill):
+    return probe_steps(
+        {"check": "#subscribe", "value": True},
+        {"fire": "#subscribe", "type": "change"},
+        {"read": "#yt-backfill-row"},
+        {"set": "#yt-backfill", "value": backfill},
+        {"submit": "#form"},
+        {"read": "#result"},
+        {"read": "#yt-backfill-error"},
+    )
+
+
+@needs_node
+def test_ticking_subscribe_offers_the_older_videos_and_subscribes_after_the_download():
+    out = page("/", answers=SUBSCRIBED, steps=subscribe_steps("5"))
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-backfill-row"]["hidden"] is False
+    assert ["POST", "/api/youtube/download"] in out["fetched"]
+    assert ["POST", "/api/subscriptions"] in out["fetched"]
+    assert 'Subscribed to the channel "Blender".' in out["reads"]["#result"]["text"]
+
+
+@needs_node
+def test_too_many_older_videos_are_refused_before_anything_is_sent():
+    out = page("/", answers=SUBSCRIBED, steps=subscribe_steps("16"))
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/youtube/download"] not in out["fetched"]
+    assert out["reads"]["#yt-backfill-error"]["text"] == "A number from 0 to 15."
+
+
 @needs_node
 def test_the_page_scrolls_to_its_anchor_once_the_sign_in_is_known():
     """The browser scrolls to #subscriptions on load, when that part is still hidden (the

@@ -560,12 +560,38 @@ def test_job_kinds_map_to_known_translations():
     assert run_node("L.kindKey('nonsense')") is None
 
 
-def test_the_page_has_the_job_list_and_the_script_builds_rows_without_innerhtml():
-    for element_id in ("jobs-list", "jobs-banner", "jobs-error", "jobs-empty", "jobs-filter"):
-        assert f'id="{element_id}"' in HTML
+def test_the_input_page_has_one_line_about_the_downloads_and_no_job_list():
+    """The jobs are on the dashboard (#38); the input page only says how much runs, waits and
+    failed, with a small progress bar, and the whole line links to the dashboard."""
+    line = re.search(r'<a id="jobs-mini"[^>]*>(.*?)</a>', HTML, re.S)
+    assert line
+    assert 'href="/dashboard"' in line.group(0)
+    assert 'data-view="input"' in line.group(0)
+    for element_id in ("jobs-mini-text", "jobs-mini-bar"):
+        assert f'id="{element_id}"' in line.group(1)
+    for gone in ("jobs-list", "jobs-banner", "jobs-filter", "jobs-empty"):
+        assert f'id="{gone}"' not in HTML, gone
     assert "innerHTML" not in APP_JS
     assert "/api/jobs" in APP_JS
     assert "visibilityState" in APP_JS, "polling pauses while the tab is hidden"
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"jobs": [{"status": "downloading", "progress": 40}, {"status": "downloading", "progress": 61},
+                   {"status": "queued"}, {"status": "organizing"}],
+          "counts": {"queued": 3, "downloading": 2, "organizing": 1, "failed": 1}},
+         {"running": 3, "waiting": 3, "failed": 1, "progress": 51}),
+        ({"jobs": [{"status": "downloading", "progress": None}, {"status": "failed"}]},
+         {"running": 1, "waiting": 0, "failed": 1, "progress": None}),
+        ({"jobs": [], "counts": {}}, {"running": 0, "waiting": 0, "failed": 0, "progress": None}),
+        (None, {"running": 0, "waiting": 0, "failed": 0, "progress": None}),
+    ],
+)  # fmt: skip
+def test_the_downloads_line_counts_and_averages_the_progress(data, expected):
+    assert run_node(f"L.jobsSummary({json.dumps(data)})") == expected
 
 
 # --- the VPN bar (#28) ----------------------
@@ -626,10 +652,18 @@ def test_the_subscribe_checkbox_is_enabled_and_explains_what_it_does():
     assert "/api/subscriptions" in APP_JS
 
 
-def test_the_page_has_the_subscription_view_built_without_innerhtml():
-    for element_id in ("subs-form", "subs-channel", "subs-backfill", "subs-add", "subs-list",
-                       "subs-empty", "subs-error", "subs-result", "subs-load-error"):  # fmt: skip
-        assert f'id="{element_id}"' in HTML
+def test_the_subscriptions_are_a_view_for_managing_them_without_a_form():
+    """Subscribing happens with the main form ("subscribe to the channel"); the subscriptions view
+    only lists them, with "check now" and "remove"."""
+    view = re.search(r'<section id="subscriptions"[^>]*>(.*?)</section>', HTML, re.S)
+    assert view
+    assert 'data-view="subscriptions"' in view.group(0)
+    assert "<form" not in view.group(1)
+    assert "<input" not in view.group(1)
+    for element_id in ("subs-list", "subs-empty", "subs-result", "subs-load-error"):
+        assert f'id="{element_id}"' in view.group(1)
+    for gone in ("subs-form", "subs-channel", "subs-backfill", "subs-add", "subs-target", "subs-audio"):
+        assert f'id="{gone}"' not in HTML, gone
     for route in ("/api/subscriptions", "/poll"):
         assert route in APP_JS
     assert "innerHTML" not in APP_JS
@@ -824,8 +858,6 @@ def test_the_page_has_the_target_choice_and_the_audio_checkbox():
         "yt-audio-row",
         "yt-channel-label",
         "yt-title-label",
-        "subs-target",
-        "subs-audio",
     ):
         assert f'id="{element_id}"' in HTML
     target = re.search(r'<select id="yt-target".*?</select>', HTML, re.S)
@@ -926,6 +958,26 @@ def test_what_the_page_sends_for_music_is_accepted_by_the_server(client):
     ):
         response = client.post("/api/youtube/download", json=run_node(call))
         assert response.status_code in {200, 201}, (call, response.text)
+
+
+def test_subscribing_from_the_form_offers_the_older_videos_too():
+    row = re.search(r'<div id="yt-subscribe-row">(.*?)\n        </div>', HTML, re.S)
+    assert row
+    assert 'id="yt-backfill-row" class="row sub-option" hidden' in row.group(1)
+    assert re.search(r'<input id="yt-backfill"[^>]*value="0"', row.group(1))
+    assert 'for="yt-backfill"' in row.group(1)
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("backfill", "subscribe", "expected"),
+    [("0", True, {}), ("15", True, {}), ("", True, {}),
+     ("16", True, {"backfill": "err.int_out_of_range"}), ("x", True, {"backfill": "err.int_out_of_range"}),
+     ("16", False, {})],
+)  # fmt: skip
+def test_the_older_videos_are_checked_only_when_subscribing(backfill, subscribe, expected):
+    values = {"channel": "c", "title": "t", "subscribe": subscribe, "backfill": backfill}
+    assert run_node(f"L.clientErrors('youtube', null, 'u', {json.dumps(values)}, 2026)") == expected
 
 
 def test_a_422_on_the_album_lands_on_the_album_field():
@@ -1043,6 +1095,16 @@ def test_speed_is_empty_when_nothing_moves():
 )  # fmt: skip
 def test_the_path_decides_the_view(path, view):
     assert run_node(f"L.pageView({json.dumps(path)})") == view
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("path", "hash_", "view"),
+    [("/", "#subscriptions", "subscriptions"), ("/", "", "input"), ("/", "#other", "input"),
+     ("/dashboard", "#subscriptions", "dashboard"), ("/accounts", "#subscriptions", "accounts")],
+)  # fmt: skip
+def test_the_subscriptions_hash_is_a_view_of_its_own(path, hash_, view):
+    assert run_node(f"L.pageView({json.dumps(path)}, {json.dumps(hash_)})") == view
 
 
 @needs_node

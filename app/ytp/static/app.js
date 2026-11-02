@@ -45,7 +45,7 @@
     applyTarget();
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
     refreshVpnText();
-    renderJobs();
+    renderJobsMini();
     renderSubs();
     if (dash) dash.render();
     if (auth) auth.render();
@@ -83,6 +83,7 @@
   function fieldElement(field) {
     if (field === "link") return $("link");
     if (mode() === "youtube") {
+      if (field === "backfill") return $("yt-backfill");
       return { channel: $("f-channel"), title: $("f-yt-title"), album: $("f-yt-album") }[field] || null;
     }
     if (mode() === "podcast") {
@@ -274,6 +275,7 @@
     $("yt-subscribe-row").hidden = target === "music";   // channels are not subscribed as music
     if (target === "video") $("yt-audio").checked = false;
     if (target === "music") $("subscribe").checked = false;
+    showBackfill();
     // A music track is audio by default (a video file does not belong in a music library).
     if (target === "music" && shownTarget !== "music") $("yt-audio").checked = true;
     if (target === "podcast" && shownTarget === "music") $("yt-audio").checked = false;
@@ -288,9 +290,16 @@
 
   /* ---------------------------------------------------------------- subscribe (#19) */
 
-  /* Ticked "subscribe" next to a YouTube download: the video's address names the channel. */
-  function subscribeToChannel(link, name, downloadText) {
-    var body = L.subscribePayload(link, name, null, ytTarget(), ytAudioOnly());
+  /* Subscribing is offered for a video or a podcast episode, not for music (applyTarget). */
+  function wantsSubscription() { return ytTarget() !== "music" && $("subscribe").checked; }
+
+  /* "Older videos" only means something while "subscribe" is ticked. */
+  function showBackfill() { $("yt-backfill-row").hidden = !$("subscribe").checked; }
+
+  /* Ticked "subscribe" next to a YouTube download: the video's address names the channel, and
+     "older videos" says how many of the channel's latest videos to take as well (0 = none). */
+  function subscribeToChannel(link, name, backfill, downloadText) {
+    var body = L.subscribePayload(link, name, backfill, ytTarget(), ytAudioOnly());
     post("/api/subscriptions", body).then(function (reply) {
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? (reply.data.other_followers > 0 ? "sub.joined" : "sub.duplicate") : "sub.created";
@@ -320,7 +329,10 @@
     var link = $("link").value;
     if (current === "podcast") { submitPodcast(link); return; }
     var data = current === "youtube"
-      ? { channel: $("f-channel").value, title: $("f-yt-title").value, album: $("f-yt-album").value }
+      ? {
+        channel: $("f-channel").value, title: $("f-yt-title").value, album: $("f-yt-album").value,
+        subscribe: wantsSubscription(), backfill: $("yt-backfill").value,
+      }
       : values();
     var problems = L.clientErrors(current, mediaType(), link, data, new Date().getFullYear());
     if (Object.keys(problems).length) {
@@ -338,12 +350,13 @@
       if (reply.status === 201 || reply.status === 200) {
         var vars = { id: reply.data.id, status: statusText(reply.data.status) };
         var text = t(reply.data.duplicate ? "result.duplicate" : "result.created", vars);
-        var wantSubscribe = current === "youtube" && $("subscribe").checked;
+        var wantSubscribe = current === "youtube" && wantsSubscription();
         var channelName = data.channel;
+        var backfill = +(String(data.backfill || "").trim() || "0");
         showResult(text, true);
         if (!reply.data.duplicate) resetFields();
         pollJobs();
-        if (wantSubscribe) subscribeToChannel(link, channelName, text);
+        if (wantSubscribe) subscribeToChannel(link, channelName, backfill, text);
         return;
       }
       if (reply.status === 422) {
@@ -428,6 +441,8 @@
     document.querySelectorAll("#form input[type=text]").forEach(function (input) { input.value = ""; });
     $("pack").checked = false;
     $("subscribe").checked = false;
+    $("yt-backfill").value = "0";
+    showBackfill();
     $("yt-target").value = "video";
     shownTarget = "video";
     applyTarget();
@@ -481,31 +496,26 @@
       .then(refreshVpnText);
   }
 
-  /* ---------------------------------------------------------------- job list (#26) */
+  /* ---------------------------------------------------------------- downloads indicator */
 
+  /* The input page shows only a one-line summary of the downloads (how many run, wait and failed,
+     with the progress of the running ones); the jobs themselves are on the dashboard (#38). */
   var JOBS_POLL_MS = 5000;
   var jobsData = null;        // the last good answer: {jobs, counts}
-  var jobsOnlyFailed = false;
   var jobsLoading = false;
   var jobsLoadFailed = false;
-  var retrying = {};          // job id -> true while its retry request runs
-  var retryErrors = {};       // job id -> text of the last failed retry
-
-  function jobsUrl() {
-    return "/api/jobs?limit=50" + (jobsOnlyFailed ? "&status=failed" : "");
-  }
 
   function pollJobs() {
     if (jobsLoading) return;
     jobsLoading = true;
-    api(jobsUrl(), { credentials: "same-origin", headers: { "Accept": "application/json" } })
+    api("/api/jobs?limit=50", { credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (response) {
         if (!response.ok) throw new Error("status " + response.status);
         return response.json();
       })
       .then(function (data) { jobsData = data; jobsLoadFailed = false; })
       .catch(function () { jobsLoadFailed = true; })
-      .then(function () { jobsLoading = false; renderJobs(); });
+      .then(function () { jobsLoading = false; renderJobsMini(); });
   }
 
   function timeText(iso) {
@@ -514,99 +524,30 @@
     return age.unit === "now" ? t("time.now") : t("time." + age.unit, { n: age.n });
   }
 
-  function jobRow(job) {
-    var li = document.createElement("li");
-    li.className = "job job-" + job.status;
-
-    var top = document.createElement("div");
-    top.className = "job-top";
-    var name = document.createElement("span");
-    name.className = "job-name";
-    name.textContent = job.label;
-    var badge = document.createElement("span");
-    badge.className = "job-status";
-    badge.textContent = statusText(job.status);
-    top.appendChild(name);
-    top.appendChild(badge);
-    li.appendChild(top);
-
-    var meta = document.createElement("div");
-    meta.className = "job-meta";
-    var key = L.kindKey(job.kind);
-    var parts = [t("jobs.id", { id: job.id })];
-    if (key) parts.push(t(key));
-    var when = timeText(job.updated_at);
-    if (when) parts.push(when);
-    meta.textContent = parts.join(" · ");
-    li.appendChild(meta);
-
-    if (job.progress != null && job.status !== "failed") {
-      var bar = document.createElement("progress");
-      bar.max = 100;
-      bar.value = job.progress;
-      bar.setAttribute("aria-label", t("jobs.progress", { n: job.progress }));
-      li.appendChild(bar);
-      var percent = document.createElement("span");
-      percent.className = "job-percent";
-      percent.textContent = t("jobs.progress", { n: job.progress });
-      li.appendChild(percent);
+  function renderJobsMini() {
+    var box = $("jobs-mini");
+    var text = $("jobs-mini-text");
+    var bar = $("jobs-mini-bar");
+    if (jobsLoadFailed && !jobsData) {
+      box.className = "jobs-mini jobs-mini-error";
+      text.textContent = t("mini.error");
+      bar.hidden = true;
+      return;
     }
-
-    if (job.status === "failed") {
-      var reason = document.createElement("p");
-      reason.className = "job-error";
-      reason.textContent = job.error || t("jobs.no_reason");
-      li.appendChild(reason);
+    if (!jobsData) { text.textContent = ""; bar.hidden = true; return; }
+    var summary = L.jobsSummary(jobsData);
+    var parts = [];
+    if (summary.running) parts.push(t("mini.running", { n: summary.running }));
+    if (summary.waiting) parts.push(t("mini.waiting", { n: summary.waiting }));
+    if (summary.failed) parts.push(t("mini.failed", { n: summary.failed }));
+    text.textContent = parts.length ? parts.join(" \u00b7 ") : t("mini.none");
+    box.className = "jobs-mini" + (summary.running || summary.waiting ? " jobs-mini-busy" : "")
+      + (summary.failed ? " jobs-mini-has-failed" : "");
+    bar.hidden = summary.progress === null;
+    if (summary.progress !== null) {
+      bar.value = summary.progress;
+      bar.setAttribute("aria-label", t("jobs.progress", { n: summary.progress }));
     }
-    if (retryErrors[job.id]) {
-      var again = document.createElement("p");
-      again.className = "job-error";
-      again.textContent = retryErrors[job.id];
-      li.appendChild(again);
-    }
-    if (job.can_retry) {
-      var button = document.createElement("button");
-      button.type = "button";
-      button.className = "ghost small";
-      button.disabled = !!retrying[job.id];
-      button.textContent = t(retrying[job.id] ? "jobs.retrying" : "jobs.retry");
-      button.addEventListener("click", function () { retryJob(job.id); });
-      li.appendChild(button);
-    }
-    return li;
-  }
-
-  function renderJobs() {
-    var list = $("jobs-list");
-    list.textContent = "";
-    $("jobs-error").textContent = jobsLoadFailed ? t("jobs.load_error") : "";
-    if (!jobsData) { $("jobs-empty").hidden = true; return; }
-    jobsData.jobs.forEach(function (job) { list.appendChild(jobRow(job)); });
-    $("jobs-empty").hidden = jobsData.jobs.length > 0 || jobsOnlyFailed;
-    var failed = jobsData.counts.failed || 0;
-    var banner = $("jobs-banner");
-    banner.hidden = failed === 0;
-    banner.textContent = failed ? t("jobs.banner", { n: failed }) : "";
-    var filter = $("jobs-filter");
-    filter.hidden = failed === 0 && !jobsOnlyFailed;
-    filter.textContent = jobsOnlyFailed ? t("jobs.filter_all") : t("jobs.filter_failed", { n: failed });
-    filter.setAttribute("aria-pressed", jobsOnlyFailed ? "true" : "false");
-  }
-
-  function retryJob(id) {
-    retrying[id] = true;
-    delete retryErrors[id];
-    renderJobs();
-    post("/api/jobs/" + id + "/retry", {}).then(function (reply) {
-      delete retrying[id];
-      if (reply.status !== 200) {
-        var detail = reply.data && typeof reply.data.detail === "string" ? reply.data.detail : "";
-        retryErrors[id] = t("jobs.retry_failed") + (detail ? " " + detail : "");
-      }
-    }).catch(function () {
-      delete retrying[id];
-      retryErrors[id] = t("jobs.retry_failed") + " " + t("result.network");
-    }).then(function () { renderJobs(); pollJobs(); });
   }
 
   function startJobPolling() {
@@ -616,10 +557,6 @@
     }, JOBS_POLL_MS);
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") pollJobs();
-    });
-    $("jobs-filter").addEventListener("click", function () {
-      jobsOnlyFailed = !jobsOnlyFailed;
-      pollJobs();
     });
   }
 
@@ -835,58 +772,8 @@
     }).then(function () { loadSubs(); renderSubs(); });
   }
 
-  function subsShowResult(text, ok) {
-    $("subs-result").textContent = text;
-    $("subs-result").className = "result " + (ok ? "ok" : "bad");
-  }
-
-  function onSubsSubmit(event) {
-    event.preventDefault();
-    $("subs-error").textContent = "";
-    $("subs-result").textContent = "";
-    $("subs-result").className = "result";
-    $("subs-channel").removeAttribute("aria-invalid");
-    var channel = $("subs-channel").value.trim();
-    var backfillText = $("subs-backfill").value.trim() || "0";
-    if (!channel) {
-      $("subs-channel").setAttribute("aria-invalid", "true");
-      $("subs-error").textContent = t("err.required");
-      $("subs-channel").focus();
-      return;
-    }
-    if (!/^\d+$/.test(backfillText) || +backfillText > 15) {
-      $("subs-error").textContent = t("err.int_out_of_range");
-      $("subs-backfill").focus();
-      return;
-    }
-    $("subs-add").disabled = true;
-    var target = $("subs-target").value;
-    var body = L.subscribePayload(channel, null, +backfillText, target, target === "podcast" && $("subs-audio").checked);
-    post("/api/subscriptions", body).then(function (reply) {
-      $("subs-add").disabled = false;
-      if (reply.status === 201 || reply.status === 200) {
-        var key = reply.data.duplicate ? (reply.data.other_followers > 0 ? "subs.joined" : "subs.already") : "subs.added";
-        subsShowResult(t(key, { name: reply.data.channel_name, n: reply.data.other_followers }), true);
-        if (!reply.data.duplicate) { $("subs-channel").value = ""; $("subs-backfill").value = "0"; }
-        loadSubs();
-        return;
-      }
-      if (reply.status === 422) {
-        var errors = L.serverErrors(reply.data.detail);
-        $("subs-error").textContent = Object.keys(errors).map(function (field) { return message(errors[field]); }).join(" ");
-        $("subs-channel").setAttribute("aria-invalid", "true");
-        return;
-      }
-      subsShowResult(failureText(reply, "subs.add_failed"), false);
-    }).catch(function () {
-      $("subs-add").disabled = false;
-      subsShowResult(t("subs.add_failed") + " " + t("result.network"), false);
-    });
-  }
-
   function startSubs() {
     loadSubs();
-    $("subs-form").addEventListener("submit", onSubsSubmit);
     window.setInterval(function () {
       if (document.visibilityState !== "hidden") loadSubs();
     }, SUBS_POLL_MS);
@@ -955,11 +842,7 @@
     });
     $("media-type").addEventListener("change", showType);
     $("yt-target").addEventListener("change", applyTarget);
-    $("subs-target").addEventListener("change", function () {
-      var podcast = $("subs-target").value === "podcast";
-      $("subs-audio").disabled = !podcast;
-      if (!podcast) $("subs-audio").checked = false;
-    });
+    $("subscribe").addEventListener("change", showBackfill);
     $("pack").addEventListener("change", function () {
       $("f-episode").disabled = $("pack").checked;
       if ($("pack").checked) $("f-episode").value = "";

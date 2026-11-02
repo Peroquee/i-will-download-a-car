@@ -29,8 +29,8 @@ def test_what_needs_a_sign_in_is_marked_so(element_id):
     assert "data-auth-only" in tag_of(element_id)
 
 
-def test_the_jobs_and_help_sections_need_a_sign_in_too():
-    assert re.search(r'<section class="jobs" data-view="input" data-auth-only', HTML)
+def test_the_downloads_line_and_help_need_a_sign_in_too():
+    assert re.search(r'<a id="jobs-mini" class="jobs-mini" href="/dashboard" data-view="input" data-auth-only', HTML)
     assert re.search(r'<details class="help" data-view="input" data-auth-only', HTML)
 
 

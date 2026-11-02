@@ -83,7 +83,9 @@ html, body {
 }
 .logo svg { width: 32px; height: 32px; }
 .titles { flex: 1 1 200px; min-width: 0; }
-.title { font-family: Georgia, "Times New Roman", serif; font-size: 22px; margin: 0; font-weight: normal; }
+/* Headings use the same font as the text; size and weight set them apart. */
+h1, h2, h3, h4 { font-family: inherit; }
+.title { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .subtitle { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
 .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 form { display: grid; gap: 14px; }
@@ -116,6 +118,9 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 .error:empty { display: none; }
 .checkbox { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 14px; }
 .checkbox input { width: 20px; height: 20px; accent-color: var(--gold); }
+/* "Older videos" belongs to the "subscribe" tick above it. */
+.sub-option { margin: 10px 0 0 30px; }
+input.narrow { max-width: 7em; }
 .muted-box { color: var(--muted); }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
@@ -150,7 +155,7 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .help summary { cursor: pointer; }
 .jobs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .jobs-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-.jobs-title { font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: normal; margin: 0; }
+.jobs-title { font-size: 17px; font-weight: 600; margin: 0; }
 .banner {
   margin: 12px 0 0;
   padding: 10px 14px;
@@ -160,7 +165,7 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
   color: var(--bad);
   font-size: 14px;
 }
-.banner[hidden], #jobs-empty[hidden], #jobs-filter[hidden] { display: none; }
+.banner[hidden] { display: none; }
 .job-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
 .job { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 6px; }
 .job-failed { border-color: var(--bad); background: rgba(228, 128, 111, 0.07); }
@@ -174,8 +179,10 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .job progress { width: 100%; height: 8px; accent-color: var(--gold); }
 .job-percent { font-size: 12px; color: var(--muted); }
 .job button { justify-self: start; }
-.subs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
-.subs form { margin-top: 12px; }
+/* Subscriptions and accounts are views of their own: no divider above them. */
+.subs { display: grid; gap: 10px; }
+.subs .job-list { margin-top: 2px; }
+.subs form { margin-top: 2px; }
 .skipped { font-size: 13px; color: var(--muted); }
 .skipped summary { cursor: pointer; }
 .skipped ul { margin: 6px 0 6px 18px; padding: 0; }
@@ -373,3 +380,29 @@ body:not([data-role="admin"]) [data-admin-only] { display: none !important; }
 .login { max-width: 26em; margin: 1.5rem auto; }
 .account { max-width: 28em; }
 .account h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }
+
+/* The downloads in one line under the form; the jobs themselves are on the dashboard. */
+.jobs-mini {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 18px;
+  padding: 10px 14px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: none;
+}
+.jobs-mini:hover { border-color: rgba(201, 162, 39, 0.45); }
+.jobs-mini:hover .jobs-mini-more { text-decoration: underline; }
+.jobs-mini:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--gold-soft); }
+.jobs-mini-label { color: var(--ink); font-weight: 600; }
+.jobs-mini-text { min-width: 0; overflow-wrap: anywhere; }
+.jobs-mini-busy .jobs-mini-text { color: var(--ink); }
+.jobs-mini-has-failed { border-color: rgba(228, 128, 111, 0.5); }
+.jobs-mini-error .jobs-mini-text { color: var(--bad); }
+.jobs-mini-bar { flex: 1 1 80px; max-width: 160px; height: 6px; accent-color: var(--gold); }
+.jobs-mini-more { margin-left: auto; color: var(--gold); white-space: nowrap; }

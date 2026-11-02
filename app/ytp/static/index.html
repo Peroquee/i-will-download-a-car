@@ -51,6 +51,7 @@
         <h1 id="title" class="title">youtube-premium</h1>
         <p class="subtitle" data-view="input" data-i18n="subtitle"></p>
         <p class="subtitle" data-view="dashboard" data-i18n="dash.subtitle" hidden></p>
+        <p class="subtitle" data-view="subscriptions" data-i18n="subs.subtitle" hidden></p>
       </div>
       <div class="tools">
         <button type="button" id="account-open" class="ghost small account-chip" aria-haspopup="dialog" data-i18n-label="account.menu" data-auth-only></button>
@@ -150,6 +151,12 @@
             <span data-i18n="yt.subscribe"></span>
           </label>
           <p id="yt-subscribe-note" class="note" data-i18n="yt.subscribe_note"></p>
+          <div id="yt-backfill-row" class="row sub-option" hidden>
+            <label class="field" for="yt-backfill" data-i18n="subs.backfill"></label>
+            <input id="yt-backfill" class="narrow" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="yt-backfill-note yt-backfill-error">
+            <p id="yt-backfill-note" class="note" data-i18n="subs.backfill_note"></p>
+            <p id="yt-backfill-error" class="error" role="alert"></p>
+          </div>
         </div>
       </section>
 
@@ -261,48 +268,17 @@
       <p id="result" class="result" role="status" aria-live="polite"></p>
     </form>
 
-    <section class="jobs" data-view="input" data-auth-only aria-labelledby="jobs-title">
-      <div class="jobs-head">
-        <h2 id="jobs-title" class="jobs-title" data-i18n="jobs.title"></h2>
-        <button type="button" id="jobs-filter" class="ghost small" aria-pressed="false" hidden></button>
-      </div>
-      <p id="jobs-banner" class="banner" role="alert" hidden></p>
-      <p id="jobs-error" class="error" role="status"></p>
-      <ul id="jobs-list" class="job-list"></ul>
-      <p id="jobs-empty" class="note" data-i18n="jobs.empty" hidden></p>
-    </section>
+    <a id="jobs-mini" class="jobs-mini" href="/dashboard" data-view="input" data-auth-only>
+      <span class="jobs-mini-label" data-i18n="mini.label"></span>
+      <span id="jobs-mini-text" class="jobs-mini-text" role="status" aria-live="polite"></span>
+      <progress id="jobs-mini-bar" class="jobs-mini-bar" max="100" hidden></progress>
+      <span class="jobs-mini-more" data-i18n="mini.open"></span>
+    </a>
 
-    <section id="subscriptions" class="subs" data-view="input" data-auth-only aria-labelledby="subs-title">
+    <section id="subscriptions" class="subs" data-view="subscriptions" data-auth-only aria-labelledby="subs-title" hidden>
       <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
-      <form id="subs-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
-        <div class="row">
-          <label class="field" for="subs-channel" data-i18n="subs.channel"></label>
-          <input id="subs-channel" type="text" inputmode="url" spellcheck="false" autocapitalize="off"
-                 autocorrect="off" data-i18n-placeholder="subs.placeholder" aria-describedby="subs-note subs-error">
-          <p id="subs-note" class="note" data-i18n="subs.note"></p>
-        </div>
-        <div class="row">
-          <label class="field" for="subs-target" data-i18n="subs.target"></label>
-          <select id="subs-target">
-            <option value="video" data-i18n="yt.target_video"></option>
-            <option value="podcast" data-i18n="yt.target_podcast"></option>
-          </select>
-        </div>
-        <label class="checkbox" for="subs-audio">
-          <input id="subs-audio" type="checkbox" disabled>
-          <span data-i18n="yt.audio"></span>
-        </label>
-        <div class="row">
-          <label class="field" for="subs-backfill" data-i18n="subs.backfill"></label>
-          <input id="subs-backfill" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="subs-backfill-note">
-          <p id="subs-backfill-note" class="note" data-i18n="subs.backfill_note"></p>
-        </div>
-        <p id="subs-error" class="error" role="alert"></p>
-        <div class="actions">
-          <button type="submit" class="primary" id="subs-add" data-i18n="subs.add"></button>
-        </div>
-        <p id="subs-result" class="result" role="status" aria-live="polite"></p>
-      </form>
+      <p class="note" data-i18n="subs.how_to_add"></p>
+      <p id="subs-result" class="result" role="status" aria-live="polite"></p>
       <p id="subs-load-error" class="error" role="status"></p>
       <ul id="subs-list" class="job-list"></ul>
       <p id="subs-empty" class="note" data-i18n="subs.empty" hidden></p>
@@ -540,14 +516,13 @@
     "yt.episode": "Folge",
     "yt.audio": "Nur Audio",
     "yt.audio_note": "Nur der Ton, kleiner und ohne Bild. Er wird ohne Neuberechnung übernommen (m4a, sonst opus), mit Titel, Podcast und Cover als Tags.",
-    "yt.subscribe_note_podcast": "Neue Videos dieses Kanals werden dann automatisch als Folgen dieses Podcasts abgelegt. Es zählen nur Videos, die nach dem Abonnieren erscheinen.",
-    "subs.target": "Neue Videos ablegen als",
+    "yt.subscribe_note_podcast": "Neue Videos dieses Kanals werden dann automatisch als Folgen dieses Podcasts abgelegt (etwa stündlich geprüft).",
     "subs.target_podcast": "Podcast",
     "subs.target_audio": "Podcast, nur Audio",
     "yt.channel": "Kanal",
     "yt.title": "Titel",
     "yt.subscribe": "Kanal abonnieren",
-    "yt.subscribe_note": "Neue Videos dieses Kanals werden dann automatisch geladen. Es zählen nur Videos, die nach dem Abonnieren erscheinen; ältere werden nicht nachgeladen.",
+    "yt.subscribe_note": "Neue Videos dieses Kanals werden dann automatisch geladen (etwa stündlich geprüft).",
     "mg.type": "Art des Inhalts",
     "type.movies": "Film",
     "type.series": "Serie",
@@ -626,15 +601,8 @@
     "vpn.paused": "Torrents angehalten",
     "vpn.since": "Zustand geändert: {when}",
     "vpn.country": "Ausgang: {country}",
-    "jobs.title": "Aufträge",
-    "jobs.empty": "Noch keine Aufträge. Oben einen Link einfügen.",
-    "jobs.load_error": "Die Auftragsliste lässt sich gerade nicht laden. Es wird weiter versucht.",
-    "jobs.banner": "{n} fehlgeschlagen. Unten steht der Grund; mit „Nochmal versuchen“ geht es weiter.",
-    "jobs.filter_failed": "Nur fehlgeschlagene ({n})",
-    "jobs.filter_all": "Alle anzeigen",
     "jobs.retry": "Nochmal versuchen",
     "jobs.retrying": "Wird erneut gestartet …",
-    "jobs.retry_failed": "Das erneute Starten hat nicht geklappt.",
     "jobs.no_reason": "Kein Grund gemeldet.",
     "jobs.id": "Auftrag #{id}",
     "jobs.progress": "{n} %",
@@ -647,17 +615,10 @@
     "sub.failed": "Das Abonnieren hat nicht geklappt.",
     "err.channel_invalid": "Das ist keine Kanal-Adresse.",
     "subs.title": "Abonnements",
-    "subs.channel": "Kanal hinzufügen",
-    "subs.placeholder": "@name, Kanal-Link oder Link eines Videos",
-    "subs.note": "Neue Videos eines Kanals werden automatisch geladen, etwa stündlich geprüft.",
     "subs.backfill": "Ältere Videos mitnehmen",
     "subs.backfill_note": "0 = nur Videos, die nach dem Abonnieren erscheinen. Höchstens 15 (so viele zeigt YouTube).",
-    "subs.add": "Abonnieren",
     "subs.empty": "Noch nichts abonniert.",
     "subs.load_error": "Die Abonnements lassen sich gerade nicht laden.",
-    "subs.added": "Kanal „{name}“ abonniert.",
-    "subs.already": "Der Kanal „{name}“ war schon abonniert.",
-    "subs.add_failed": "Das Abonnieren hat nicht geklappt.",
     "subs.skipped": "übersprungen: {n}",
     "subs.skipped_why": "Livestreams, Premieren und Shorts lädt die App bei Abonnements nicht automatisch. Ein einzelnes Video kannst du weiter von Hand einfügen.",
     "subs.skip.live": "Livestream",
@@ -719,7 +680,7 @@
     "alert.job_failed.title": "Download fehlgeschlagen: {label}",
     "alert.job_failed.what": "„{label}“ (Auftrag #{job_id}) ist fehlgeschlagen. Grund: {reason}",
     "alert.job_failed.did": "Der Auftrag ist als fehlgeschlagen markiert. Dateien, die schon in der Bibliothek liegen, bleiben unberührt.",
-    "alert.job_failed.todo": "Die Ursache beheben und dann beim Auftrag „Nochmal versuchen“ drücken (hier im Dashboard oder in der Liste auf der Eingabeseite).",
+    "alert.job_failed.todo": "Die Ursache beheben und dann beim Auftrag hier im Dashboard „Nochmal versuchen“ drücken.",
     "alert.feed_error.title": "Problem mit dem Feed: {name}",
     "alert.feed_error.what": "„{name}“ konnte nicht geprüft werden: {reason}",
     "alert.feed_error.did": "Die App versucht es nach kurzer Zeit erneut. Es gehen keine neuen Folgen oder Videos verloren, sie werden beim nächsten erfolgreichen Prüfen nachgeholt, solange sie noch im Feed stehen.",
@@ -829,7 +790,6 @@
     "accounts.load_error": "Die Konten konnten nicht geladen werden.",
     "subs.followers": "Folgen: {names}",
     "subs.shared_note": "{n} weitere Person(en) folgen dem auch; „Entfernen“ beendet es nur für dich.",
-    "subs.joined": "Du folgst „{name}“ jetzt auch ({n} weitere Person(en) folgen schon).",
     "subs.remove_all": "Für alle entfernen",
     "subs.confirm_all": "Wirklich für alle entfernen?",
     "sub.joined": "Du folgst „{name}“ jetzt auch ({n} weitere Person(en) folgen schon).",
@@ -865,16 +825,16 @@
     "howto.s3.alt": "Das Formular: oben der eingefügte Link, darunter die Art und die Felder, unten der Knopf „Hinzufügen“.",
     "howto.s3.text": "Den Link oben in das Feld „Link“ einfügen. Die Seite erkennt den Magnet-Link selbst. Dann die Art wählen (Film, Serie, Hörbuch oder Musik) und die Felder ausfüllen, zum Beispiel Titel und Jahr. Zum Schluss auf „Hinzufügen“ tippen.",
     "howto.s4.title": "4. Zuschauen",
-    "howto.s4.alt": "Die Liste der Aufträge: einer lädt mit einem Fortschrittsbalken, einer ist rot fehlgeschlagen und hat den Knopf „Nochmal versuchen“.",
-    "howto.s4.text": "Unter „Aufträge“ siehst du, wie weit es ist: wartet, lädt, wird einsortiert, fertig. Geht etwas schief, steht der Grund in Rot da, und „Nochmal versuchen“ startet es neu. Das Laden kann eine Weile dauern.",
+    "howto.s4.alt": "Die Aufträge im Dashboard: einer lädt mit einem Fortschrittsbalken, einer ist rot fehlgeschlagen und hat den Knopf „Nochmal versuchen“.",
+    "howto.s4.text": "Unter dem Formular steht in einer Zeile, wie viel gerade lädt. Im Dashboard siehst du jeden Auftrag: wartet, lädt, wird einsortiert, fertig. Geht etwas schief, steht der Grund in Rot da, und „Nochmal versuchen“ startet es neu. Das Laden kann eine Weile dauern.",
     "howto.s5.title": "5. In Jellyfin ansehen",
     "howto.s5.alt": "Jellyfin mit Kacheln für die Bibliotheken; eine neue Kachel mit einem Abspiel-Zeichen.",
     "howto.s5.text": "Ist der Auftrag „fertig“, erscheint der Titel nach kurzer Zeit in Jellyfin, in der passenden Bibliothek (Filme, Serien, Hörbücher, Musik oder Youtube). Wenn nicht: kurz warten und die Seite in Jellyfin neu laden.",
     "howto.yt.title": "YouTube-Videos und Kanäle",
     "howto.yt.alt": "Das Formular mit einem YouTube-Link und dem Haken „Kanal abonnieren“.",
     "howto.yt.video": "Ein Video: den Link des Videos oben einfügen. Kanal und Titel erscheinen von selbst und lassen sich ändern. Dann auf „Hinzufügen“ tippen.",
-    "howto.yt.subscribe": "Einem Kanal folgen: vor dem Hinzufügen den Haken „Kanal abonnieren“ setzen. Oder weiter unten bei „Abonnements“ den Namen mit @ eintragen. Neue Videos des Kanals werden dann von selbst geladen (etwa stündlich geprüft). Es zählen nur Videos, die nach dem Abonnieren erscheinen.",
-    "howto.yt.unsubscribe": "Nicht mehr folgen: bei „Abonnements“ auf „Entfernen“ tippen. Schon geladene Videos bleiben.",
+    "howto.yt.subscribe": "Einem Kanal folgen: vor dem Hinzufügen den Haken „Kanal abonnieren“ setzen. Neue Videos des Kanals werden dann von selbst geladen (etwa stündlich geprüft). Mit „Ältere Videos mitnehmen“ kommen zusätzlich bis zu 15 der letzten Videos des Kanals dazu.",
+    "howto.yt.unsubscribe": "Nicht mehr folgen: im Reiter „Abonnements“ auf „Entfernen“ tippen. Schon geladene Videos bleiben.",
     "howto.find.title": "Wo findet man Magnet-Links?",
     "howto.find.looks": "So sieht ein Magnet-Link aus. Er beginnt immer mit „magnet:?xt=urn:btih:“:",
     "howto.find.where": "Du findest ihn auf der Seite eines Torrents, meist als Magnet-Zeichen neben dem Download-Knopf. Ein Link, der mit „http“ oder „https“ anfängt, ist kein Magnet-Link.",
@@ -884,7 +844,16 @@
     "howto.ill.new": "neu",
     "err.int_out_of_range_20": "Eine Zahl von 0 bis 20.",
     "help.title": "Hilfe",
-    "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Die Adresse eines Podcast-Feeds einfügen: eine einzelne Folge wählen oder den Podcast abonnieren. Das Ergebnis erscheint später in Jellyfin."
+    "help.body": "Einen YouTube-Link einfügen: Kanal und Titel werden abgefragt und lassen sich ändern. Einen Magnet-Link einfügen: die Art des Inhalts wählen und die Angaben ausfüllen. Die Adresse eines Podcast-Feeds einfügen: eine einzelne Folge wählen oder den Podcast abonnieren. Das Ergebnis erscheint später in Jellyfin.",
+    "subs.subtitle": "Die Kanäle und Podcasts, denen du folgst",
+    "subs.how_to_add": "Neue Abonnements legst du auf der Eingabeseite an: einen YouTube-Link einfügen und „Kanal abonnieren“ ankreuzen, oder einen Podcast-Feed einfügen und „Podcast abonnieren“ ankreuzen.",
+    "mini.label": "Aufträge",
+    "mini.none": "gerade läuft nichts",
+    "mini.running": "läuft: {n}",
+    "mini.waiting": "wartet: {n}",
+    "mini.failed": "fehlgeschlagen: {n}",
+    "mini.error": "Stand gerade nicht abrufbar",
+    "mini.open": "Zum Dashboard ›"
   },
   "en": {
     "subtitle": "Paste a YouTube link, a magnet link or a podcast feed and have it filed",
@@ -935,14 +904,13 @@
     "yt.episode": "Episode",
     "yt.audio": "Audio only",
     "yt.audio_note": "Just the sound, smaller and without picture. It is taken over without re-encoding (m4a, otherwise opus), with title, podcast and cover as tags.",
-    "yt.subscribe_note_podcast": "New videos of this channel are then filed automatically as episodes of this podcast. Only videos published after subscribing count.",
-    "subs.target": "File new videos as",
+    "yt.subscribe_note_podcast": "New videos of this channel are then filed automatically as episodes of this podcast (checked about hourly).",
     "subs.target_podcast": "Podcast",
     "subs.target_audio": "Podcast, audio only",
     "yt.channel": "Channel",
     "yt.title": "Title",
     "yt.subscribe": "Subscribe to the channel",
-    "yt.subscribe_note": "New videos of this channel are then downloaded automatically. Only videos published after subscribing count; older ones are not fetched.",
+    "yt.subscribe_note": "New videos of this channel are then downloaded automatically (checked about hourly).",
     "mg.type": "Kind of content",
     "type.movies": "Movie",
     "type.series": "Series",
@@ -1021,15 +989,8 @@
     "vpn.paused": "torrents paused",
     "vpn.since": "state changed: {when}",
     "vpn.country": "exit: {country}",
-    "jobs.title": "Jobs",
-    "jobs.empty": "No jobs yet. Paste a link above.",
-    "jobs.load_error": "The job list cannot be loaded right now. Still trying.",
-    "jobs.banner": "{n} failed. The reason is shown below; Try again continues.",
-    "jobs.filter_failed": "Failed only ({n})",
-    "jobs.filter_all": "Show all",
     "jobs.retry": "Try again",
     "jobs.retrying": "Starting again …",
-    "jobs.retry_failed": "Starting it again did not work.",
     "jobs.no_reason": "No reason was reported.",
     "jobs.id": "Job #{id}",
     "jobs.progress": "{n}%",
@@ -1042,17 +1003,10 @@
     "sub.failed": "Subscribing did not work.",
     "err.channel_invalid": "This is not a channel address.",
     "subs.title": "Subscriptions",
-    "subs.channel": "Add a channel",
-    "subs.placeholder": "@name, channel link or the link of a video",
-    "subs.note": "New videos of a channel are downloaded automatically; it is checked about hourly.",
     "subs.backfill": "Also take older videos",
     "subs.backfill_note": "0 = only videos published after subscribing. At most 15 (that is all YouTube shows).",
-    "subs.add": "Subscribe",
     "subs.empty": "Nothing subscribed yet.",
     "subs.load_error": "The subscriptions cannot be loaded right now.",
-    "subs.added": "Subscribed to the channel \"{name}\".",
-    "subs.already": "The channel \"{name}\" was already subscribed.",
-    "subs.add_failed": "Subscribing did not work.",
     "subs.skipped": "skipped: {n}",
     "subs.skipped_why": "Live streams, premieres and Shorts are not downloaded automatically for subscriptions. You can still paste a single video by hand.",
     "subs.skip.live": "live stream",
@@ -1114,7 +1068,7 @@
     "alert.job_failed.title": "Download failed: {label}",
     "alert.job_failed.what": "“{label}” (job #{job_id}) failed. Reason: {reason}",
     "alert.job_failed.did": "The job is marked as failed. Files that are already in the library are not touched.",
-    "alert.job_failed.todo": "Fix the cause, then press “Try again” on the job (here on the dashboard or in the list on the input page).",
+    "alert.job_failed.todo": "Fix the cause, then press “Try again” on the job here on the dashboard.",
     "alert.feed_error.title": "Feed problem: {name}",
     "alert.feed_error.what": "“{name}” could not be checked: {reason}",
     "alert.feed_error.did": "The app tries again after a short while. Nothing is lost: new episodes or videos are picked up by the next successful check as long as they are still in the feed.",
@@ -1224,7 +1178,6 @@
     "accounts.load_error": "The accounts could not be loaded.",
     "subs.followers": "Followed by: {names}",
     "subs.shared_note": "{n} other person(s) follow this too; \"Remove\" only stops it for you.",
-    "subs.joined": "You now follow \"{name}\" too ({n} other person(s) already do).",
     "subs.remove_all": "Remove for everyone",
     "subs.confirm_all": "Really remove for everyone?",
     "sub.joined": "You now follow \"{name}\" too ({n} other person(s) already do).",
@@ -1260,16 +1213,16 @@
     "howto.s3.alt": "The form: the pasted link on top, below it the kind and the fields, at the bottom the \"Add\" button.",
     "howto.s3.text": "Paste the link into the \"Link\" field at the top. The page recognises the magnet link by itself. Then choose the kind (movie, series, audiobook or music) and fill in the fields, for example title and year. Finally tap \"Add\".",
     "howto.s4.title": "4. Watch it work",
-    "howto.s4.alt": "The job list: one is downloading with a progress bar, one has failed in red and has a \"Try again\" button.",
-    "howto.s4.text": "Under \"Jobs\" you see how far it is: queued, downloading, being filed, done. If something goes wrong the reason is shown in red, and \"Try again\" starts it again. Downloading can take a while.",
+    "howto.s4.alt": "The jobs on the dashboard: one is downloading with a progress bar, one has failed in red and has a \"Try again\" button.",
+    "howto.s4.text": "Below the form one line tells you how much is downloading. The dashboard shows every job: queued, downloading, being filed, done. If something goes wrong the reason is shown in red, and \"Try again\" starts it again. Downloading can take a while.",
     "howto.s5.title": "5. Watch it in Jellyfin",
     "howto.s5.alt": "Jellyfin with tiles for the libraries; a new tile with a play symbol.",
     "howto.s5.text": "When the job says \"done\", the title shows up in Jellyfin after a short while, in the matching library (Movies, Series, Audiobooks, Music or Youtube). If not: wait a little and reload the page in Jellyfin.",
     "howto.yt.title": "YouTube videos and channels",
     "howto.yt.alt": "The form with a YouTube link and the tick box \"Subscribe to the channel\".",
     "howto.yt.video": "One video: paste the video's link at the top. Channel and title appear by themselves and can be changed. Then tap \"Add\".",
-    "howto.yt.subscribe": "Follow a channel: tick \"Subscribe to the channel\" before adding. Or enter the channel name with @ further down under \"Subscriptions\". New videos of the channel are then downloaded automatically (checked about hourly). Only videos published after subscribing count.",
-    "howto.yt.unsubscribe": "Stop following: tap \"Remove\" under \"Subscriptions\". Videos that were already downloaded stay.",
+    "howto.yt.subscribe": "Follow a channel: tick \"Subscribe to the channel\" before adding. New videos of the channel are then downloaded automatically (checked about hourly). With \"Also take older videos\" up to 15 of the channel's latest videos come along too.",
+    "howto.yt.unsubscribe": "Stop following: tap \"Remove\" in the \"Subscriptions\" tab. Videos that were already downloaded stay.",
     "howto.find.title": "Where do you find magnet links?",
     "howto.find.looks": "This is what a magnet link looks like. It always starts with \"magnet:?xt=urn:btih:\":",
     "howto.find.where": "You find it on a torrent's page, usually as a magnet symbol next to the download button. A link that starts with \"http\" or \"https\" is not a magnet link.",
@@ -1279,7 +1232,16 @@
     "howto.ill.new": "new",
     "err.int_out_of_range_20": "A number from 0 to 20.",
     "help.title": "Help",
-    "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. Paste the address of a podcast feed: choose a single episode or subscribe to the podcast. The result appears in Jellyfin later."
+    "help.body": "Paste a YouTube link: channel and title are looked up and can be changed. Paste a magnet link: choose the kind of content and fill in the details. Paste the address of a podcast feed: choose a single episode or subscribe to the podcast. The result appears in Jellyfin later.",
+    "subs.subtitle": "The channels and podcasts you follow",
+    "subs.how_to_add": "New subscriptions are made on the input page: paste a YouTube link and tick \"Subscribe to the channel\", or paste a podcast feed and tick \"Subscribe to the podcast\".",
+    "mini.label": "Jobs",
+    "mini.none": "nothing running right now",
+    "mini.running": "running: {n}",
+    "mini.waiting": "waiting: {n}",
+    "mini.failed": "failed: {n}",
+    "mini.error": "status not available right now",
+    "mini.open": "Open dashboard ›"
   }
 }
 </script>
