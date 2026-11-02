@@ -17,7 +17,13 @@ from __future__ import annotations
 import os
 
 from .envfile import apply_settings, missing_settings, parse_env, write_env
-from .steps import PLACEHOLDER, Context, StepError, wait_healthy
+from .steps import (
+    PLACEHOLDER,
+    Context,
+    StepError,
+    ensure_qbit_proxy_settings,
+    wait_healthy,
+)
 
 
 def sync_env_defaults(ctx: Context) -> list[str]:
@@ -65,6 +71,7 @@ def run_update(ctx: Context, state, conv) -> int:
 
     try:
         sync_env_defaults(ctx)
+        ensure_qbit_proxy_settings(ctx)  # stops qBittorrent if it must; `up` below starts it
         if (
             parse_env(ctx.env_path.read_text(encoding="utf-8")).get("VPN_SERVICE_PROVIDER")
             == "custom"

@@ -10,12 +10,22 @@ network namespace: if the tunnel is down there is no tun0 and nothing connects.
 Usage:
     scripts/qbittorrent/seed_config.py [--user NAME] [--config PATH] [--port N] [--dry-run]
                                        [--password-stdin]
+    scripts/qbittorrent/seed_config.py --fix-host-header [--config PATH] [--dry-run]
 
 The password is asked for twice on the terminal, or read from stdin with
 --password-stdin (for automation; never put it on the command line). Run it on
 the host, with the qbittorrent container STOPPED: qBittorrent rewrites its config
 on exit and would overwrite the change. Safe to re-run; it replaces only the keys
 it owns and keeps everything else in the file.
+
+**Host header check off, CSRF protection on.** qBittorrent answers 401 to any request whose `Host`
+header names another port than its own (8080 inside gluetun). Through the proxy on 8081 the
+browser's `Host` is `<lan address>:8081`, so the Web UI could never be reached that way. The key
+`WebUI\\HostHeaderValidation` is therefore set to false, and `WebUI\\CSRFProtection` is set to
+true explicitly. Only Caddy (LAN check, then login) and localhost on the VM can reach the port;
+see docs/proxy.md. `--fix-host-header` applies just these two keys to an EXISTING config (no
+password asked, nothing else touched); stop the qbittorrent container first, it rewrites the file
+when it exits.
 
 Test hook: none needed, --config points it at any file.
 """
@@ -44,6 +54,13 @@ KEY_BYTES = 64
 MIN_PASSWORD_LENGTH = 10
 USER_PATTERN = re.compile(r"[A-Za-z0-9._-]{3,64}")
 
+# The proxy on :8081 sends Host "<lan address>:8081" to a Web UI on :8080, which qBittorrent
+# refuses (401) while host header validation is on. CSRF protection (Origin against Host) stays on.
+PROXY_SETTINGS = {
+    "WebUI\\HostHeaderValidation": "false",
+    "WebUI\\CSRFProtection": "true",
+}
+
 VPN_INTERFACE = "tun0"
 WEBUI_PORT = "8080"  # the container-side port gluetun publishes (docker-compose.yml)
 
@@ -67,6 +84,7 @@ def wanted_settings(user: str, password: str, port: str = WEBUI_PORT) -> dict[st
             # Ask for the login from every client, localhost and LAN included.
             "WebUI\\LocalHostAuth": "true",
             "WebUI\\AuthSubnetWhitelistEnabled": "false",
+            **PROXY_SETTINGS,
         },
         "BitTorrent": {
             "Session\\Interface": VPN_INTERFACE,
@@ -121,6 +139,29 @@ def write_private(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+def host_header_fixed(text: str) -> bool:
+    """Does this config already have the proxy settings (as written by this script)?"""
+    lines = {ln.strip() for ln in text.splitlines()}
+    return all(f"{key}={value}" in lines for key, value in PROXY_SETTINGS.items())
+
+
+def fix_host_header(config: Path, dry_run: bool) -> int:
+    """Set the proxy keys in an existing config and nothing else. 0 also if it was fine already."""
+    if not config.exists():
+        print(f"error: {config} does not exist (run the script without --fix-host-header)")
+        return 1
+    existing = config.read_text(encoding="utf-8")
+    if host_header_fixed(existing):
+        print(f"{config} already has the proxy settings, nothing to do")
+        return 0
+    if dry_run:
+        print(f"dry run: would set {', '.join(PROXY_SETTINGS)} in {config}")
+        return 0
+    write_private(config, apply_settings(existing, {"Preferences": PROXY_SETTINGS}))
+    print(f"set {', '.join(PROXY_SETTINGS)} in {config}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Seed qBittorrent's Web UI login and VPN binding.")
     parser.add_argument("--user", default="admin", help="Web UI user name (default: admin)")
@@ -139,7 +180,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--password-stdin", action="store_true", help="read the password from stdin"
     )
+    parser.add_argument(
+        "--fix-host-header",
+        action="store_true",
+        help="only set the two proxy-related keys in an existing config (no password asked)",
+    )
     args = parser.parse_args(argv)
+
+    if args.fix_host_header:
+        return fix_host_header(args.config, args.dry_run)
 
     if not USER_PATTERN.fullmatch(args.user):
         raise SystemExit("error: --user must be 3 to 64 characters of A-Z a-z 0-9 . _ -")

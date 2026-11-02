@@ -75,9 +75,37 @@ maintenance scripts on the VM use it). (6) qBittorrent's own login behind the pr
 
 **qBittorrent behind a proxy.** It gets its own port (`8081`) instead of a path like `/qbt/`:
 its Web UI uses absolute paths and a cookie scoped to `/`, so a sub-path needs rewriting that
-cannot be tested without the real UI. Caddy passes the `Host` header through unchanged, which is
-what qBittorrent's CSRF check needs (it compares `Origin` with `Host` and answers `401` when the
-port differs; that is what we saw with a port mapping). `ReverseProxySupportEnabled` is
+cannot be tested without the real UI. Caddy passes the `Host` header through unchanged (`<lan address>:8081`), and qBittorrent's
+CSRF check, which compares `Origin` with `Host`, is **on** and keeps working.
+
+**Host header validation is off (`WebUI\\HostHeaderValidation=false`).** qBittorrent answers
+`401` to any request whose `Host` header names another port than its own Web UI port (8080), or
+an address it does not know. Through the proxy the port is always 8081, so with the check on the
+Web UI could never be reached that way (found in the first real install: the proxy check
+`qBittorrent with the login -> 200` got 401; `curl -H "Host: <lan address>:8081"
+http://127.0.0.1:8080/` gave 401, `Host: 127.0.0.1:8080` gave 200). `seed_config.py` therefore
+writes `WebUI\\HostHeaderValidation=false` and, explicitly, `WebUI\\CSRFProtection=true`.
+
+Why this is acceptable: the check protects a Web UI that is open on a network against DNS
+rebinding (a hostile site's name that resolves to the Web UI's address). Here nothing reaches
+port 8080 except (1) Caddy, which refuses anything outside `LAN_SUBNET` and then asks for the
+proxy login, and (2) localhost on the VM (`QBIT_WEBUI_BIND`, the maintenance scripts). Both are
+unaffected by a rebinding page: Caddy's LAN check and the login come first, qBittorrent's own
+login and CSRF protection come after, and the Web UI is not published anywhere else. So the
+check would only add a way for the owner's own proxy to break.
+
+**Existing installations.** A `qBittorrent.conf` made before this change lacks the setting. The
+installer adds it on *Repair* and on *Update* (it stops qBittorrent for that, because it rewrites
+its config on exit, patches the file with `seed_config.py --fix-host-header`, and the following
+`docker compose up -d` starts it again). By hand:
+
+```bash
+docker compose stop qbittorrent                              # it rewrites its config when it exits
+scripts/qbittorrent/seed_config.py --fix-host-header         # only the two keys, no password asked
+docker compose up -d qbittorrent                             # start it again
+```
+
+`ReverseProxySupportEnabled` is
 **not** switched on: it would make qBittorrent believe `X-Forwarded-For` from a "trusted proxy
 list" whose address is a changing Docker address. The consequence: qBittorrent sees every client
 as the proxy. Five wrong *qBittorrent* passwords (after passing the proxy login) ban the proxy
