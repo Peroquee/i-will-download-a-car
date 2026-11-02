@@ -42,7 +42,8 @@ def seed(config_dir: Path, *extra: str) -> None:
             str(SEED_SCRIPT),
             "--config",
             str(config_dir / "qBittorrent" / "qBittorrent.conf"),
-            *extra,
+            # the password comes in through stdin (as the installer does); the fix mode has none
+            *(extra if "--fix-host-header" in extra else ("--password-stdin", *extra)),
         ],
         input=None if "--fix-host-header" in extra else PASSWORD + "\n",
         text=True,
