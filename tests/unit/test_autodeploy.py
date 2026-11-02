@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -240,6 +241,8 @@ class FakeShell:
 
 @pytest.fixture
 def world(tmp_path) -> World:
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed (the CI image has none; runs on developer machines)")
     w = World(tmp_path)
     w.token()
     return w
@@ -761,8 +764,6 @@ def test_gitlab_trouble_is_a_calm_offline_result(world, http, message):
 
 
 def test_an_unreachable_remote_is_offline_not_a_crash(world):
-    import shutil
-
     world.publish("feature")
     shutil.rmtree(world.remote)
     outcome = run(world)
