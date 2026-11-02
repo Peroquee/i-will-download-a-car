@@ -139,6 +139,24 @@ class Torrent:
         )
 
     @property
+    def bytes_done(self) -> int:
+        """How much of the content exists (0 while the file list is still unknown)."""
+        if self.size <= 0 or not 0 <= self.amount_left <= self.size:
+            return 0
+        return self.size - self.amount_left
+
+    @property
+    def metadata_missing(self) -> bool:
+        """Still looking for the torrent's file list (a magnet link carries only the hash)."""
+        return self.state in {"metaDL", "forcedMetaDL"}
+
+    @property
+    def looking_for_sources(self) -> bool:
+        """Active and trying to get data: the only states where "no progress" means "no sources".
+        Paused, queued by qBittorrent, checking, moving and the like are not."""
+        return self.state in {"metaDL", "forcedMetaDL", "stalledDL", "downloading", "forcedDL"}
+
+    @property
     def paused(self) -> bool:
         """Paused by hand or pause_all(): `paused*` (qBittorrent 4.x) or `stopped*` (5.x) states."""
         return self.state.startswith(("paused", "stopped"))
@@ -422,6 +440,20 @@ class QbitClient:
     def resume_torrents(self, hashes: list[str]) -> None:
         """Resume just these torrents (infohashes); same start/resume fallback as resume_all()."""
         self._all_torrents("start", "resume", _hash_list(hashes))
+
+    def delete_torrents(self, hashes: list[str], *, delete_files: bool) -> None:
+        """Remove these torrents (infohashes) from qBittorrent, and their files if asked.
+
+        `delete_files` only ever removes the files qBittorrent lists for the torrent (there is no
+        folder sweep); the caller decides whether that is safe, see the reconciler's give-up.
+        """
+        status, _ = self._request(
+            "POST",
+            "torrents/delete",
+            form={"hashes": _hash_list(hashes), "deleteFiles": "true" if delete_files else "false"},
+        )
+        if status != 200:
+            raise QbitRequestError(f"torrents/delete answered {status}", status)
 
     def _all_torrents(self, new_name: str, old_name: str, hashes: str = "all") -> None:
         status, _ = self._request("POST", f"torrents/{new_name}", form={"hashes": hashes})

@@ -219,3 +219,20 @@ def test_a_bad_entry_is_named_by_position_not_by_value(name):
     assert name in str(error.value)
     assert "entry 2" in str(error.value)
     assert "secret-garbage" not in str(error.value)
+
+
+# --- MAGNET_STALL_DAYS (#40) ---------------------------------------------------------
+
+
+def test_magnet_stall_days_default_to_seven():
+    assert settings().magnet_stall_days == 7
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0", 0), ("1", 1), ("14", 14), ("365", 365)])
+def test_magnet_stall_days_accepts_zero_and_up_to_a_year(value, expected):
+    assert settings(MAGNET_STALL_DAYS=value).magnet_stall_days == expected
+
+
+@pytest.mark.parametrize("value", ["-1", "366", "seven", "1.5"])
+def test_magnet_stall_days_rejects_anything_else(value):
+    assert any("MAGNET_STALL_DAYS" in p for p in problems(MAGNET_STALL_DAYS=value))

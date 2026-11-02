@@ -213,8 +213,30 @@ reports; it would run inside gluetun's namespace and need a hole in the VPN fire
 - **Without an organizer** (until #16 sets `app.state.organizer`): finished torrents stay
   `downloading`, with one warning in the log; nothing is lost.
 - `app_state` key `reconciler.last_ok` has the time of the last successful run.
-- A torrent that never finds metadata (a magnet nobody seeds) stays `downloading`; a timeout for
-  that is not part of this issue.
+
+### Giving up on a stalled magnet link (issue #40)
+
+A magnet link nobody seeds would sit in qBittorrent forever: either without its file list
+(`metaDL`) or stopped at some percentage (`stalledDL`). `MAGNET_STALL_DAYS` (default 7, `0` =
+never) is the limit:
+
+- The reconciler stores per job how many bytes the torrent has (`jobs.progress_bytes`) and when
+  that last changed (`jobs.progress_at`, migration 0007). **More bytes restart the clock**, so a
+  slow download is kept however long it takes. It writes at most every 10 minutes per job.
+- When the clock reaches the limit the job becomes `failed` with `no sources for 7 days: the
+  torrent never got its file list` (or `... the download stopped at 43 %`). A warning
+  `job gave up: no sources` is logged (the alert strip of #38 will show it).
+- **The torrent and its unfinished data are removed** from qBittorrent (`torrents/delete` with
+  `deleteFiles`), but only if the torrent's location is inside `downloads/`. A finished torrent
+  is never looked at, and a torrent in the library is a hardlink made after completion, so library
+  files cannot be touched. If qBittorrent refuses the removal, nothing is failed and the next run
+  tries again.
+- **Only time that could have produced progress counts.** The clock is restarted while the torrent
+  is paused (by hand or by the VPN watchdog), queued by qBittorrent, being checked or moved, and
+  after a gap of more than 10 minutes between two runs (the app or qBittorrent was away; the
+  stored `reconciler.last_ok` time tells the app after a restart).
+- **Retry** works as for every failed job (#26): the magnet link is added again and the clock
+  starts from zero (the retry clears `progress_*`).
 
 ## File organizer (issue #16)
 

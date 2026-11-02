@@ -111,7 +111,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.scheduler.start()
         if app.state.qbit is not None:
             # Turns finished torrents into organized files (#15); the organizer arrives with #16.
-            app.state.reconciler = Reconciler(app.state.db, app.state.qbit, app.state.organizer)
+            app.state.reconciler = Reconciler(
+                app.state.db,
+                app.state.qbit,
+                app.state.organizer,
+                stall_seconds=settings.magnet_stall_days * 86400,
+                downloads_dir=settings.downloads_dir,
+            )
             app.state.scheduler.add_interval_job(
                 app.state.reconciler.run_once,
                 job_id=RECONCILE_JOB_ID,

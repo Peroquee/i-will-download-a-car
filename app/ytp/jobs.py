@@ -30,6 +30,8 @@ class Job:
     error: str | None
     created_at: str
     updated_at: str
+    progress_bytes: int | None = None  # magnet jobs: what the reconciler last saw (#40)
+    progress_at: str | None = None  # ... and when that last changed
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Job:
@@ -42,6 +44,8 @@ class Job:
             error=row["error"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            progress_bytes=row["progress_bytes"],
+            progress_at=row["progress_at"],
         )
 
 
@@ -84,7 +88,8 @@ def submit_job(
         if outcome == "duplicate" and row["status"] == "failed" and retry_failed:
             conn.execute(
                 "UPDATE jobs SET status = 'queued', error = NULL, metadata = ?, "
-                "source = COALESCE(?, source) WHERE id = ?",
+                "source = COALESCE(?, source), progress_bytes = NULL, progress_at = NULL "
+                "WHERE id = ?",
                 (metadata_json, source, row["id"]),
             )
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
@@ -168,6 +173,15 @@ def transition(
             (to, error[:MAX_ERROR_LENGTH] if error else None, job_id, *expected),
         )
         return cursor.rowcount == 1
+
+
+def record_progress(db: Database, job_id: int, done_bytes: int, at: str) -> None:
+    """Remember how much of a torrent exists and when that was last seen to change (#40)."""
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE jobs SET progress_bytes = ?, progress_at = ? WHERE id = ?",
+            (done_bytes, at, job_id),
+        )
 
 
 def list_jobs(db: Database, *, limit: int = 50, status: str | None = None) -> list[Job]:

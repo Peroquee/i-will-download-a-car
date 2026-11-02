@@ -9,6 +9,7 @@
       "JELLYFIN_API_KEY": "",
       "JELLYFIN_URL": "http://192.168.178.108:8096",
       "LOG_LEVEL": "INFO",
+      "MAGNET_STALL_DAYS": "7",
       "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
       "MEDIA_DIR_MOVIES": "Filme",
       "MEDIA_DIR_MUSIC": "Musik",
