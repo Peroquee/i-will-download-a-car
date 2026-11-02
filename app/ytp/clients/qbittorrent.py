@@ -117,6 +117,8 @@ class Torrent:
     amount_left: int = 0
     added_on: int = 0
     completion_on: int = 0
+    dlspeed: int = 0  # bytes per second right now
+    eta: int = 0  # seconds; qBittorrent's 8640000 means "unknown"
 
     @property
     def finished(self) -> bool:
@@ -176,6 +178,8 @@ class Torrent:
                 amount_left=int(item.get("amount_left", 0)),
                 added_on=int(item.get("added_on", 0)),
                 completion_on=int(item.get("completion_on", 0)),
+                dlspeed=int(item.get("dlspeed", 0)),
+                eta=int(item.get("eta", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise QbitUnavailable(

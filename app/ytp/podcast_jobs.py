@@ -20,6 +20,7 @@ import logging
 import re
 import shutil
 import threading
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
@@ -113,6 +114,8 @@ class PodcastWorker:
         self.processed = 0
         # Percent of the running download by job id, for the job list (not persisted).
         self.progress: dict[int, int] = {}
+        # Size, speed and ETA of the running download by job id, for the dashboard (#38).
+        self.details: dict[int, dict[str, int | None]] = {}
 
     def wake(self) -> None:
         """A job was just queued: look now instead of at the next idle check."""
@@ -142,6 +145,7 @@ class PodcastWorker:
             self._fail(job, f"the download failed: {type(exc).__name__}")
         finally:
             self.progress.pop(job.id, None)
+            self.details.pop(job.id, None)
         self.processed += 1
         return True
 
@@ -242,11 +246,20 @@ class PodcastWorker:
 
     def _progress(self, job: Job):
         reached = {"quarter": 0}
+        started = time.monotonic()
 
         def hook(done: int, total: int | None) -> None:
             if not total:
                 return
             self.progress[job.id] = min(int(done * 100 / total), 100)
+            elapsed = time.monotonic() - started
+            speed = int(done / elapsed) if elapsed > 0 and done > 0 else None
+            self.details[job.id] = {
+                "done_bytes": int(done),
+                "total_bytes": int(total),
+                "speed": speed,
+                "eta": int((total - done) / speed) if speed else None,
+            }
             quarter = int(done * 4 / total)
             if quarter > reached["quarter"]:
                 reached["quarter"] = quarter

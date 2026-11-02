@@ -192,6 +192,24 @@ def record_progress(db: Database, job_id: int, done_bytes: int, at: str) -> None
         )
 
 
+def active_jobs(db: Database) -> list[Job]:
+    """Everything running or waiting, of every type, oldest first (the dashboard)."""
+    rows = db.query(
+        "SELECT * FROM jobs WHERE status IN ('queued', 'downloading', 'organizing') ORDER BY id"
+    )
+    return [Job.from_row(row) for row in rows]
+
+
+def recent_finished(db: Database, limit: int = 20) -> list[Job]:
+    """The newest done and failed jobs, by when they last changed."""
+    rows = db.query(
+        "SELECT * FROM jobs WHERE status IN ('done', 'failed') "
+        "ORDER BY updated_at DESC, id DESC LIMIT ?",
+        (limit,),
+    )
+    return [Job.from_row(row) for row in rows]
+
+
 def list_jobs(db: Database, *, limit: int = 50, status: str | None = None) -> list[Job]:
     """Jobs, newest first (the job list view)."""
     if status is None:
