@@ -64,7 +64,7 @@ OVERFLOW_PROBE = """
     const box = el.getBoundingClientRect();
     if (box.width > 0 && box.right > width + 1) {
       const name = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
-        (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ').join('.') : '');
+        (typeof el.className === 'string' && el.className ? '.' + el.className.replace(/ /g, '.') : '');
       wide.push(name + ' right=' + Math.round(box.right) + ' width=' + Math.round(box.width));
     }
   }
@@ -228,7 +228,7 @@ def main() -> None:
             print(f"run {number}. {name}", flush=True)
             try:
                 function(ctx)
-            except BaseException as error:  # noqa: BLE001 - report every kind, then go on
+            except BaseException as error:
                 detail = f"{type(error).__name__}: {error}".strip()
                 print(f"FAIL {number}. {name}\n     {detail[:1500]}", flush=True)
                 if os.environ.get("YTP_TRACEBACK"):
