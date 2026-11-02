@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request
 
 from . import jobs
 from .apiutil import hand_to_qbittorrent, problem
-from .clients.qbittorrent import QbitClient, QbitError
+from .clients.qbittorrent import QbitClient, QbitError, Torrent
 from .jobs import Job
 from .podcast_jobs import JOB_TYPE as PODCAST_JOB_TYPE
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
@@ -88,21 +88,35 @@ class TorrentProgress:
         self._lock = threading.Lock()
         self._fetched_at = float("-inf")
         self._values: dict[str, int] = {}
+        self._torrents: dict[str, Torrent] = {}
+
+    def _refresh(self) -> None:
+        if time.monotonic() - self._fetched_at < self._ttl:
+            return
+        try:
+            torrents = self._client.list_torrents()  # type: ignore[union-attr]
+            self._torrents = {t.hash.lower(): t for t in torrents}
+            self._values = {h: int(t.progress * 100) for h, t in self._torrents.items()}
+        except QbitError as exc:
+            logger.info("torrent progress unavailable", extra={"error": str(exc)})
+            self._values = {}
+            self._torrents = {}
+        self._fetched_at = time.monotonic()
 
     def get(self) -> dict[str, int]:
         if self._client is None:
             return {}
         with self._lock:
-            if time.monotonic() - self._fetched_at < self._ttl:
-                return self._values
-            try:
-                torrents = self._client.list_torrents()
-                self._values = {t.hash.lower(): int(t.progress * 100) for t in torrents}
-            except QbitError as exc:
-                logger.info("torrent progress unavailable", extra={"error": str(exc)})
-                self._values = {}
-            self._fetched_at = time.monotonic()
+            self._refresh()
             return self._values
+
+    def details(self) -> dict[str, Torrent]:
+        """The torrents themselves (size, speed, ETA) from the same cached call (#38)."""
+        if self._client is None:
+            return {}
+        with self._lock:
+            self._refresh()
+            return self._torrents
 
 
 def job_progress(job: Job, torrents: dict[str, int], youtube: dict[int, int]) -> int | None:

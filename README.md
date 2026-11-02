@@ -91,6 +91,7 @@ install.sh, update.sh  the guided installer and updater (start here)
 AI-HELP.md             paste into an AI chat for step-by-step help (English)
 HILFE-MIT-KI.md        dasselbe auf Deutsch
 docs/podcasts.md       podcasts: RSS feeds, episodes, the library, the SSRF-safe fetcher
+docs/dashboard.md      the dashboard, the alert strip, where alerts come from
 ```
 
 ## Quick start

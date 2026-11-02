@@ -25,6 +25,7 @@ from .db import Database, DatabaseError
 from .feeds import FeedClient
 from .jobs_api import TorrentProgress
 from .logging_setup import configure_logging
+from .monitor import MONITOR_JOB_ID, MONITOR_SECONDS, AlertMonitor
 from .organizer import FileOrganizer
 from .podcast_jobs import POLL_JOB_ID as PODCAST_POLL_JOB_ID
 from .podcast_jobs import PodcastPoller, PodcastWorker
@@ -106,6 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reconciler = None
     app.state.poller = None
     app.state.podcast_poller = None
+    app.state.monitor = None
     if app.state.db is not None:
         app.state.scheduler = AppScheduler(app.state.db)
         app.state.scheduler.start()
@@ -155,6 +157,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         else:
             logger.info("podcast polling is off (PODCAST_POLL_MINUTES=0)")
+        # Notices what a person should know about and writes the alert log (#38).
+        app.state.monitor = AlertMonitor(
+            app.state.db, app.state.watchdog_status, settings.data_root
+        )
+        app.state.scheduler.add_interval_job(
+            app.state.monitor.run_once,
+            job_id=MONITOR_JOB_ID,
+            seconds=MONITOR_SECONDS,
+        )
         if app.state.jellyfin.enabled:
             # Sends the debounced library refresh once things have been quiet for a while.
             app.state.scheduler.add_interval_job(
@@ -199,6 +210,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.podcast_feeds = None
     app.state.podcast_worker = None
     app.state.podcast_poller = None
+    app.state.monitor = None
     app.state.watchdog_status = None
     app.state.youtube = None
     app.state.channels = None

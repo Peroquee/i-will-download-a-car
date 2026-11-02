@@ -59,6 +59,7 @@ can read the VPN.
 | Podcasts | `podcasts.py`, `podcast_subscriptions.py`, `podcast_jobs.py`, `podcasts_api.py`, `safefetch.py` | RSS feeds and episodes from arbitrary hosts through the VPN proxy, public addresses only ([podcasts.md](podcasts.md)); files into `Podcasts/<podcast>/` |
 | YouTube | `youtube.py`, `youtube_download.py`, `youtube_jobs.py` | probe (title, channel), download with yt-dlp through gluetun's proxy, file into `Youtube/<channel>/` |
 | Subscriptions | `channels.py`, `subscriptions.py`, `feeds.py`, `subscription_poller.py` | resolve a channel once, poll its RSS feed slowly, queue only videos published after subscribing |
+| Alerts and dashboard | `alertlog.py`, `monitor.py`, `alerts_api.py`, `dashboard_api.py`, `static/dashboard.js` | an alert log written by a scheduled monitor (VPN changes seen through the watchdog's status, failed jobs, feed errors, disk space), the strip under the VPN bar and `/dashboard` ([dashboard.md](dashboard.md)) |
 | Jellyfin | `clients/jellyfin.py` | debounced library refresh |
 | VPN view | `clients/watchdog.py` | reads the watchdog's status for the page |
 | Scheduler | `scheduler.py` | the one place that runs periodic jobs (reconciler, poller, Jellyfin refresh, heartbeat) |

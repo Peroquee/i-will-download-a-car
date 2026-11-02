@@ -89,7 +89,13 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/podcasts",
         "/api/podcasts/{subscription_id}",
         "/api/podcasts/{subscription_id}/poll",
+        "/api/alerts",  # the alert log (#38)
+        "/api/alerts/ack-all",
+        "/api/alerts/{alert_id}",
+        "/api/alerts/{alert_id}/ack",
+        "/api/dashboard",
         "/",
+        "/dashboard",  # the same page, in its dashboard view (#38)
         "/static",  # the form's files (#25)
     }
 

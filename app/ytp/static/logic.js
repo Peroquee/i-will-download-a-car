@@ -193,7 +193,83 @@
     };
   }
 
+  /* ---------------------------------------------------------------- dashboard (#38) */
+
+  /* "1.5 GB", "320 KB"; null/negative = unknown. The decimal mark follows the language. */
+  function formatBytes(value, lang) {
+    if (typeof value !== "number" || !isFinite(value) || value < 0) return null;
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var n = value;
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+    var text = i === 0 || n >= 100 ? String(Math.round(n)) : n.toFixed(1);
+    if (lang === "de") text = text.replace(".", ",");
+    return text + " " + units[i];
+  }
+
+  function formatSpeed(value, lang) {
+    var size = formatBytes(value, lang);
+    return size === null || !value ? null : size + "/s";
+  }
+
+  /* "5 min", "1 h 20 min", "2 d 3 h"; null = unknown (also qBittorrent's "infinity"). */
+  function formatEta(seconds) {
+    if (typeof seconds !== "number" || !isFinite(seconds) || seconds < 0 || seconds >= 8640000) return null;
+    var minutes = Math.round(seconds / 60);
+    if (seconds < 60) return "< 1 min";
+    if (minutes < 60) return minutes + " min";
+    var hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + " h" + (minutes % 60 ? " " + (minutes % 60) + " min" : "");
+    var days = Math.floor(hours / 24);
+    return days + " d" + (hours % 24 ? " " + (hours % 24) + " h" : "");
+  }
+
+  /* Which view of the one page is wanted: "dashboard" for /dashboard, else the form. */
+  function pageView(pathname) {
+    return /^\/dashboard\/?$/.test(String(pathname || "")) ? "dashboard" : "input";
+  }
+
+  function alertAnchor(id) { return "alert-" + id; }
+
+  /* The alert id named by a location hash ("#alert-12"), or null. */
+  function alertIdFromHash(hash) {
+    var match = /^#alert-(\d{1,9})$/.exec(String(hash || ""));
+    return match ? Number(match[1]) : null;
+  }
+
+  /* The text keys of an alert and the values to fill in. `known` says whether a key exists. A
+     kind the page has no text for falls back to the English title and detail from the server. */
+  function alertTexts(alert, known) {
+    var kind = alert && typeof alert.kind === "string" ? alert.kind : "";
+    var base = "alert." + kind;
+    var params = alert && alert.params && typeof alert.params === "object" ? alert.params : {};
+    if (kind && known(base + ".title")) {
+      return {
+        title: base + ".title",
+        what: known(base + ".what") ? base + ".what" : null,
+        did: known(base + ".did") ? base + ".did" : null,
+        todo: known(base + ".todo") ? base + ".todo" : null,
+        params: params,
+        fallback: false,
+      };
+    }
+    return { title: null, what: null, did: null, todo: null, params: params, fallback: true };
+  }
+
+  /* The newest unread alerts for the strip, at most `max`. */
+  function stripAlerts(alerts, max) {
+    return (Array.isArray(alerts) ? alerts : []).filter(function (a) { return a && !a.acknowledged; }).slice(0, max);
+  }
+
   return {
+    formatBytes: formatBytes,
+    formatSpeed: formatSpeed,
+    formatEta: formatEta,
+    pageView: pageView,
+    alertAnchor: alertAnchor,
+    alertIdFromHash: alertIdFromHash,
+    alertTexts: alertTexts,
+    stripAlerts: stripAlerts,
     age: age,
     kindKey: kindKey,
     vpnView: vpnView,

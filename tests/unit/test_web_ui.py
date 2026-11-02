@@ -911,3 +911,269 @@ def test_what_the_page_sends_for_music_is_accepted_by_the_server(client):
 
 def test_a_422_on_the_album_lands_on_the_album_field():
     assert '{ channel: $("f-channel"), title: $("f-yt-title"), album: $("f-yt-album") }' in APP_JS
+
+
+# --- the alert strip and the dashboard (#38) ----------------------
+
+DASH_JS = (STATIC_DIR / "dashboard.js").read_text(encoding="utf-8")
+ALERT_KINDS = (
+    "vpn_down", "vpn_blind", "egress_mismatch", "watchdog_silent", "vpn_recovered",
+    "job_failed", "feed_error", "disk_low",
+)  # fmt: skip
+
+
+def test_the_dashboard_script_is_served_and_follows_the_same_rules(client):
+    assert client.get("/static/dashboard.js").status_code == 200
+    assert 'src="/static/dashboard.js"' in HTML
+    assert HTML.index("dashboard.js") < HTML.index("/static/app.js")
+    assert "innerHTML" not in DASH_JS, "server text is always set with textContent"
+    assert "eval(" not in DASH_JS
+    assert not re.search(r"""(?:src|href)\s*=\s*["']?(?:https?:)?//""", DASH_JS)
+    assert not re.search(r"fetch\(\s*[\"']https?:", DASH_JS)
+
+
+def test_the_ids_the_dashboard_script_uses_exist_in_the_page():
+    used = set(re.findall(r'\$\("([\w-]+)"\)', DASH_JS))
+    present = set(re.findall(r'\bid="([\w-]+)"', HTML))
+    assert used <= present, sorted(used - present)
+
+
+def test_every_key_the_dashboard_uses_exists_in_both_languages():
+    t = translations()
+    used = {k for k in re.findall(r'\bt\("([\w.]+)"', DASH_JS) if not k.endswith(".")}
+    used |= {f"alert.sev.{s}" for s in ("info", "warning", "error")}
+    used |= {f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch")}
+    for kind in ALERT_KINDS:
+        used |= {f"alert.{kind}.{part}" for part in ("title", "what", "did", "todo")}
+    for lang in ("de", "en"):
+        assert not {k for k in used if k not in t[lang]}, lang
+
+
+def test_alert_texts_only_use_values_the_monitor_provides():
+    """A placeholder with no value would show as "{label}" to the owner."""
+    from ytp.monitor import AlertMonitor  # noqa: F401  (the params below mirror its alerts)
+
+    provided = {
+        "job_failed": {"label", "reason", "job_id", "type"},
+        "feed_error": {"source", "name", "reason"},
+        "disk_low": {"free_percent", "free_gb"},
+    }
+    t = translations()
+    for lang in ("de", "en"):
+        for kind in ALERT_KINDS:
+            for part in ("title", "what", "did", "todo"):
+                placeholders = set(re.findall(r"\{(\w+)\}", t[lang][f"alert.{kind}.{part}"]))
+                assert placeholders <= provided.get(kind, set()), (lang, kind, part, placeholders)
+
+
+def test_the_strip_sits_under_the_vpn_bar_and_the_dashboard_is_a_view_of_the_same_page():
+    assert HTML.index('id="vpn"') < HTML.index('id="alert-strip"') < HTML.index('class="wrap"')
+    assert 'id="nav-link"' in HTML
+    assert 'id="dashboard"' in HTML
+    assert 'data-view="dashboard"' in HTML
+    assert 'data-view="input"' in HTML
+    assert "[hidden] { display: none !important; }" in CSS
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("value", "lang", "expected"),
+    [
+        (0, "en", "0 B"), (1536, "en", "1.5 KB"), (1536, "de", "1,5 KB"),
+        (250 * 1024**2, "en", "250 MB"), (3 * 1024**3, "en", "3.0 GB"),
+        (-1, "en", None), (None, "en", None), ("12", "en", None),
+    ],
+)  # fmt: skip
+def test_sizes_are_formatted_with_the_decimal_mark_of_the_language(value, lang, expected):
+    assert run_node(f"L.formatBytes({json.dumps(value)}, {json.dumps(lang)})") == expected
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0, "< 1 min"), (59, "< 1 min"), (60, "1 min"), (3000, "50 min"), (3700, "1 h 2 min"),
+        (7200, "2 h"), (200000, "2 d 7 h"), (8640000, None), (-5, None), (None, None),
+    ],
+)  # fmt: skip
+def test_the_remaining_time_is_short_and_unknown_stays_unknown(seconds, expected):
+    assert run_node(f"L.formatEta({json.dumps(seconds)})") == expected
+
+
+@needs_node
+def test_speed_is_empty_when_nothing_moves():
+    assert run_node("L.formatSpeed(0, 'en')") is None
+    assert run_node("L.formatSpeed(2048, 'en')") == "2.0 KB/s"
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("path", "view"),
+    [("/dashboard", "dashboard"), ("/dashboard/", "dashboard"), ("/", "input"),
+     ("/dashboardx", "input"), ("", "input"), (None, "input")],
+)  # fmt: skip
+def test_the_path_decides_the_view(path, view):
+    assert run_node(f"L.pageView({json.dumps(path)})") == view
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("hash_", "expected"),
+    [("#alert-12", 12), ("#alert-0", 0), ("#alert-", None), ("#alert-1x", None), ("#alerts", None),
+     ("alert-3", None), ("#alert-1234567890", None), ("", None)],
+)  # fmt: skip
+def test_the_alert_named_by_the_address_is_found_or_none(hash_, expected):
+    assert run_node(f"L.alertIdFromHash({json.dumps(hash_)})") == expected
+
+
+@needs_node
+def test_an_alert_of_an_unknown_kind_falls_back_to_the_servers_english_text():
+    result = run_node("L.alertTexts({kind: 'brand_new', params: {a: 1}}, () => false)")
+    assert result["fallback"] is True
+    result = run_node(
+        "L.alertTexts({kind: 'disk_low', params: {free_percent: 4}}, (k) => k.startsWith('alert.disk_low.'))"
+    )
+    assert result["fallback"] is False
+    assert result["title"] == "alert.disk_low.title"
+    assert result["params"] == {"free_percent": 4}
+
+
+@needs_node
+def test_the_strip_shows_only_unread_alerts_newest_first_and_at_most_three():
+    alerts = [{"id": i, "acknowledged": i % 2 == 0} for i in range(10, 0, -1)]
+    shown = run_node(f"L.stripAlerts({json.dumps(alerts)}, 3)")
+    assert [a["id"] for a in shown] == [9, 7, 5]
+    assert run_node("L.stripAlerts(null, 3)") == []
+
+
+def smoke(path, hash_, answers, click=None):
+    ids = sorted(set(re.findall(r'\bid="([\w-]+)"', HTML)) - {"i18n"})
+    scenario = {
+        "ids": ids,
+        "viewNodes": ["input", "dashboard"],
+        "dictionary": translations()["en"],
+        "answers": answers,
+        "click": click,
+    }
+    result = subprocess.run(
+        [NODE, str(STATIC_DIR.parents[2] / "tests/helpers/dashboard_smoke.js"), str(STATIC_DIR),
+         path, hash_, json.dumps(scenario)],
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+ALERTS = {
+    "alerts": [
+        {"id": 7, "time": "2026-11-02T10:00:00Z", "kind": "job_failed", "severity": "error",
+         "title": "A download failed: X", "detail": "d", "acknowledged": False,
+         "params": {"label": "Film <b>X</b>", "reason": "no sources for 7 days", "job_id": 3, "type": "magnet"}},
+        {"id": 6, "time": "2026-11-02T09:00:00Z", "kind": "brand_new", "severity": "warning",
+         "title": "English fallback title", "detail": "English fallback detail", "acknowledged": False, "params": {}},
+        {"id": 5, "time": "2026-11-01T09:00:00Z", "kind": "disk_low", "severity": "warning",
+         "title": "t", "detail": "d", "acknowledged": True, "params": {"free_percent": 4, "free_gb": 20}},
+    ],
+    "unread": 2,
+}  # fmt: skip
+DASHBOARD = {
+    "active": [
+        {"id": 1, "type": "magnet", "kind": "movies", "label": "Big Film", "status": "downloading",
+         "progress": 42, "done_bytes": 1536, "total_bytes": 3 * 1024**3, "speed": 2048, "eta": 3700,
+         "created_at": "x", "updated_at": "x"},
+        {"id": 2, "type": "youtube", "kind": "youtube", "label": "Clip", "status": "queued",
+         "progress": None, "done_bytes": None, "total_bytes": None, "speed": None, "eta": None,
+         "created_at": "x", "updated_at": "x"},
+    ],
+    "recent": [
+        {"id": 3, "type": "magnet", "kind": "movies", "label": "Old", "status": "failed",
+         "error": "no sources for 7 days", "can_retry": True, "created_at": "x", "updated_at": "x"},
+        {"id": 4, "type": "magnet", "kind": "movies", "label": "Fine", "status": "done",
+         "error": None, "can_retry": False, "created_at": "x", "updated_at": "x"},
+    ],
+    "vpn": {"current": {"state": "ok", "since": "2026-11-02T08:00:00Z"},
+            "history": [{"time": "2026-11-02T08:00:00Z", "condition": "ok", "paused": False, "reason": ""},
+                        {"time": "2026-11-02T07:00:00Z", "condition": "down", "paused": True, "reason": "x"}]},
+    "disk": {"free_percent": 25, "free_gb": 500, "total_gb": 2000},
+}  # fmt: skip
+ANSWERS = {"/api/alerts": ALERTS, "/api/dashboard": DASHBOARD}
+
+
+@needs_node
+def test_the_strip_lists_unread_alerts_with_links_to_their_detail_on_the_dashboard():
+    out = smoke("/", "", ANSWERS)
+    assert dict(out["views"]) == {"input": False, "dashboard": True}
+    chips = out["strip"]
+    assert len(chips) == 2, "the acknowledged one is not in the strip"
+    assert chips[0]["text"].startswith("Download failed: Film <b>X</b>"), "server text stays text"
+    assert chips[0]["href"] == "/dashboard#alert-7"
+    assert chips[1]["text"].startswith("English fallback title")
+    assert out["nodes"]["alert-strip"]["hidden"] is False
+    assert out["nodes"]["alert-strip-ack"]["hidden"] is False, "two unread: the 'all' button shows"
+    assert out["nodes"]["nav-link"]["text"] == "Dashboard"
+    assert ["GET", "/api/dashboard"] not in out["calls"], (
+        "the input page does not load the dashboard"
+    )
+
+
+@needs_node
+def test_the_strip_is_hidden_without_unread_alerts_or_when_the_server_does_not_answer():
+    quiet = {"alerts": [], "unread": 0}
+    assert smoke("/", "", {"/api/alerts": quiet})["nodes"]["alert-strip"]["hidden"] is True
+    assert smoke("/", "", {})["nodes"]["alert-strip"]["hidden"] is True
+
+
+@needs_node
+def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
+    out = smoke("/dashboard", "#alert-7", ANSWERS)
+    assert dict(out["views"]) == {"input": True, "dashboard": False}
+    active = out["nodes"]["dash-active-list"]["children"]
+    assert len(active) == 2
+    assert "42%" in active[0]["text"] or "42 %" in active[0]["text"]
+    assert "1.5 KB of 3.0 GB" in active[0]["text"]
+    assert "2.0 KB/s" in active[0]["text"]
+    assert "1 h 2 min left" in active[0]["text"]
+    assert "waiting" in active[1]["text"]
+    recent = out["nodes"]["dash-recent-list"]["children"]
+    assert "no sources for 7 days" in recent[0]["text"]
+    assert "Try again" in recent[0]["text"]
+    assert "Try again" not in recent[1]["text"]
+    assert "VPN running" in out["nodes"]["dash-vpn-now"]["text"]
+    history = [c["text"] for c in out["nodes"]["dash-vpn-list"]["children"]]
+    assert len(history) == 2
+    assert "torrents paused" in history[1]
+    assert (
+        out["nodes"]["dash-disk"]["text"] == "Storage: 25 % free (500 GB of 1.9 TB)"
+        or "25 %" in out["nodes"]["dash-disk"]["text"]
+    )
+    log = out["nodes"]["dash-alerts-list"]["children"]
+    assert [c["id"] for c in log] == ["alert-7", "alert-6", "alert-5"]
+    assert "alert-unread" in log[0]["cls"]
+    assert "alert-target" in log[0]["cls"], "the alert named by the address is marked"
+    assert "alert-unread" not in log[2]["cls"]
+    assert "What happened:" in log[0]["text"]
+    assert "no sources for 7 days" in log[0]["text"]
+    assert "What you can do:" in log[0]["text"]
+    assert "English fallback detail" in log[1]["text"], "an unknown kind shows the server's text"
+    assert out["nodes"]["nav-link"]["text"] == "Input form"
+    assert out["nodes"]["dash-alerts-ack"]["hidden"] is False
+
+
+@needs_node
+def test_dismissing_a_chip_acknowledges_that_alert_and_reloads_the_list():
+    out = smoke("/", "", ANSWERS, click="dismiss")
+    assert ["POST", "/api/alerts/7/ack"] in out["calls"]
+    assert out["calls"].count(["GET", "/api/alerts?limit=50"]) == 2
+
+
+@needs_node
+def test_mark_all_read_posts_once():
+    out = smoke("/", "", ANSWERS, click="ack-all")
+    assert out["calls"].count(["POST", "/api/alerts/ack-all"]) == 1
+
+
+@needs_node
+def test_retry_on_the_dashboard_uses_the_existing_retry_endpoint_and_reloads():
+    out = smoke("/dashboard", "", ANSWERS, click="retry")
+    assert ["RETRY", 3] in out["calls"]
+    assert out["calls"].count(["GET", "/api/dashboard"]) == 2

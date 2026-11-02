@@ -1,7 +1,8 @@
 """The web UI and the browser-facing security (issues #25, #13 note).
 
-* `register_ui` serves the submission form: `GET /` and the files under `/static/` (HTML, CSS and
-  two scripts, all from this app; no CDN, no external font, nothing is fetched from another site).
+* `register_ui` serves the submission form: `GET /` (`GET /dashboard` is the same page) and the
+  files under `/static/` (HTML, CSS and scripts, all from this app; no CDN, no external font,
+  nothing is fetched from another site).
 * `SecurityMiddleware` does two things for every request:
 
   1. **Same-origin check for state-changing requests** (POST, PUT, PATCH, DELETE). A page on another
@@ -112,4 +113,6 @@ def register_ui(app: FastAPI) -> None:
         )
 
     app.add_api_route("/", index, methods=["GET"], include_in_schema=False)
+    # The dashboard (#38) is the same page: the script shows the dashboard view for this address.
+    app.add_api_route("/dashboard", index, methods=["GET"], include_in_schema=False)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

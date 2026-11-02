@@ -9,6 +9,7 @@
   var probeTimer = null;
   var probeSerial = 0;
   var feedSerial = 0;
+  var dash = null;   // the alert strip and the dashboard (dashboard.js, #38)
 
   /* ---------------------------------------------------------------- language */
 
@@ -41,6 +42,7 @@
     renderJobs();
     renderSubs();
     renderHowtoSources();
+    if (dash) dash.render();
   }
 
   /* ---------------------------------------------------------------- state */
@@ -879,6 +881,16 @@
 
   function init() {
     lang = chooseLanguage();
+    dash = window.Dash.create({
+      t: t,
+      $: $,
+      lang: function () { return lang; },
+      timeText: timeText,
+      statusText: statusText,
+      getJson: getJson,
+      post: post,
+      retryJob: function (id) { return post("/api/jobs/" + id + "/retry", {}).catch(function () { return null; }); },
+    });
     applyLanguage();
     document.querySelectorAll("input[name=mode]").forEach(function (radio) {
       radio.addEventListener("change", function () { setMode(radio.value); scheduleProbe(); });
@@ -906,11 +918,12 @@
     });
     pollVpn();
     window.setInterval(function () {
-      if (document.visibilityState !== "hidden") pollVpn();
+      if (document.visibilityState !== "hidden") { pollVpn(); dash.refreshAlerts(); }
     }, VPN_POLL_MS);
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") pollVpn();
+      if (document.visibilityState === "visible") { pollVpn(); dash.refreshAlerts(); }
     });
+    dash.start();
     startJobPolling();
     startSubs();
     startHowto();

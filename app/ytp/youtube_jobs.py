@@ -141,6 +141,8 @@ class YoutubeWorker:
         self.processed = 0
         # Percent of the running download by job id, for the job list (not persisted).
         self.progress: dict[int, int] = {}
+        # Size, speed and ETA of the running download by job id, for the dashboard (#38).
+        self.details: dict[int, dict[str, int | None]] = {}
 
     def wake(self) -> None:
         """A job was just queued: look now instead of at the next idle check."""
@@ -172,6 +174,7 @@ class YoutubeWorker:
             self._fail(job, f"the download failed: {type(exc).__name__}")
         finally:
             self.progress.pop(job.id, None)
+            self.details.pop(job.id, None)
         self.processed += 1
         return True
 
@@ -322,6 +325,13 @@ class YoutubeWorker:
             if data.get("status") != "downloading" or not total or not done:
                 return
             self.progress[job.id] = min(int(done * 100 / total), 100)
+            speed, eta = data.get("speed"), data.get("eta")
+            self.details[job.id] = {
+                "done_bytes": int(done),
+                "total_bytes": int(total),
+                "speed": int(speed) if isinstance(speed, (int, float)) and speed > 0 else None,
+                "eta": int(eta) if isinstance(eta, (int, float)) and eta >= 0 else None,
+            }
             quarter = int(done * 4 / total)
             if quarter > reached["quarter"]:
                 reached["quarter"] = quarter
