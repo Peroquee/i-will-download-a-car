@@ -54,6 +54,14 @@ def get_job(db: Database, job_id: int) -> Job | None:
     return Job.from_row(rows[0]) if rows else None
 
 
+def find_job(db: Database, job_type: str, external_id: str) -> Job | None:
+    """The job for a thing, if the system has one (any status)."""
+    rows = db.query(
+        "SELECT * FROM jobs WHERE type = ? AND external_id = ?", (job_type, external_id)
+    )
+    return Job.from_row(rows[0]) if rows else None
+
+
 def submit_job(
     db: Database,
     job_type: str,

@@ -158,9 +158,46 @@ after that is the normal download path: job list, retry, filing, Jellyfin refres
 - **One Jellyfin refresh per batch:** the poller wakes the download worker once at the end; the
   library refresh is debounced by `LibraryRefresher` (a batch of videos finishing together causes
   one refresh per library after things have been quiet for a while).
-- **Live streams and premieres** are listed in the feed like videos. Until they have ended
-  yt-dlp refuses them, so such a job fails with "This is a live stream or premiere that has not
-  ended yet"; the same video can be retried from the job list later.
+
+### Lives, premieres and Shorts are skipped (issue #39)
+
+The poller does not queue live streams (running, announced or ended), premieres or Shorts. A
+download of those fails ("not ended yet") or gives a clip nobody wanted, and the job list filled
+up with failures. The rules (`app/ytp/video_filter.py`):
+
+1. **A video that already has a job is never looked at again** (done, running or failed): the
+   unique index of `jobs` decides, as above.
+2. **Free signal first:** the feed links a Short as `youtube.com/shorts/<id>`. Such an entry is a
+   Short without any request.
+3. **One yt-dlp metadata probe per NEW video** (nothing is downloaded), through the same proxy
+   and with the same options as the form's probe. Probes are spread out (1 to 3 seconds apart),
+   at most 8 per poll; further new videos wait for the next poll. It decides:
+   - `live`: `live_status` is `is_live` or `was_live` (so a finished live stream also counts),
+     `is_live` / `was_live` is true, or `media_type` is `livestream`;
+   - `premiere`: `live_status` is `is_upcoming`, or yt-dlp refuses the video with "Premieres in
+     ..." / "live event will begin". A premiere and a scheduled live stream look the same before
+     they start, so both are called "premiere";
+   - `short`: `media_type` is `short` or the page address is a `/shorts/` one, or the video is
+     **at most 3 minutes long and its picture is taller than wide** (YouTube's own limit for a
+     Short; the size is the top-level width/height or the tallest format). A vertical clip of
+     under 3 minutes uploaded as an ordinary video is therefore skipped as well; a short
+     landscape clip is not, and neither is a video of unknown size (an ordinary video is never
+     dropped on a guess).
+4. **The verdict is remembered** in `skipped_videos` (migration 0008, one row per subscription
+   and video, removed with the subscription), so each video is judged once. The subscription
+   list shows "skipped: 3" with the newest five (title and reason) in a folding detail. A
+   skipped video is not a job and not a failure: `last_error` stays empty.
+5. **A probe that cannot get an answer:** if YouTube cannot be reached (`network`, bot check)
+   the rest of the poll's probes are not tried and the videos are judged at the next poll;
+   a timeout postpones only that video. Nothing is remembered for them and nothing is queued.
+   Any other failure (private, deleted, members-only, ...) queues the video as before, so the
+   download names the real reason in the job list.
+
+Because the verdict is final, a **premiere is also skipped after it has aired** (it was judged
+when it was announced), and so is a live stream after it has ended. Such a video can be fetched
+by pasting its link in the form: **videos pasted by hand are never filtered.** Global or
+per-subscription switches to allow one of the three kinds are a later step (the default is to
+skip all three). The same rules apply to a channel followed as a podcast (#35) and to "Check now".
 
 ## As a podcast episode, optionally audio only (issue #35)
 
