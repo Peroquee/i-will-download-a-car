@@ -1,486 +1,586 @@
-"""The alert log and the monitor that fills it (issue #38)."""
+"""app/ytp/alerts.py, the watchdog's alerts and status page, and the app's /api/vpn badge."""
 
 from __future__ import annotations
 
 import json
-from collections import namedtuple
-from datetime import UTC, datetime, timedelta
+import logging
+import socket
+import time
+import urllib.request
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from starlette.testclient import TestClient
 
-from ytp import alertlog, jobs, subscriptions
-from ytp.db import Database
-from ytp.monitor import (
-    DISK_ERROR_PERCENT,
-    KEY_JOBS,
-    SILENT_POLLS,
-    AlertMonitor,
-    disk_summary,
-    vpn_condition,
+from tests.helpers.fake_alert_target import FakeAlertTarget
+from tests.helpers.fake_gluetun import API_KEY, FakeGluetun
+from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from ytp import watchdog as wd
+from ytp.alerts import Alert, Alerter
+from ytp.clients.gluetun import GluetunControl
+from ytp.clients.qbittorrent import QbitClient
+from ytp.clients.watchdog import WatchdogStatusClient
+from ytp.config import Settings
+from ytp.main import create_app
+from ytp.watchdog import StatusServer, Watchdog, WatchdogConfig
+
+ENV = {
+    "MEDIA_DIR_MOVIES": "Filme",
+    "MEDIA_DIR_SERIES": "Serien",
+    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
+    "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
+    "MEDIA_DIR_YOUTUBE": "Youtube",
+}
+NOW = Alert(
+    "down",
+    "VPN is down",
+    "Time: 2026-11-01T10:00:00+00:00\nReason: x",
+    "2026-11-01T10:00:00+00:00",
+    True,
 )
-from ytp.scheduler import get_state, set_state
 
-NOW = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
+
+def free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 @pytest.fixture
-def db(tmp_path) -> Database:
-    database = Database.open(tmp_path / "app.db")
-    yield database
-    database.close()
+def target() -> Iterator[FakeAlertTarget]:
+    server = FakeAlertTarget().start()
+    yield server
+    server.stop()
 
 
-class FakeWatchdog:
-    def __init__(self, **status):
-        self.status = {"state": "ok", **status}
-
-    def set(self, **status):
-        self.status = status
-
-    def fetch_status(self):
-        return dict(self.status)
+@pytest.fixture
+def gluetun() -> Iterator[FakeGluetun]:
+    server = FakeGluetun().start()
+    yield server
+    server.stop()
 
 
-Usage = namedtuple("Usage", "total used free")
+@pytest.fixture
+def qbit_server() -> Iterator[FakeQbittorrent]:
+    server = FakeQbittorrent().start()
+    yield server
+    server.stop()
 
 
-def monitor(db, watchdog=None, free_percent=50.0, **kw):
-    usage = {"free": free_percent}
-    m = AlertMonitor(
-        db,
-        watchdog,
-        Path("/data"),
-        now=lambda: NOW,
-        disk_usage=lambda _p: Usage(1000, 1000 - usage["free"] * 10, usage["free"] * 10),
-        **kw,
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class Wall:
+    """A wall clock that moves with the fake monotonic clock."""
+
+    def __init__(self, clock: Clock) -> None:
+        self.clock = clock
+
+    def __call__(self) -> datetime:
+        return datetime(2026, 11, 1, 10, 0, 0, tzinfo=UTC).replace(microsecond=0) + (
+            datetime.fromtimestamp(self.clock.now - 1000.0, UTC) - datetime.fromtimestamp(0, UTC)
+        )
+
+
+# --- the sender ----------------------
+
+
+def test_ntfy_format_is_a_plain_text_post_with_title_priority_and_tags(target):
+    alerter = Alerter(target.url, fmt="ntfy")
+    alerter.notify(NOW)
+    assert target.wait_for(1)
+    (got,) = target.received
+    assert got["path"] == "/vpn-alerts-secret-topic"
+    assert got["body"].decode() == NOW.message
+    assert got["headers"]["title"] == "VPN is down"
+    assert got["headers"]["priority"] == "urgent"
+    assert got["headers"]["tags"] == "rotating_light"
+    assert got["headers"]["content-type"].startswith("text/plain")
+    assert "authorization" not in got["headers"]
+
+
+def test_a_recovery_is_not_urgent(target):
+    Alerter(target.url).notify(Alert("recovered", "VPN is back", "x", "t", urgent=False))
+    assert target.wait_for(1)
+    assert target.received[0]["headers"]["priority"] == "default"
+    assert target.received[0]["headers"]["tags"] == "white_check_mark"
+
+
+def test_webhook_format_is_json(target):
+    Alerter(target.url, fmt="webhook").notify(NOW)
+    assert target.wait_for(1)
+    (body,) = target.json_bodies()
+    assert body == {
+        "event": "down",
+        "title": "VPN is down",
+        "message": NOW.message,
+        "timestamp": NOW.timestamp,
+        "urgent": True,
+    }
+    assert target.received[0]["headers"]["content-type"] == "application/json"
+
+
+def test_the_token_is_sent_as_a_bearer_header(target):
+    Alerter(target.url, token="the-token-value").notify(NOW)
+    assert target.wait_for(1)
+    assert target.received[0]["headers"]["authorization"] == "Bearer the-token-value"
+
+
+def test_non_ascii_titles_cannot_break_the_ntfy_header(target):
+    Alerter(target.url).notify(
+        Alert("x", "VPN ist weg - Größe", "Nachricht mit Umlauten: äöü", "t")
     )
-    m.usage = usage
-    return m
+    assert target.wait_for(1)
+    assert target.received[0]["body"].decode() == "Nachricht mit Umlauten: äöü"
 
 
-def kinds(db):
-    return [a.kind for a in reversed(alertlog.list_alerts(db, limit=100))]
+def test_alerts_arrive_in_order(target):
+    alerter = Alerter(target.url)
+    for n in range(5):
+        alerter.notify(Alert("k", f"title {n}", f"message {n}", "t"))
+    assert target.wait_for(5)
+    assert [r["body"].decode() for r in target.received] == [f"message {n}" for n in range(5)]
 
 
-# --- the log itself -------------------------------------------------------------------------
+def test_notify_does_not_wait_for_a_slow_target(target):
+    target.delay = 1.0
+    alerter = Alerter(target.url)
+    started = time.monotonic()
+    for _ in range(3):
+        alerter.notify(NOW)
+    assert time.monotonic() - started < 0.3
 
 
-def test_an_alert_is_stored_and_listed_newest_first(db):
-    alertlog.add(db, "job_failed", "error", "First", "d1", {"job_id": 1})
-    alertlog.add(db, "disk_low", "warning", "Second", "d2")
-    got = alertlog.list_alerts(db)
-    assert [a.title for a in got] == ["Second", "First"]
-    assert got[1].params == {"job_id": 1}
-    assert got[0].acknowledged is False
-    assert alertlog.unread_count(db) == 2
+def test_a_failing_target_is_retried_then_given_up_without_raising(target, caplog):
+    target.status = 500
+    alerter = Alerter(target.url, retry_pauses=(0.0, 0.0), sleep=lambda s: None)
+    with caplog.at_level(logging.ERROR, logger="ytp.alerts"):
+        alerter.notify(NOW)
+        alerter.close()
+    assert target.attempts == 3
+    assert alerter.dropped == 1
+    assert "giving up" in caplog.text
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("VPN 10.1.2.3 is down", "VPN [address] is down"),
-        ("from 84.150.20.30 to x", "from [address] to x"),
-        ("2003:abcd:1200::1 is the prefix", "[address] is the prefix"),
-        ("full 2a02:1:2:3:4:5:6:7 form", "full [address] form"),
-        ("loopback ::1 too", "loopback [address] too"),
-        ("at 12:30:45 sharp", "at 12:30:45 sharp"),
-        ("ratio 1:2, version 1.2.3", "ratio 1:2, version 1.2.3"),
-    ],
-)
-def test_addresses_are_redacted_and_ordinary_text_is_not(text, expected):
-    assert alertlog.redact(text) == expected
+def test_a_target_that_recovers_gets_the_alert(target):
+    target.fail_first = 2
+    alerter = Alerter(target.url, retry_pauses=(0.0, 0.0, 0.0), sleep=lambda s: None)
+    alerter.notify(NOW)
+    assert target.wait_for(1)
+    alerter.close()
+    assert target.attempts == 3
+    assert alerter.sent == 1
 
 
-def test_no_address_reaches_the_database_from_title_detail_or_params(db):
-    alert = alertlog.add(
-        db,
-        "job_failed",
-        "error",
-        "failed 10.0.0.5",
-        "the host 192.168.178.1 refused",
-        {"reason": "connect to 2003:abcd::1 failed", "n": 3, "ok": True, "none": None},
+def test_an_unreachable_target_never_raises():
+    alerter = Alerter(f"http://127.0.0.1:{free_port()}/topic", retry_pauses=(), timeout=0.5)
+    alerter.notify(NOW)
+    alerter.close(5)
+    assert alerter.dropped == 1
+
+
+@pytest.mark.security
+def test_the_url_path_and_token_never_reach_the_log(target, caplog):
+    alerter = Alerter(
+        target.url, token="bearer-secret-value", retry_pauses=(), sleep=lambda s: None
     )
-    stored = json.dumps(alert.as_dict())
-    for fragment in ("10.0.0.5", "192.168.178.1", "2003:abcd"):
-        assert fragment not in stored
-    assert alert.params["n"] == 3
-    assert alert.params["ok"] is True
-    raw = db.query("SELECT title, detail, params FROM alerts")[0]
-    assert "10.0.0.5" not in "".join(map(str, tuple(raw)))
+    target.status = 500
+    with caplog.at_level(logging.DEBUG):
+        alerter.notify(NOW)
+        alerter.close()
+    target.status = 200
+    ok = Alerter(target.url, token="bearer-secret-value")
+    with caplog.at_level(logging.DEBUG):
+        ok.notify(NOW)
+        ok.close()
+    everything = caplog.text + " ".join(str(r.__dict__) for r in caplog.records)
+    assert "vpn-alerts-secret-topic" not in everything
+    assert "bearer-secret-value" not in everything
+    assert "vpn-alerts-secret-topic" not in repr(alerter)
+    assert {getattr(r, "host", None) for r in caplog.records} >= {"127.0.0.1"}, (
+        "only the host is named"
+    )
 
 
-def test_control_characters_and_long_texts_are_cleaned(db):
-    alert = alertlog.add(db, "x_y", "info", "a\x00b\nc" + "z" * 900, "", {"reason": "q" * 900})
-    assert "\x00" not in alert.title
-    assert "\n" not in alert.title
-    assert len(alert.title) <= alertlog.MAX_TEXT
-    assert len(alert.params["reason"]) <= alertlog.MAX_PARAM
+@pytest.mark.parametrize("url", ["", "ftp://x/y", "ntfy.sh/topic", "http://"])
+def test_a_bad_url_is_refused(url):
+    with pytest.raises(ValueError, match="ALERT_URL"):
+        Alerter(url)
 
 
-def test_bad_kinds_severities_and_param_names_are_refused_or_dropped(db):
-    with pytest.raises(ValueError, match="kind"):
-        alertlog.add(db, "Bad Kind", "info", "t")
-    with pytest.raises(ValueError, match="severity"):
-        alertlog.add(db, "ok_kind", "loud", "t")
-    alert = alertlog.add(db, "ok_kind", "info", "t", params={"Bad Name": 1, "good": 2})
-    assert alert.params == {"good": 2}
+def test_a_bad_format_is_refused(target):
+    with pytest.raises(ValueError, match="ALERT_FORMAT"):
+        Alerter(target.url, fmt="telegram")
 
 
-def test_the_same_key_is_recorded_once(db):
-    assert alertlog.add(db, "job_failed", "error", "t", key="job:1") is not None
-    assert alertlog.add(db, "job_failed", "error", "t", key="job:1") is None
-    assert alertlog.add(db, "job_failed", "error", "t") is not None, "no key: always recorded"
-    assert len(alertlog.list_alerts(db)) == 2
+# --- the watchdog raises them ----------------------
 
 
-def test_acknowledging_marks_read_and_is_idempotent(db):
-    a = alertlog.add(db, "disk_low", "warning", "t")
-    b = alertlog.add(db, "disk_low", "warning", "t")
-    assert alertlog.acknowledge(db, a.id) is True
-    assert alertlog.acknowledge(db, a.id) is True
-    assert alertlog.acknowledge(db, 999) is False
-    assert alertlog.get(db, a.id).acknowledged is True
-    assert alertlog.get(db, b.id).acknowledged is False
-    assert [x.id for x in alertlog.list_alerts(db, unread_only=True)] == [b.id]
-    assert alertlog.acknowledge_all(db) == 1
-    assert alertlog.unread_count(db) == 0
+def make(gluetun, qbit_server, target, **config) -> tuple[Watchdog, Clock, Alerter]:
+    clock = Clock()
+    cfg = WatchdogConfig(
+        control_url=gluetun.url, api_key=API_KEY, qbit_url=qbit_server.url, qbit_password=PASSWORD,
+        threshold=2, **config,
+    )  # fmt: skip
+    alerter = Alerter(target.url, fmt="webhook")
+    dog = Watchdog(
+        GluetunControl(gluetun.url, API_KEY),
+        QbitClient(qbit_server.url, USER, PASSWORD, timeout=2),
+        cfg,
+        clock=clock,
+        alerter=alerter,
+        wall=Wall(clock),
+    )
+    return dog, clock, alerter
 
 
-def test_the_log_is_pruned_by_count_and_by_age(db, monkeypatch):
-    monkeypatch.setattr(alertlog, "MAX_ALERTS", 5)
-    for i in range(8):
-        alertlog.add(db, "disk_low", "warning", f"t{i}")
-    assert [a.title for a in alertlog.list_alerts(db, limit=100)] == [
-        f"t{i}" for i in (7, 6, 5, 4, 3)
+def steps(dog: Watchdog, clock: Clock, count: int) -> None:
+    for _ in range(count):
+        dog.step()
+        clock.now += 1.0
+
+
+def test_down_and_recovery_each_send_one_alert(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    gluetun.status = "stopped"
+    steps(dog, clock, 10)
+    assert target.wait_for(1)
+    gluetun.status = "running"
+    steps(dog, clock, 3)
+    assert target.wait_for(2)
+    time.sleep(0.2)
+    down, back = target.json_bodies()
+    assert (down["event"], down["urgent"]) == ("down", True)
+    assert "Reason: the VPN is not running" in down["message"]
+    assert "All torrents were paused" in down["message"]
+    assert "Time: 2026-11-01T10:00" in down["message"]
+    assert (back["event"], back["urgent"]) == ("recovered", False)
+    assert "running again after" in back["message"]
+    assert "stay paused" in back["message"]
+    assert len(target.received) == 2
+
+
+def test_a_blip_sends_nothing(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    gluetun.status = "stopped"
+    steps(dog, clock, 1)
+    gluetun.status = "running"
+    steps(dog, clock, 5)
+    time.sleep(0.3)
+    assert target.received == []
+
+
+def test_a_long_outage_sends_one_down_alert_not_one_per_second(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    gluetun.status = "stopped"
+    steps(dog, clock, 40)
+    assert target.wait_for(1)
+    time.sleep(0.3)
+    assert len(target.received) == 1
+
+
+def test_a_flap_while_down_does_not_repeat_the_down_alert(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target, resume_after=30)
+    dog.step()
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    gluetun.status = "running"
+    steps(dog, clock, 5)
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    time.sleep(0.3)
+    assert [b["event"] for b in target.json_bodies()] == ["down"]
+
+
+def test_with_auto_resume_the_recovery_alert_comes_after_the_resume(gluetun, qbit_server, target):
+    qbit_server.torrents = [
+        {"hash": "a" * 40, "name": "a", "state": "downloading", "progress": 0.5}
     ]
-    with db.transaction() as conn:
-        conn.execute("UPDATE alerts SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = 4")
-    alertlog.add(db, "disk_low", "warning", "fresh")
-    assert 4 not in [a.id for a in alertlog.list_alerts(db, limit=100)]
+    dog, clock, _ = make(gluetun, qbit_server, target, resume_after=10)
+    dog.step()
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    gluetun.status = "running"
+    steps(dog, clock, 5)
+    assert target.wait_for(1)
+    time.sleep(0.2)
+    assert [b["event"] for b in target.json_bodies()] == ["down"], "not yet stable"
+    steps(dog, clock, 10)
+    assert target.wait_for(2)
+    assert target.json_bodies()[1]["event"] == "recovered"
+    assert "1 torrent(s) were resumed" in target.json_bodies()[1]["message"]
 
 
-# --- the VPN --------------------------------------------------------------------------------
+def test_the_down_alert_says_when_pausing_is_still_pending(gluetun, target):
+    clock = Clock()
+    cfg = WatchdogConfig(api_key=API_KEY, qbit_password=PASSWORD, threshold=1)
+    dog = Watchdog(
+        GluetunControl(gluetun.url, API_KEY),
+        QbitClient(f"http://127.0.0.1:{free_port()}", USER, PASSWORD, timeout=0.3),
+        cfg, clock=clock, alerter=Alerter(target.url, fmt="webhook"), wall=Wall(clock),
+    )  # fmt: skip
+    gluetun.status = "stopped"
+    steps(dog, clock, 2)
+    assert target.wait_for(1)
+    assert "still being tried" in target.json_bodies()[0]["message"]
+
+
+def test_a_blind_watchdog_alerts_once_and_again_when_it_sees(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    good = dog.control
+    dog.control = GluetunControl(gluetun.url, "wrong key")
+    steps(dog, clock, 20)
+    assert target.wait_for(1)
+    dog.control = good
+    steps(dog, clock, 2)
+    assert target.wait_for(2)
+    time.sleep(0.2)
+    blind, sighted = target.json_bodies()
+    assert (blind["event"], blind["urgent"]) == ("blind", True)
+    assert "make watchdog-key" in blind["message"]
+    assert (sighted["event"], sighted["urgent"]) == ("sighted", False)
+
+
+@pytest.mark.security
+def test_messages_hold_no_secrets_and_no_addresses(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    gluetun.status = "stopped"
+    steps(dog, clock, 4)
+    gluetun.status = "running"
+    steps(dog, clock, 3)
+    assert target.wait_for(2)
+    text = json.dumps(target.json_bodies())
+    for secret in (API_KEY, PASSWORD, "vpn-alerts-secret-topic"):
+        assert secret not in text
+    import re
+
+    assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", text), "no IP address in a message"
+
+
+def test_without_an_alerter_nothing_changes(gluetun, qbit_server):
+    clock = Clock()
+    cfg = WatchdogConfig(
+        api_key=API_KEY, qbit_password=PASSWORD, qbit_url=qbit_server.url, threshold=1
+    )
+    dog = Watchdog(
+        GluetunControl(gluetun.url, API_KEY), QbitClient(qbit_server.url, USER, PASSWORD), cfg,
+        clock=clock,
+    )  # fmt: skip
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    assert dog.state == "unhealthy"
+
+
+# --- the snapshot and the status page ----------------------
+
+
+def test_the_snapshot_follows_the_state(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    assert dog.snapshot()["state"] == "starting"
+    steps(dog, clock, 1)
+    snap = dog.snapshot()
+    assert snap["state"] == "ok"
+    assert snap["paused"] is False
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    snap = dog.snapshot()
+    assert (snap["state"], snap["paused"], snap["reason"]) == (
+        "down",
+        True,
+        "the VPN is not running",
+    )
+    assert snap["since"].startswith("2026-11-01T10:00")
+    gluetun.status = "running"
+    steps(dog, clock, 2)
+    assert dog.snapshot()["state"] == "ok"
+    dog.control = GluetunControl(gluetun.url, "wrong")
+    steps(dog, clock, 1)
+    assert dog.snapshot()["state"] == "blind"
+
+
+def fetch(url: str, method: str = "GET"):
+    request = urllib.request.Request(url, method=method, data=b"x" if method != "GET" else None)
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return response.status, json.loads(response.read() or b"null")
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"null")
+
+
+def test_the_status_server_serves_the_snapshot_read_only(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    steps(dog, clock, 1)
+    server = StatusServer(dog, 0)
+    server.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        status, body = fetch(f"{base}/status")
+        assert status == 200
+        assert body["state"] == "ok"
+        assert fetch(f"{base}/other")[0] == 404
+        for method in ("POST", "PUT", "DELETE", "PATCH"):
+            assert fetch(f"{base}/status", method)[0] == 405
+    finally:
+        server.stop()
+
+
+@pytest.mark.security
+def test_the_status_holds_no_secrets_or_addresses(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    text = json.dumps(dog.snapshot())
+    for secret in (API_KEY, PASSWORD, "127.0.0.1", "vpn-alerts-secret-topic"):
+        assert secret not in text
+
+
+# --- the app's side: /api/vpn ----------------------
+
+
+def test_the_status_client_passes_on_only_the_known_fields(gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    steps(dog, clock, 1)
+    server = StatusServer(dog, 0)
+    server.start()
+    try:
+        got = WatchdogStatusClient(f"http://127.0.0.1:{server.port}").fetch_status()
+    finally:
+        server.stop()
+    assert set(got) == {
+        "state", "since", "reason", "paused", "last_poll", "auto_resume",
+        "egress", "egress_checked", "egress_country",
+    }  # fmt: skip
+    assert got["state"] == "ok"
+
+
+def test_an_unreachable_or_odd_watchdog_is_unknown_not_an_error():
+    client = WatchdogStatusClient(f"http://127.0.0.1:{free_port()}", timeout=0.5)
+    assert client.fetch_status()["state"] == "unknown"
+
+
+@pytest.mark.parametrize("body", [b"", b"nope", b"[]", b'{"state": "exploding"}', b'{"state": 7}'])
+def test_an_unreadable_status_is_unknown(body):
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    ).start()
+    try:
+        got = WatchdogStatusClient(f"http://127.0.0.1:{server.server_address[1]}").fetch_status()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert got["state"] == "unknown"
+
+
+def make_app(tmp_path: Path, status_url: str) -> TestClient:
+    config = tmp_path / "config"
+    config.mkdir(exist_ok=True)
+    values = {
+        **ENV,
+        "DATA_ROOT": str(tmp_path),
+        "CONFIG_DIR": str(config),
+        "WATCHDOG_STATUS_URL": status_url,
+    }
+    return TestClient(create_app(Settings.from_env(values)))
+
+
+def test_api_vpn_shows_the_watchdogs_state(tmp_path, gluetun, qbit_server, target):
+    dog, clock, _ = make(gluetun, qbit_server, target)
+    gluetun.status = "stopped"
+    steps(dog, clock, 3)
+    server = StatusServer(dog, 0)
+    server.start()
+    try:
+        with make_app(tmp_path, f"http://127.0.0.1:{server.port}") as client:
+            response = client.get("/api/vpn")
+    finally:
+        server.stop()
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["state"], body["paused"]) == ("down", True)
+
+
+def test_api_vpn_is_unknown_when_the_watchdog_is_away_and_health_does_not_care(tmp_path):
+    with make_app(tmp_path, f"http://127.0.0.1:{free_port()}") as client:
+        response = client.get("/api/vpn")
+        assert response.status_code == 200
+        assert response.json()["state"] == "unknown"
+        assert client.get("/health").status_code == 200
+
+
+def test_api_vpn_only_allows_get(tmp_path):
+    with make_app(tmp_path, f"http://127.0.0.1:{free_port()}") as client:
+        assert client.post("/api/vpn").status_code == 405
+
+
+# --- configuration ----------------------
+
+
+def base_env(**extra: str) -> dict[str, str]:
+    return {"GLUETUN_CONTROL_APIKEY": "k" * 22, "QBIT_PASSWORD": "p" * 12, **extra}
+
+
+def test_alerts_are_off_by_default():
+    cfg = WatchdogConfig.from_env(base_env())
+    assert cfg.alert_url == ""
+    assert cfg.alert_format == "ntfy"
+    assert cfg.status_port == 8090
+
+
+def test_alert_settings_are_read():
+    cfg = WatchdogConfig.from_env(
+        base_env(
+            ALERT_URL="http://ntfy.lan/topic",
+            ALERT_TOKEN="t",
+            ALERT_FORMAT="Webhook",
+            WATCHDOG_STATUS_PORT="0",
+        )
+    )
+    assert (cfg.alert_url, cfg.alert_token, cfg.alert_format, cfg.status_port) == (
+        "http://ntfy.lan/topic", "t", "webhook", 0,
+    )  # fmt: skip
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        ({"state": "ok"}, "ok"),
-        ({"state": "ok", "egress": "mismatch"}, "mismatch"),
-        ({"state": "unknown", "egress": "mismatch"}, "mismatch"),
-        ({"state": "down", "egress": "mismatch"}, "down"),
-        ({"state": "blind"}, "blind"),
-        ({"state": "starting"}, "starting"),
-        ({"state": "weird"}, "unknown"),
-        ({}, "unknown"),
-    ],
+    "env", [{"ALERT_FORMAT": "sms"}, {"ALERT_URL": "ntfy.sh/topic"}, {"ALERT_URL": "ftp://x/y"}]
 )
-def test_the_condition_follows_the_vpn_bar(status, expected):
-    assert vpn_condition(status) == expected
+def test_bad_alert_settings_are_reported_without_showing_the_url(env):
+    with pytest.raises(wd.ConfigError) as caught:
+        WatchdogConfig.from_env(base_env(**env))
+    assert "ALERT_" in str(caught.value)
+    assert env.get("ALERT_URL", "zzz") not in str(caught.value)
 
 
-def history(db):
-    return [(e["condition"], e["paused"]) for e in reversed(alertlog.vpn_history(db))]
+@pytest.mark.security
+def test_alert_secrets_are_not_in_the_config_repr():
+    cfg = WatchdogConfig(alert_url="http://x/secret-topic", alert_token="secret-token")
+    assert "secret-topic" not in repr(cfg)
+    assert "secret-token" not in repr(cfg)
 
 
-def test_a_working_vpn_writes_a_history_row_but_no_alert(db):
-    m = monitor(db, FakeWatchdog())
-    m.run_once()
-    m.run_once()
-    assert history(db) == [("ok", False)]
-    assert kinds(db) == []
-
-
-def test_down_alerts_once_and_recovery_alerts_once(db):
-    dog = FakeWatchdog()
-    m = monitor(db, dog)
-    m.run_once()
-    dog.set(state="down", paused=True, reason="gluetun stopped")
-    m.run_once()
-    m.run_once()
-    dog.set(state="ok")
-    m.run_once()
-    m.run_once()
-    assert kinds(db) == ["vpn_down", "vpn_recovered"]
-    assert history(db) == [("ok", False), ("down", True), ("ok", False)]
-    down = alertlog.list_alerts(db)[1]
-    assert down.severity == "error"
-    assert down.params == {"paused": True}
-
-
-def test_the_other_bad_conditions_have_their_own_alerts(db):
-    dog = FakeWatchdog()
-    m = monitor(db, dog)
-    m.run_once()
-    for status, kind in (
-        ({"state": "blind"}, "vpn_blind"),
-        ({"state": "ok", "egress": "mismatch"}, "egress_mismatch"),
-    ):
-        dog.set(**status)
-        m.run_once()
-        assert kinds(db)[-1] == kind
-
-
-def test_starting_never_alerts_and_does_not_count_as_recovery(db):
-    dog = FakeWatchdog()
-    m = monitor(db, dog)
-    m.run_once()
-    dog.set(state="starting")
-    m.run_once()
-    dog.set(state="ok")
-    m.run_once()
-    assert kinds(db) == []
-    assert history(db) == [("ok", False), ("starting", False), ("ok", False)]
-
-
-def test_a_silent_watchdog_alerts_only_after_several_polls_and_recovery_follows(db):
-    dog = FakeWatchdog()
-    m = monitor(db, dog)
-    m.run_once()
-    dog.set(state="unknown")
-    for _ in range(SILENT_POLLS - 1):
-        m.run_once()
-    assert kinds(db) == []
-    m.run_once()
-    assert kinds(db) == ["watchdog_silent"]
-    dog.set(state="ok")
-    m.run_once()
-    assert kinds(db) == ["watchdog_silent", "vpn_recovered"]
-
-
-def test_one_missed_poll_in_between_is_forgotten(db):
-    dog = FakeWatchdog()
-    m = monitor(db, dog)
-    m.run_once()
-    dog.set(state="unknown")
-    m.run_once()
-    dog.set(state="ok")
-    m.run_once()
-    dog.set(state="unknown")
-    for _ in range(SILENT_POLLS - 1):
-        m.run_once()
-    assert kinds(db) == [], "the streak starts again after an answer"
-
-
-def test_a_restart_of_the_app_does_not_repeat_the_alert(db):
-    dog = FakeWatchdog(state="down", paused=True)
-    monitor(db, dog).run_once()
-    monitor(db, dog).run_once()  # a new process, the same state
-    assert kinds(db) == ["vpn_down"]
-
-
-def test_a_down_vpn_at_the_first_look_is_announced(db):
-    monitor(db, FakeWatchdog(state="down")).run_once()
-    assert kinds(db) == ["vpn_down"]
-
-
-def test_pausing_while_down_is_history_not_a_second_alert(db):
-    dog = FakeWatchdog(state="down", paused=False)
-    m = monitor(db, dog)
-    m.run_once()
-    dog.set(state="down", paused=True)
-    m.run_once()
-    assert kinds(db) == ["vpn_down"]
-    assert history(db) == [("down", False), ("down", True)]
-
-
-def test_without_a_watchdog_nothing_happens(db):
-    monitor(db, None).run_once()
-    assert kinds(db) == []
-
-
-def test_vpn_texts_hold_no_address_even_if_the_watchdog_sends_one(db):
-    monitor(db, FakeWatchdog(state="down", reason="lost 84.150.20.30 and 2003:abcd::1")).run_once()
-    event = alertlog.vpn_history(db)[0]
-    assert "84.150" not in event["reason"]
-    assert "2003" not in event["reason"]
-
-
-# --- failed jobs ----------------------------------------------------------------------------
-
-
-def fail_job(
-    db,
-    external_id,
-    reason,
-    when,
-    job_type="magnet",
-    metadata='{"type": "movies", "title": "X", "year": 2000}',
-):
-    job, _ = jobs.submit_job(db, job_type, external_id, metadata, "magnet:?xt=urn:btih:secret")
-    with db.transaction() as conn:
-        conn.execute(
-            "UPDATE jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
-            (reason, when, job.id),
-        )
-    return job
-
-
-def stamp(delta_minutes: float) -> str:
-    return (NOW + timedelta(minutes=delta_minutes)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-
-def test_the_first_look_does_not_announce_old_failures(db):
-    fail_job(db, "a" * 40, "old", stamp(-600))
-    m = monitor(db)
-    m.run_once()
-    assert kinds(db) == []
-    assert get_state(db, KEY_JOBS) is not None
-
-
-def test_a_job_that_fails_later_is_announced_once_without_its_magnet_link(db):
-    m = monitor(db)
-    m.run_once()
-    job = fail_job(db, "a" * 40, "no sources for 7 days: x", stamp(5))
-    m.run_once()
-    m.run_once()
-    assert kinds(db) == ["job_failed"]
-    alert = alertlog.list_alerts(db)[0]
-    assert alert.params["job_id"] == job.id
-    assert alert.params["reason"] == "no sources for 7 days: x"
-    assert "X (2000)" in alert.params["label"]
-    assert "secret" not in json.dumps(alert.as_dict())
-
-
-def test_a_retried_job_that_fails_again_is_announced_again(db):
-    m = monitor(db)
-    m.run_once()
-    job = fail_job(db, "a" * 40, "first", stamp(5))
-    m.run_once()
-    with db.transaction() as conn:
-        conn.execute(
-            "UPDATE jobs SET status = 'failed', error = 'second', updated_at = ? WHERE id = ?",
-            (stamp(30), job.id),
-        )
-    m.run_once()
-    assert kinds(db) == ["job_failed", "job_failed"]
-
-
-def test_youtube_and_podcast_failures_are_announced_too(db):
-    m = monitor(db)
-    m.run_once()
-    fail_job(
-        db,
-        "vid",
-        "video is private",
-        stamp(1),
-        "youtube",
-        '{"type": "youtube", "video_id": "vid", "channel": "C", "title": "T"}',
-    )
-    m.run_once()
-    assert alertlog.list_alerts(db)[0].params["label"] == "C - T"
-
-
-# --- feeds ----------------------------------------------------------------------------------
-
-
-def sub_with_error(db, error, name="Blender", channel="UC" + "a" * 22):
-    sub, _ = subscriptions.add(db, channel, name)
-    with db.transaction() as conn:
-        conn.execute("UPDATE subscriptions SET last_error = ? WHERE id = ?", (error, sub.id))
-    return sub
-
-
-def test_a_feed_error_is_announced_once_while_it_stays_the_same(db):
-    sub_with_error(db, "the feed could not be fetched (is the VPN up?)")
-    m = monitor(db)
-    m.run_once()
-    m.run_once()
-    monitor(db).run_once()  # even after a restart
-    assert kinds(db) == ["feed_error"]
-    alert = alertlog.list_alerts(db)[0]
-    assert alert.params["name"] == "Blender"
-    assert alert.severity == "warning"
-
-
-def test_a_different_error_or_a_new_error_after_recovery_is_announced_again(db):
-    sub = sub_with_error(db, "first problem")
-    m = monitor(db)
-    m.run_once()
-    with db.transaction() as conn:
-        conn.execute(
-            "UPDATE subscriptions SET last_error = 'second problem' WHERE id = ?", (sub.id,)
-        )
-    m.run_once()
-    with db.transaction() as conn:
-        conn.execute("UPDATE subscriptions SET last_error = NULL WHERE id = ?", (sub.id,))
-    m.run_once()
-    with db.transaction() as conn:
-        conn.execute(
-            "UPDATE subscriptions SET last_error = 'second problem' WHERE id = ?", (sub.id,)
-        )
-    m.run_once()
-    assert kinds(db) == ["feed_error"] * 3
-
-
-def test_podcast_feed_errors_are_announced_with_the_podcast_name(db):
-    with db.transaction() as conn:
-        conn.execute(
-            "INSERT INTO podcast_subscriptions (feed_url, title, last_error) VALUES (?, ?, ?)",
-            ("https://example.org/feed.xml", "My Show", "the feed is not valid XML"),
-        )
-    monitor(db).run_once()
-    alert = alertlog.list_alerts(db)[0]
-    assert (alert.kind, alert.params["name"], alert.params["source"]) == (
-        "feed_error",
-        "My Show",
-        "podcast",
-    )
-
-
-# --- disk space -----------------------------------------------------------------------------
-
-
-def test_disk_space_alerts_on_crossing_not_on_every_run(db):
-    m = monitor(db, free_percent=50)
-    m.run_once()
-    assert kinds(db) == []
-    m.usage["free"] = 9
-    m.run_once()
-    m.run_once()
-    assert kinds(db) == ["disk_low"]
-    assert alertlog.list_alerts(db)[0].severity == "warning"
-    m.usage["free"] = DISK_ERROR_PERCENT - 1
-    m.run_once()
-    assert alertlog.list_alerts(db)[0].severity == "error"
-    m.usage["free"] = 8  # better, but still low: no new alert
-    m.run_once()
-    assert kinds(db) == ["disk_low", "disk_low"]
-    m.usage["free"] = 60
-    m.run_once()
-    m.usage["free"] = 4
-    m.run_once()
-    assert kinds(db) == ["disk_low"] * 3
-
-
-def test_an_unreadable_drive_is_not_an_alert_and_does_not_stop_the_other_checks(db):
-    def broken(_path):
-        raise OSError("not mounted")
-
-    m = AlertMonitor(
-        db, FakeWatchdog(state="down"), Path("/data"), now=lambda: NOW, disk_usage=broken
-    )
-    m.run_once()
-    assert kinds(db) == ["vpn_down"]
-    assert disk_summary(Path("/data"), broken) is None
-
-
-def test_the_disk_summary_has_percent_and_gigabytes():
-    summary = disk_summary(Path("/x"), lambda _p: Usage(2_000_000_000_000, 0, 500_000_000_000))
-    assert summary == {"free_percent": 25, "free_gb": 500, "total_gb": 2000}
-
-
-def test_a_failing_check_does_not_hide_the_others(db, caplog):
-    m = monitor(db, FakeWatchdog(state="down"))
-    m.check_jobs = lambda: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
-    m.run_once()
-    assert kinds(db) == ["vpn_down"]
-    assert any("alert check failed" in r.getMessage() for r in caplog.records)
-
-
-def test_state_is_kept_in_app_state_so_it_survives_a_restart(db):
-    set_state(db, "alerts.disk", "error")
-    m = monitor(db, free_percent=2)
-    m.run_once()
-    assert kinds(db) == [], "the low disk was announced before the restart"
+def test_the_app_setting_for_the_status_url():
+    s = Settings.from_env({**ENV, "WATCHDOG_STATUS_URL": "http://dog:9000/"})
+    assert s.watchdog_status_url == "http://dog:9000"
+    with pytest.raises(Exception, match="WATCHDOG_STATUS_URL"):
+        Settings.from_env({**ENV, "WATCHDOG_STATUS_URL": "https://dog"})
