@@ -19,6 +19,7 @@ html, body {
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
 }
+[hidden] { display: none !important; }
 .vpn-bar {
   position: sticky;
   top: 0;
@@ -239,4 +240,60 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   .actions { justify-content: stretch; }
   .actions button { flex: 1; }
   .logo { width: 44px; height: 44px; }
+}
+
+/* The alert strip under the VPN bar and the dashboard (#38). */
+.alert-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 8px 16px;
+  font-size: 13px;
+  background: #121c27;
+  border-bottom: 1px solid var(--line);
+}
+.alert-strip-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.alert-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--gold);
+  border-radius: 8px;
+  background: var(--gold-soft);
+}
+.alert-chip.alert-error, .alert-item.alert-error { border-left-color: var(--bad); }
+.alert-chip.alert-info, .alert-item.alert-info { border-left-color: var(--good); }
+.alert-link { color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.alert-link:hover, .alert-more:hover { text-decoration: underline; }
+.alert-when { color: var(--muted); white-space: nowrap; }
+.alert-dismiss { min-height: 44px; min-width: 44px; padding: 0 10px; }
+.alert-strip-tools { display: flex; align-items: center; gap: 12px; }
+.alert-more { color: var(--muted); }
+.dashboard { margin-top: 8px; }
+.dash-vpn-now { margin: 0 0 6px; font-weight: 600; }
+.dash-vpn-now.vpn-ok { color: var(--good); }
+.dash-vpn-now.vpn-down, .dash-vpn-now.vpn-mismatch, .dash-vpn-now.vpn-blind { color: var(--bad); }
+.dash-events { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.dash-event { overflow-wrap: anywhere; }
+.alert-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--gold);
+  border-radius: 10px;
+}
+.alert-unread { background: var(--gold-soft); }
+.alert-target { outline: 2px solid var(--gold); }
+.alert-title { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.alert-part { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.alert-item button { justify-self: start; }
+@media (max-width: 520px) {
+  .alert-strip { padding: 8px 12px; }
+  .alert-chip { width: 100%; }
 }

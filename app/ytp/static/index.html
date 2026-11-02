@@ -13,6 +13,13 @@
   <span class="vpn-dot" aria-hidden="true"></span>
   <span class="vpn-main"><strong id="vpn-text" data-i18n="vpn.unknown"></strong><span id="vpn-detail" class="vpn-detail"></span></span>
 </div>
+<nav id="alert-strip" class="alert-strip" aria-label="Alerts" data-i18n-label="alert.strip_label" hidden>
+  <ul id="alert-strip-list" class="alert-strip-list"></ul>
+  <div class="alert-strip-tools">
+    <a id="alert-strip-more" class="alert-more" href="/dashboard#alerts"></a>
+    <button type="button" id="alert-strip-ack" class="ghost small" data-i18n="alert.ack_all" hidden></button>
+  </div>
+</nav>
 <div class="wrap">
   <main class="card" aria-labelledby="title">
     <header class="header">
@@ -33,15 +40,17 @@
       </div>
       <div class="titles">
         <h1 id="title" class="title">youtube-premium</h1>
-        <p class="subtitle" data-i18n="subtitle"></p>
+        <p class="subtitle" data-view="input" data-i18n="subtitle"></p>
+        <p class="subtitle" data-view="dashboard" data-i18n="dash.subtitle" hidden></p>
       </div>
       <div class="tools">
+        <a id="nav-link" class="howto-button" href="/dashboard"></a>
         <button type="button" id="howto-open" class="howto-button" aria-haspopup="dialog" data-i18n="howto.button"></button>
         <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
       </div>
     </header>
 
-    <form id="form" autocomplete="off" novalidate>
+    <form id="form" data-view="input" autocomplete="off" novalidate>
       <div class="row">
         <label class="field" for="link" data-i18n="link.label"></label>
         <input id="link" name="link" type="text" inputmode="url" spellcheck="false"
@@ -214,7 +223,7 @@
       <p id="result" class="result" role="status" aria-live="polite"></p>
     </form>
 
-    <section class="jobs" aria-labelledby="jobs-title">
+    <section class="jobs" data-view="input" aria-labelledby="jobs-title">
       <div class="jobs-head">
         <h2 id="jobs-title" class="jobs-title" data-i18n="jobs.title"></h2>
         <button type="button" id="jobs-filter" class="ghost small" aria-pressed="false" hidden></button>
@@ -225,7 +234,7 @@
       <p id="jobs-empty" class="note" data-i18n="jobs.empty" hidden></p>
     </section>
 
-    <section class="subs" aria-labelledby="subs-title">
+    <section class="subs" data-view="input" aria-labelledby="subs-title">
       <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
       <form id="subs-form" autocomplete="off" novalidate>
         <div class="row">
@@ -261,7 +270,41 @@
       <p id="subs-empty" class="note" data-i18n="subs.empty" hidden></p>
     </section>
 
-    <details class="help">
+    <section id="dashboard" class="dashboard" data-view="dashboard" hidden>
+      <p id="dash-error" class="error" role="status"></p>
+
+      <section class="jobs" aria-labelledby="dash-active-title">
+        <h2 id="dash-active-title" class="jobs-title" data-i18n="dash.active"></h2>
+        <ul id="dash-active-list" class="job-list"></ul>
+        <p id="dash-active-empty" class="note" data-i18n="dash.active_empty" hidden></p>
+      </section>
+
+      <section class="jobs" aria-labelledby="dash-recent-title">
+        <h2 id="dash-recent-title" class="jobs-title" data-i18n="dash.recent"></h2>
+        <ul id="dash-recent-list" class="job-list"></ul>
+        <p id="dash-recent-empty" class="note" data-i18n="dash.recent_empty" hidden></p>
+      </section>
+
+      <section class="jobs" aria-labelledby="dash-vpn-title">
+        <h2 id="dash-vpn-title" class="jobs-title" data-i18n="dash.vpn"></h2>
+        <p id="dash-vpn-now" class="dash-vpn-now"></p>
+        <p id="dash-disk" class="note"></p>
+        <ul id="dash-vpn-list" class="dash-events"></ul>
+        <p id="dash-vpn-empty" class="note" data-i18n="dash.vpn_empty" hidden></p>
+      </section>
+
+      <section id="alerts" class="jobs" aria-labelledby="dash-alerts-title">
+        <div class="jobs-head">
+          <h2 id="dash-alerts-title" class="jobs-title" data-i18n="dash.alerts"></h2>
+          <button type="button" id="dash-alerts-ack" class="ghost small" data-i18n="alert.ack_all" hidden></button>
+        </div>
+        <p id="dash-alerts-error" class="error" role="status"></p>
+        <ul id="dash-alerts-list" class="job-list"></ul>
+        <p id="dash-alerts-empty" class="note" data-i18n="alert.empty" hidden></p>
+      </section>
+    </section>
+
+    <details class="help" data-view="input">
       <summary data-i18n="help.title"></summary>
       <p data-i18n="help.body"></p>
     </details>
@@ -527,6 +570,72 @@
     "subs.skip.premiere": "Premiere",
     "subs.skip.short": "Short (Kurzvideo)",
     "subs.skipped_more": "und {n} weitere",
+    "nav.dashboard": "Übersicht",
+    "nav.input": "Eingabe",
+    "dash.subtitle": "Was gerade läuft, was schiefging und wie es dem VPN geht",
+    "dash.active": "Läuft und wartet",
+    "dash.active_empty": "Gerade läuft und wartet nichts.",
+    "dash.recent": "Zuletzt fertig oder fehlgeschlagen",
+    "dash.recent_empty": "Noch nichts abgeschlossen.",
+    "dash.vpn": "VPN und Wächter",
+    "dash.vpn_empty": "Noch keine Wechsel aufgezeichnet.",
+    "dash.since": "seit {when}",
+    "dash.paused": "Torrents angehalten",
+    "dash.disk": "Speicher: {percent} % frei ({free} von {total})",
+    "dash.disk_unknown": "Der freie Speicher ist unbekannt.",
+    "dash.alerts": "Meldungen",
+    "dash.load_error": "Die Übersicht lässt sich gerade nicht laden.",
+    "dash.size": "{done} von {total}",
+    "dash.eta": "noch {eta}",
+    "dash.waiting": "wartet",
+    "dash.starting": "startet …",
+    "alert.strip_label": "Meldungen",
+    "alert.dismiss": "Meldung ausblenden",
+    "alert.ack": "Als gelesen markieren",
+    "alert.ack_all": "Alle als gelesen",
+    "alert.all": "Alle Meldungen",
+    "alert.more": "{n} weitere Meldungen",
+    "alert.empty": "Keine Meldungen.",
+    "alert.unread": "ungelesen",
+    "alert.load_error": "Die Meldungen lassen sich gerade nicht laden.",
+    "alert.sev.info": "Hinweis",
+    "alert.sev.warning": "Warnung",
+    "alert.sev.error": "Fehler",
+    "alert.label_what": "Was passiert ist:",
+    "alert.label_did": "Was die App getan hat:",
+    "alert.label_todo": "Was du tun kannst:",
+    "alert.vpn_down.title": "Das VPN ist ausgefallen",
+    "alert.vpn_down.what": "Die Verbindung zum VPN ist unterbrochen.",
+    "alert.vpn_down.did": "Der Wächter hält alle Torrents an, sobald er den Ausfall bestätigt hat, damit nichts über deinen Heimanschluss läuft.",
+    "alert.vpn_down.todo": "Meist reicht Warten. Wenn das VPN zurück ist, bleiben die Torrents angehalten, bis du sie in qBittorrent fortsetzt (oder WATCHDOG_RESUME_AFTER gesetzt ist). Bleibt es aus: VPN-Zugang und den VPN-Container prüfen.",
+    "alert.vpn_blind.title": "Der Wächter sieht das VPN nicht",
+    "alert.vpn_blind.what": "Der Wächter kann den VPN-Status nicht lesen. Niemand kann sagen, ob die Downloads geschützt sind.",
+    "alert.vpn_blind.did": "Der Wächter hat nichts angehalten (ohne Sicht ist das kein Beweis für einen Ausfall) und meldet den Zustand rot.",
+    "alert.vpn_blind.todo": "Den Schlüssel des Wächters erneuern (make watchdog-key) und den VPN-Container prüfen, siehe docs/watchdog.md.",
+    "alert.egress_mismatch.title": "Der Datenverkehr läuft vielleicht nicht über das VPN",
+    "alert.egress_mismatch.what": "Die Prüfung der öffentlichen Adresse hat ergeben, dass der Datenverkehr nicht aus dem VPN kommt.",
+    "alert.egress_mismatch.did": "Alle Torrents wurden angehalten und bleiben angehalten, auch wenn die nächste Prüfung wieder besteht.",
+    "alert.egress_mismatch.todo": "Erst prüfen, warum (VPN-Server, Zugang, Einstellungen), dann die Torrents in qBittorrent bewusst wieder starten.",
+    "alert.watchdog_silent.title": "Der VPN-Wächter antwortet nicht",
+    "alert.watchdog_silent.what": "Die App erreicht den VPN-Wächter nicht, deshalb ist der VPN-Zustand unbekannt.",
+    "alert.watchdog_silent.did": "Die App zeigt den Zustand grau als „unbekannt“ und beobachtet weiter.",
+    "alert.watchdog_silent.todo": "Prüfen, ob der Container „watchdog“ läuft (docker compose ps) und ihn bei Bedarf neu starten.",
+    "alert.vpn_recovered.title": "Das VPN funktioniert wieder",
+    "alert.vpn_recovered.what": "Das VPN ist zurück, nachdem es gestört war.",
+    "alert.vpn_recovered.did": "Die App hat nur aufgezeichnet, dass es wieder läuft. Vom Wächter angehaltene Torrents bleiben angehalten, solange WATCHDOG_RESUME_AFTER nicht gesetzt ist.",
+    "alert.vpn_recovered.todo": "Falls Downloads stehen: Torrents in qBittorrent fortsetzen.",
+    "alert.job_failed.title": "Download fehlgeschlagen: {label}",
+    "alert.job_failed.what": "„{label}“ (Auftrag #{job_id}) ist fehlgeschlagen. Grund: {reason}",
+    "alert.job_failed.did": "Der Auftrag ist als fehlgeschlagen markiert. Dateien, die schon in der Bibliothek liegen, bleiben unberührt.",
+    "alert.job_failed.todo": "Die Ursache beheben und dann beim Auftrag „Nochmal versuchen“ drücken (hier im Dashboard oder in der Liste auf der Eingabeseite).",
+    "alert.feed_error.title": "Problem mit dem Feed: {name}",
+    "alert.feed_error.what": "„{name}“ konnte nicht geprüft werden: {reason}",
+    "alert.feed_error.did": "Die App versucht es nach kurzer Zeit erneut. Es gehen keine neuen Folgen oder Videos verloren, sie werden beim nächsten erfolgreichen Prüfen nachgeholt, solange sie noch im Feed stehen.",
+    "alert.feed_error.todo": "Meist ist es ein vorübergehendes Problem (VPN, Server der Seite). Bleibt der Fehler, in der Abo-Liste „Jetzt prüfen“ drücken oder das Abo entfernen und neu anlegen.",
+    "alert.disk_low.title": "Der Speicher ist fast voll",
+    "alert.disk_low.what": "Auf der Medien-Platte sind nur noch {free_percent} % frei (etwa {free_gb} GB).",
+    "alert.disk_low.did": "Die App hat nur gewarnt. Neue Downloads schlagen fehl, wenn die Platte voll ist.",
+    "alert.disk_low.todo": "Platz schaffen (alte Downloads oder Medien löschen) oder die Platte vergrößern.",
     "subs.never": "noch nie geprüft",
     "subs.checked": "geprüft {when}",
     "subs.ok": "in Ordnung",
@@ -747,6 +856,72 @@
     "subs.skip.premiere": "premiere",
     "subs.skip.short": "Short",
     "subs.skipped_more": "and {n} more",
+    "nav.dashboard": "Dashboard",
+    "nav.input": "Input form",
+    "dash.subtitle": "What is running, what went wrong and how the VPN is doing",
+    "dash.active": "Running and waiting",
+    "dash.active_empty": "Nothing is running or waiting right now.",
+    "dash.recent": "Recently finished or failed",
+    "dash.recent_empty": "Nothing has finished yet.",
+    "dash.vpn": "VPN and watchdog",
+    "dash.vpn_empty": "No changes recorded yet.",
+    "dash.since": "since {when}",
+    "dash.paused": "torrents paused",
+    "dash.disk": "Storage: {percent} % free ({free} of {total})",
+    "dash.disk_unknown": "The free storage is unknown.",
+    "dash.alerts": "Alerts",
+    "dash.load_error": "The dashboard cannot be loaded right now.",
+    "dash.size": "{done} of {total}",
+    "dash.eta": "{eta} left",
+    "dash.waiting": "waiting",
+    "dash.starting": "starting …",
+    "alert.strip_label": "Alerts",
+    "alert.dismiss": "Dismiss alert",
+    "alert.ack": "Mark as read",
+    "alert.ack_all": "Mark all as read",
+    "alert.all": "All alerts",
+    "alert.more": "{n} more alerts",
+    "alert.empty": "No alerts.",
+    "alert.unread": "unread",
+    "alert.load_error": "The alerts cannot be loaded right now.",
+    "alert.sev.info": "Notice",
+    "alert.sev.warning": "Warning",
+    "alert.sev.error": "Error",
+    "alert.label_what": "What happened:",
+    "alert.label_did": "What the app did:",
+    "alert.label_todo": "What you can do:",
+    "alert.vpn_down.title": "The VPN is down",
+    "alert.vpn_down.what": "The connection to the VPN is broken.",
+    "alert.vpn_down.did": "The watchdog pauses all torrents once it has confirmed the outage, so nothing goes out through your home connection.",
+    "alert.vpn_down.todo": "Waiting is usually enough. When the VPN is back the torrents stay paused until you resume them in qBittorrent (or WATCHDOG_RESUME_AFTER is set). If it stays down, check the VPN account and the VPN container.",
+    "alert.vpn_blind.title": "The watchdog cannot see the VPN",
+    "alert.vpn_blind.what": "The watchdog cannot read the VPN status. Nobody can say whether the downloads are protected.",
+    "alert.vpn_blind.did": "The watchdog did not pause anything (not seeing is no proof of an outage) and reports the state in red.",
+    "alert.vpn_blind.todo": "Renew the watchdog's key (make watchdog-key) and check the VPN container, see docs/watchdog.md.",
+    "alert.egress_mismatch.title": "Traffic may not be going through the VPN",
+    "alert.egress_mismatch.what": "The check of the public address found that the traffic does not come out of the VPN.",
+    "alert.egress_mismatch.did": "All torrents were paused and stay paused, even if the next check passes.",
+    "alert.egress_mismatch.todo": "First find out why (VPN server, account, settings), then start the torrents again in qBittorrent on purpose.",
+    "alert.watchdog_silent.title": "The VPN watchdog does not answer",
+    "alert.watchdog_silent.what": "The app cannot reach the VPN watchdog, so the VPN state is unknown.",
+    "alert.watchdog_silent.did": "The app shows the state in grey as “unknown” and keeps watching.",
+    "alert.watchdog_silent.todo": "Check that the “watchdog” container is running (docker compose ps) and restart it if needed.",
+    "alert.vpn_recovered.title": "The VPN is working again",
+    "alert.vpn_recovered.what": "The VPN is back after a problem.",
+    "alert.vpn_recovered.did": "The app only recorded that it runs again. Torrents the watchdog paused stay paused unless WATCHDOG_RESUME_AFTER is set.",
+    "alert.vpn_recovered.todo": "If downloads are standing still, resume the torrents in qBittorrent.",
+    "alert.job_failed.title": "Download failed: {label}",
+    "alert.job_failed.what": "“{label}” (job #{job_id}) failed. Reason: {reason}",
+    "alert.job_failed.did": "The job is marked as failed. Files that are already in the library are not touched.",
+    "alert.job_failed.todo": "Fix the cause, then press “Try again” on the job (here on the dashboard or in the list on the input page).",
+    "alert.feed_error.title": "Feed problem: {name}",
+    "alert.feed_error.what": "“{name}” could not be checked: {reason}",
+    "alert.feed_error.did": "The app tries again after a short while. Nothing is lost: new episodes or videos are picked up by the next successful check as long as they are still in the feed.",
+    "alert.feed_error.todo": "Usually a temporary problem (VPN, the site's server). If it stays, press “Check now” in the subscription list or remove the subscription and add it again.",
+    "alert.disk_low.title": "The storage is almost full",
+    "alert.disk_low.what": "Only {free_percent} % of the media drive is free (about {free_gb} GB).",
+    "alert.disk_low.did": "The app only warned. New downloads fail when the drive is full.",
+    "alert.disk_low.todo": "Free some space (delete old downloads or media) or enlarge the drive.",
     "subs.never": "never checked",
     "subs.checked": "checked {when}",
     "subs.ok": "fine",
@@ -798,6 +973,7 @@
 }
 </script>
 <script src="/static/logic.js"></script>
+<script src="/static/dashboard.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

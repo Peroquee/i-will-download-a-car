@@ -181,6 +181,9 @@ not answer. `/health` does not depend on it.
 | `blind` | red: the watchdog cannot read the VPN status, nothing is protecting |
 | `starting` / `unknown` | grey |
 
+The app polls this status every 15 seconds and records every change as an alert and in the VPN
+history of the dashboard ([dashboard.md](dashboard.md)); the watchdog itself is unchanged.
+
 ## The container
 
 Same image as the app, started with `python -m ytp.watchdog` (standard library plus our two
