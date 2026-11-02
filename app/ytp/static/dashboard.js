@@ -186,6 +186,8 @@
       var text = t("vpn." + info.view);
       if (info.since) text += " · " + t("dash.since", { when: ctx.timeText(info.since) || info.since });
       now.textContent = text;
+      var explain = "vpn.d." + info.view;
+      $("dash-vpn-explain").textContent = info.view === "ok" ? t("dash.vpn_explain_ok") : has(explain) ? t(explain) : "";
       var list = $("dash-vpn-list");
       list.textContent = "";
       vpn.history.forEach(function (event) {
@@ -224,6 +226,7 @@
       dashData.recent.forEach(function (job) { recent.appendChild(recentRow(job)); });
       $("dash-recent-empty").hidden = dashData.recent.length > 0;
       renderVpn(dashData.vpn);
+      focusVpn();
       renderDeploy(dashData.deploy);
       var disk = dashData.disk;
       $("dash-disk").textContent = disk
@@ -296,11 +299,26 @@
 
     /* ------------------------------------------------------------ the page */
 
+    function setCurrent(node, on) {
+      if (on) node.setAttribute("aria-current", "page");
+      else node.removeAttribute("aria-current");
+    }
+
+    /* The tab of the page you are on (the subscriptions are a part of the input page). */
     function renderNav() {
-      var nav = $("nav-link");
       var onDashboard = view === "dashboard";
-      nav.href = onDashboard ? "/" : "/dashboard";
-      nav.textContent = t(onDashboard ? "nav.input" : "nav.dashboard");
+      var subs = !onDashboard && root.location.hash === "#subscriptions";
+      setCurrent($("nav-input"), !onDashboard && !subs);
+      setCurrent($("nav-dashboard"), onDashboard);
+      setCurrent($("nav-subs"), subs);
+    }
+
+    /* The VPN bar links to /dashboard#vpn: bring that part into view and frame it. */
+    function focusVpn() {
+      if (view !== "dashboard" || root.location.hash !== "#vpn") return;
+      var section = $("dash-vpn");
+      section.classList.add("alert-target");
+      section.scrollIntoView({ block: "start" });
     }
 
     function applyView() {
@@ -322,10 +340,17 @@
     function start() {
       $("alert-strip-ack").addEventListener("click", acknowledgeAll);
       $("dash-alerts-ack").addEventListener("click", acknowledgeAll);
-      root.addEventListener("hashchange", function () { focused = null; renderAlertLog(); });
+      root.addEventListener("hashchange", function () {
+        focused = null;
+        renderNav();
+        $("dash-vpn").classList.remove("alert-target");
+        focusVpn();
+        renderAlertLog();
+      });
       applyView();
       refreshAlerts();
       if (view !== "dashboard") return;
+      focusVpn();
       refreshDashboard();
       timer = root.setInterval(function () {
         if (document.visibilityState !== "hidden") refreshDashboard();

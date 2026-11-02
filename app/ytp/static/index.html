@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="ytp-static-version" content="__STATIC_VERSION__">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>youtube-premium</title>
@@ -10,8 +11,15 @@
 </head>
 <body>
 <div id="vpn" class="vpn-bar vpn-unknown" role="status">
-  <span class="vpn-dot" aria-hidden="true"></span>
-  <span class="vpn-main"><strong id="vpn-text" data-i18n="vpn.unknown"></strong><span id="vpn-detail" class="vpn-detail"></span></span>
+  <a id="vpn-link" class="vpn-link" href="/dashboard#vpn">
+    <span class="vpn-dot" aria-hidden="true"></span>
+    <span class="vpn-main"><strong id="vpn-text" data-i18n="vpn.unknown"></strong><span id="vpn-detail" class="vpn-detail"></span></span>
+    <span class="vpn-more" data-i18n="vpn.details"></span>
+  </a>
+</div>
+<div id="update-banner" class="update-banner" role="alert" hidden>
+  <span id="update-banner-text" data-i18n="reload.new_version"></span>
+  <button type="button" id="update-banner-reload" class="ghost small" data-i18n="reload.button"></button>
 </div>
 <nav id="alert-strip" class="alert-strip" aria-label="Alerts" data-i18n-label="alert.strip_label" hidden>
   <ul id="alert-strip-list" class="alert-strip-list"></ul>
@@ -22,6 +30,7 @@
 </nav>
 <div class="wrap">
   <main class="card" aria-labelledby="title">
+    <p id="js-warning" class="js-warning" role="alert">Die Skripte dieser Seite sind nicht geladen oder veraltet. Bitte die Seite neu laden (Strg+F5). / The scripts of this page did not load or are out of date. Please reload the page (Ctrl+F5).</p>
     <header class="header">
       <div class="logo" aria-hidden="true">
         <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -44,13 +53,18 @@
         <p class="subtitle" data-view="dashboard" data-i18n="dash.subtitle" hidden></p>
       </div>
       <div class="tools">
-        <a id="nav-link" class="howto-button" href="/dashboard"></a>
-        <button type="button" id="howto-open" class="howto-button" aria-haspopup="dialog" data-i18n="howto.button"></button>
         <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
       </div>
     </header>
 
-    <form id="form" data-view="input" autocomplete="off" novalidate>
+    <nav id="topnav" class="topnav" aria-label="Main" data-i18n-label="nav.label">
+      <a id="nav-input" class="nav-item" href="/" data-i18n="nav.input"></a>
+      <a id="nav-dashboard" class="nav-item" href="/dashboard" data-i18n="nav.dashboard"></a>
+      <a id="nav-subs" class="nav-item" href="/#subscriptions" data-i18n="nav.subs"></a>
+      <button type="button" id="howto-open" class="nav-item nav-howto" aria-haspopup="dialog" data-i18n="howto.button"></button>
+    </nav>
+
+    <form id="form" data-view="input" method="post" action="/reload-needed" autocomplete="off" novalidate>
       <div class="row">
         <label class="field" for="link" data-i18n="link.label"></label>
         <input id="link" name="link" type="text" inputmode="url" spellcheck="false"
@@ -234,9 +248,9 @@
       <p id="jobs-empty" class="note" data-i18n="jobs.empty" hidden></p>
     </section>
 
-    <section class="subs" data-view="input" aria-labelledby="subs-title">
+    <section id="subscriptions" class="subs" data-view="input" aria-labelledby="subs-title">
       <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
-      <form id="subs-form" autocomplete="off" novalidate>
+      <form id="subs-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
         <div class="row">
           <label class="field" for="subs-channel" data-i18n="subs.channel"></label>
           <input id="subs-channel" type="text" inputmode="url" spellcheck="false" autocapitalize="off"
@@ -285,9 +299,10 @@
         <p id="dash-recent-empty" class="note" data-i18n="dash.recent_empty" hidden></p>
       </section>
 
-      <section class="jobs" aria-labelledby="dash-vpn-title">
+      <section id="dash-vpn" class="jobs" aria-labelledby="dash-vpn-title">
         <h2 id="dash-vpn-title" class="jobs-title" data-i18n="dash.vpn"></h2>
         <p id="dash-vpn-now" class="dash-vpn-now"></p>
+        <p id="dash-vpn-explain" class="note"></p>
         <p id="dash-disk" class="note"></p>
         <p id="dash-deploy" class="note" hidden></p>
         <ul id="dash-vpn-list" class="dash-events"></ul>
@@ -571,8 +586,6 @@
     "subs.skip.premiere": "Premiere",
     "subs.skip.short": "Short (Kurzvideo)",
     "subs.skipped_more": "und {n} weitere",
-    "nav.dashboard": "Übersicht",
-    "nav.input": "Eingabe",
     "dash.subtitle": "Was gerade läuft, was schiefging und wie es dem VPN geht",
     "dash.active": "Läuft und wartet",
     "dash.active_empty": "Gerade läuft und wartet nichts.",
@@ -676,6 +689,14 @@
     "deploy.result.error": "Fehler",
     "deploy.result.failed": "früher fehlgeschlagen",
     "deploy.result.resumed": "wieder eingeschaltet",
+    "nav.label": "Hauptmenü",
+    "nav.input": "Eingabe",
+    "nav.dashboard": "Dashboard",
+    "nav.subs": "Abonnements",
+    "vpn.details": "Details ›",
+    "reload.new_version": "Die App wurde aktualisiert. Bitte die Seite neu laden.",
+    "reload.button": "Neu laden",
+    "dash.vpn_explain_ok": "Das VPN läuft: alle Downloads gehen durch den Tunnel, und der Wächter prüft laufend, ob das so bleibt. Unten steht, wann sich der Zustand geändert hat.",
     "subs.never": "noch nie geprüft",
     "subs.checked": "geprüft {when}",
     "subs.ok": "in Ordnung",
@@ -896,8 +917,6 @@
     "subs.skip.premiere": "premiere",
     "subs.skip.short": "Short",
     "subs.skipped_more": "and {n} more",
-    "nav.dashboard": "Dashboard",
-    "nav.input": "Input form",
     "dash.subtitle": "What is running, what went wrong and how the VPN is doing",
     "dash.active": "Running and waiting",
     "dash.active_empty": "Nothing is running or waiting right now.",
@@ -1001,6 +1020,14 @@
     "deploy.result.error": "error",
     "deploy.result.failed": "failed earlier",
     "deploy.result.resumed": "switched on again",
+    "nav.label": "Main menu",
+    "nav.input": "Input",
+    "nav.dashboard": "Dashboard",
+    "nav.subs": "Subscriptions",
+    "vpn.details": "Details ›",
+    "reload.new_version": "The app was updated. Please reload the page.",
+    "reload.button": "Reload",
+    "dash.vpn_explain_ok": "The VPN is running: all downloads go through the tunnel, and the watchdog keeps checking that this stays so. Below you see when the state changed.",
     "subs.never": "never checked",
     "subs.checked": "checked {when}",
     "subs.ok": "fine",

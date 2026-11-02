@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.started_at = time.monotonic()  # /api/vpn says "starting" for a minute (#43)
     settings: Settings = app.state.settings
     configure_logging(settings.log_level)
     logger.info("starting", extra={"version": __version__, **settings.summary()})
@@ -199,6 +201,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
     )
     app.state.settings = resolved
+    app.state.started_at = time.monotonic()
     app.state.db = None
     app.state.db_error = None
     app.state.qbit = None
