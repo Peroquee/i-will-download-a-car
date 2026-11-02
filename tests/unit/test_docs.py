@@ -91,7 +91,13 @@ def test_every_variable_of_the_scripts_is_documented():
             text = script.read_text(encoding="utf-8")
             names |= set(re.findall(r"\$\{((?:KS|AB|RT)_[A-Z_]+)[:}-]", text))
             names |= set(re.findall(r"""environ\.get\(\s*["']((?:YTP|RT)_[A-Z_]+)["']""", text))
-    names |= {"YTP_NETWORK_TESTS", "YTP_YTDLP_PROXY", "YTP_VPN_ENV_FILE", "YTP_OVPN_SOURCE"}
+    names |= {
+        "YTP_NETWORK_TESTS",
+        "YTP_YTDLP_PROXY",
+        "YTP_VPN_ENV_FILE",
+        "YTP_OVPN_SOURCE",
+        "YTP_BACKUP_DIR",
+    }
     assert {"KS_COMPOSE", "AB_PROBE_URL", "YTP_BACKUP_DIR", "RT_COMPOSE", "RT_IP_URL"} <= names, (
         "the scan itself works"
     )

@@ -12,6 +12,11 @@
 # makes a missing bind-mount source as root:root) it is handed to PUID:PGID, non-recursively
 # (the folder and app.db*). The app runs as PUID:PGID and cannot do that itself.
 #
+# Also the backup folder DATA_ROOT/.youtube-premium-backups (issue #41), created owned by PUID:PGID with
+# mode 700: on the media drive (so backups survive the loss of the VM's disk), hidden, outside
+# downloads/ and the libraries (Jellyfin never indexes it). An existing one, its mode and its
+# contents are never touched; with YTP_BACKUP_DIR in the env file nothing is created here.
+#
 # Why two trees: unfinished downloads must never show up in Jellyfin, whose libraries
 # point at the library folders. Finished files are HARDLINKED from downloads/ into them,
 # which needs both on one filesystem (scripts/host/check-host.sh --only layout proves it).
@@ -37,13 +42,14 @@ ENV_FILE=".env"
 DRY_RUN=0
 
 readonly DOWNLOAD_DIRS="movies series audiobooks music incomplete"
+readonly BACKUP_DIR_NAME=".youtube-premium-backups"  # the same name as scripts/ops/backup.py
 readonly MEDIA_VARS="MEDIA_DIR_MOVIES MEDIA_DIR_SERIES MEDIA_DIR_AUDIOBOOKS MEDIA_DIR_MUSIC MEDIA_DIR_PODCASTS MEDIA_DIR_YOUTUBE"
 
 log() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 run() {
@@ -133,6 +139,23 @@ ensure_app_config() {
   fi
 }
 
+# The backup folder on the media drive: private (700), created only if missing. Contents, mode and
+# owner of an existing folder are left alone (check-host.sh reports a wrong mode). A symbolic link
+# is refused: this runs as root and a link could point anywhere.
+ensure_backup_dir() {
+  local dir="$1"
+  if [ -L "$dir" ]; then
+    die "$dir is a symbolic link; the backups belong on the media drive itself (make it a real folder)"
+  elif [ -d "$dir" ]; then
+    log "exists   $dir (contents and mode left as they are)"
+  elif [ -e "$dir" ]; then
+    die "$dir exists but is not a folder"
+  else
+    log "creating $dir"
+    run install -d -m 700 -o "$PUID" -g "$PGID" "$dir"
+  fi
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -186,6 +209,15 @@ main() {
   done
   log "App state folder (the app's database; the app runs as $PUID:$PGID)"
   ensure_app_config "$APP_CONFIG_DIR"
+
+  local custom_backups
+  custom_backups="$(env_value YTP_BACKUP_DIR || true)"
+  if [ -n "$custom_backups" ]; then
+    log "Backups go to $custom_backups (YTP_BACKUP_DIR in $ENV_FILE): not created here"
+  else
+    log "Backup folder (on the media drive, private, never indexed by Jellyfin)"
+    ensure_backup_dir "$root/$BACKUP_DIR_NAME"
+  fi
 
   log "Done. Prove hardlinks work: scripts/host/check-host.sh --only layout"
 }

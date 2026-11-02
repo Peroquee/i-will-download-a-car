@@ -21,7 +21,7 @@ help:
 	@echo "proxy-check     from a LAN machine: 401 without login, 200 with it, backend ports closed"
 	@echo "watchdog-key    create the VPN watchdog's read-only gluetun key (.env and gluetun's auth file)"
 	@echo "vpn-abuse-test  on the VM: drop the VPN CYCLES times (default 5), check the watchdog, leaks and recovery"
-	@echo "backup           back up the database, config/ and .env to backups/ (mode 600; DRY=1 to only show)"
+	@echo "backup           back up the database, config/ and .env to <DATA_ROOT>/.youtube-premium-backups (mode 600; DRY=1 to only show)"
 	@echo "backup-list      list the backups"
 	@echo "update-check     is the pinned yt-dlp the newest release? (exit 10 = newer exists); lists the pinned image tags"
 	@echo "recovery-prepare  before a reboot of the VM or the Proxmox host: record what runs and which jobs are in progress"

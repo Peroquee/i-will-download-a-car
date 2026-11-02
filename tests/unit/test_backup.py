@@ -1,4 +1,6 @@
-"""scripts/ops/backup.py: backups of the database, config/ and .env, and their restore (#30)."""
+"""scripts/ops/backup.py: backups of the database, config/ and .env, and their restore (#30, #41)."""
+
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -380,3 +382,168 @@ def test_the_script_is_executable_and_prints_help():
     with pytest.raises(SystemExit) as exit_info:
         mod.main(["--help"])
     assert exit_info.value.code == 0
+
+
+# --- where the archives go (issue #41) -------------------------------------------------------------
+
+BACKUPS = ".youtube-premium-backups"
+
+
+@pytest.fixture
+def media(repo, tmp_path, monkeypatch) -> Path:
+    """A stack whose .env names a media drive (DATA_ROOT) with libraries and a private backup folder."""
+    monkeypatch.delenv("YTP_BACKUP_DIR", raising=False)
+    data = tmp_path / "data"
+    for name in ("downloads", "Filme", "Musik", "Podcasts"):
+        (data / name).mkdir(parents=True)
+    folder = data / BACKUPS
+    folder.mkdir(mode=0o700)
+    folder.chmod(0o700)
+    (repo / ".env").write_text(
+        SECRET
+        + f"DATA_ROOT={data}\nMEDIA_DIR_MOVIES=Filme\nMEDIA_DIR_MUSIC=Musik\nMEDIA_DIR_PODCASTS=Podcasts\n"
+    )
+    return data
+
+
+def test_the_default_folder_is_on_the_media_drive(repo, media):
+    assert mod.default_target(repo.resolve(), {}) == media / BACKUPS
+    assert run(repo) == 0
+    (archive,) = list((media / BACKUPS).glob("ytp-backup-*.tar.gz"))
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o600
+    assert not (repo / "backups").exists()
+
+
+def test_without_a_media_drive_in_env_the_old_folder_is_the_fallback(repo, monkeypatch):
+    monkeypatch.delenv("YTP_BACKUP_DIR", raising=False)
+    assert mod.default_target(repo.resolve(), {}) == repo.resolve() / "backups"
+
+
+def test_the_choice_order_is_environment_then_env_file_then_data_root(repo, media, tmp_path):
+    (repo / ".env").write_text(
+        (repo / ".env").read_text() + f"YTP_BACKUP_DIR={tmp_path}/from-dotenv\n"
+    )
+    assert mod.default_target(repo.resolve(), {"YTP_BACKUP_DIR": "/from/environment"}) == Path(
+        "/from/environment"
+    )
+    assert mod.default_target(repo.resolve(), {}) == tmp_path / "from-dotenv"
+    (repo / ".env").write_text(SECRET + f"DATA_ROOT={media}\n")
+    assert mod.default_target(repo.resolve(), {}) == media / BACKUPS
+
+
+def test_the_backup_folder_is_created_private_when_only_it_is_missing(repo, media):
+    (media / BACKUPS).rmdir()
+    assert run(repo) == 0
+    assert stat.S_IMODE((media / BACKUPS).stat().st_mode) == 0o700
+
+
+@pytest.mark.security
+def test_a_missing_media_drive_is_not_papered_over_on_the_system_disk(repo, media, capsys):
+    import shutil
+
+    shutil.rmtree(media)  # the drive is not mounted: DATA_ROOT itself is missing
+    assert run(repo) == 2
+    assert "is the media drive mounted" in capsys.readouterr().err
+    assert not media.exists(), "no folder was created at all"
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("mode", [0o755, 0o750, 0o705, 0o770, 0o777])
+def test_a_folder_others_can_read_is_refused(repo, media, mode, capsys):
+    (media / BACKUPS).chmod(mode)
+    assert run(repo) == 2
+    err = capsys.readouterr().err
+    assert "readable by group or others" in err
+    assert f"chmod 700 {media / BACKUPS}" in err
+    assert not list((media / BACKUPS).glob("ytp-backup-*"))
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "inside", ["downloads", "downloads/movies", "Filme", "Filme/x", "Musik", "Podcasts/sub"]
+)
+def test_a_folder_inside_the_downloads_or_a_library_is_refused(repo, media, inside, capsys):
+    target = media / inside
+    target.mkdir(parents=True, exist_ok=True)
+    target.chmod(0o700)
+    assert run(repo, "--target", str(target)) == 2
+    assert "must not be in a library or the downloads" in capsys.readouterr().err
+    assert not list(target.glob("ytp-backup-*"))
+
+
+@pytest.mark.security
+def test_a_symlinked_target_is_refused(repo, media, tmp_path, capsys):
+    real = tmp_path / "elsewhere"
+    real.mkdir(mode=0o700)
+    link = media / "link"
+    link.symlink_to(real)
+    assert run(repo, "--target", str(link)) == 2
+    assert "symbolic link" in capsys.readouterr().err
+
+
+def test_a_file_as_the_target_is_refused(repo, media, capsys):
+    (media / "file").write_text("x")
+    assert run(repo, "--target", str(media / "file")) == 2
+    assert "not a folder" in capsys.readouterr().err
+
+
+def test_a_folder_next_to_the_media_that_is_private_is_fine(repo, media, tmp_path):
+    other = tmp_path / "nas"
+    other.mkdir(mode=0o700)
+    other.chmod(0o700)
+    assert run(repo, "--target", str(other)) == 0
+
+
+def test_a_dry_run_creates_nothing(repo, media):
+    (media / BACKUPS).rmdir()
+    assert run(repo, "--dry-run") == 0
+    assert not (media / BACKUPS).exists()
+
+
+def test_listing_uses_the_same_default(repo, media, capsys):
+    run(repo)
+    capsys.readouterr()
+    assert run(repo, "list") == 0
+    assert "ytp-backup-" in capsys.readouterr().out
+
+
+def test_run_as_root_the_archive_goes_to_the_folders_owner(repo, media, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        mod.os, "chown", lambda path, uid, gid: calls.append((Path(path).name, uid, gid))
+    )
+    folder_owner = (media / BACKUPS).stat()
+    # the fake owner must differ from root for the hand-over to happen
+    real_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        info = real_stat(self, *args, **kwargs)
+        if self == media / BACKUPS:
+            return os.stat_result(
+                (
+                    info.st_mode,
+                    info.st_ino,
+                    info.st_dev,
+                    info.st_nlink,
+                    1000,
+                    1000,
+                    info.st_size,
+                    0,
+                    0,
+                    0,
+                )
+            )
+        return info
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    assert run(repo) == 0
+    assert calls
+    assert calls[0][0].startswith("ytp-backup-")
+    assert calls[0][1:] == (1000, 1000)
+    assert folder_owner is not None
+
+
+def test_the_backups_folder_name_is_hidden_and_not_a_library_name():
+    assert mod.BACKUP_DIR_NAME == BACKUPS
+    assert BACKUPS.startswith(".")

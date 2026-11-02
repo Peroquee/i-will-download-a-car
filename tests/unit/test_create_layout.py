@@ -95,8 +95,8 @@ def test_is_safe_to_run_twice(layout):
     assert second.returncode == 0
     assert "creating" not in second.stdout
     assert (
-        second.stdout.count("exists") == 1 + len(DOWNLOADS) + len(LIBRARIES) + 1
-    )  # +1: the app state folder
+        second.stdout.count("exists") == 1 + len(DOWNLOADS) + len(LIBRARIES) + 1 + 1
+    )  # +1: the app state folder, +1: the backup folder
 
 
 @pytest.mark.security
@@ -351,3 +351,80 @@ def test_a_normal_database_file_is_still_handed_over(layout):
     (layout.config / "app.db").write_text("db")
     assert layout.run().returncode == 0
     assert owner(layout.config / "app.db") == (layout.puid, layout.pgid)
+
+
+# --- the backup folder (issue #41) --------------------------------------------------------------
+
+BACKUPS = ".youtube-premium-backups"
+
+
+def test_the_backup_folder_is_created_private_and_owned_by_the_media_user(layout):
+    result = layout.run()
+    assert result.returncode == 0, result.stderr
+    folder = layout.data / BACKUPS
+    assert folder.is_dir()
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700, "no setgid, no group or other bits"
+    info = folder.stat()
+    assert (info.st_uid, info.st_gid) == (layout.puid, layout.pgid)
+
+
+def test_the_backup_folder_is_outside_downloads_and_every_library(layout):
+    layout.run()
+    folder = layout.data / BACKUPS
+    assert folder.parent == layout.data
+    assert BACKUPS.startswith("."), "hidden"
+    assert BACKUPS not in {*LIBRARIES.values(), "downloads"}
+
+
+def test_the_name_is_the_one_backup_py_uses():
+    backup_py = (Path(__file__).resolve().parents[2] / "scripts" / "ops" / "backup.py").read_text()
+    assert f'BACKUP_DIR_NAME = "{BACKUPS}"' in backup_py
+
+
+@pytest.mark.security
+def test_an_existing_backup_folder_and_its_archives_are_left_alone(layout):
+    folder = layout.data / BACKUPS
+    folder.mkdir()
+    folder.chmod(0o750)
+    archive = folder / "ytp-backup-20261102T090000Z.tar.gz"
+    archive.write_text("precious")
+    archive.chmod(0o640)
+    before = (folder.stat().st_mode, archive.stat().st_mode, archive.stat().st_mtime_ns)
+    result = layout.run()
+    assert result.returncode == 0, result.stderr
+    assert "contents and mode left as they are" in result.stdout
+    assert (folder.stat().st_mode, archive.stat().st_mode, archive.stat().st_mtime_ns) == before
+    assert archive.read_text() == "precious"
+
+
+@pytest.mark.security
+def test_a_symlinked_backup_folder_is_refused(layout):
+    elsewhere = layout.data.parent / "elsewhere"
+    elsewhere.mkdir()
+    (layout.data / BACKUPS).symlink_to(elsewhere)
+    result = layout.run()
+    assert result.returncode != 0
+    assert "symbolic link" in result.stderr
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_a_file_where_the_backup_folder_should_be_is_refused(layout):
+    (layout.data / BACKUPS).write_text("not a folder")
+    result = layout.run()
+    assert result.returncode != 0
+    assert "not a folder" in result.stderr
+
+
+def test_a_custom_backup_folder_in_the_env_file_creates_nothing_here(layout):
+    layout.write_env(YTP_BACKUP_DIR="/mnt/nas/ytp-backups")
+    result = layout.run()
+    assert result.returncode == 0, result.stderr
+    assert not (layout.data / BACKUPS).exists()
+    assert "YTP_BACKUP_DIR" in result.stdout
+
+
+def test_a_dry_run_does_not_create_the_backup_folder(layout):
+    result = layout.run("--dry-run")
+    assert result.returncode == 0
+    assert not (layout.data / BACKUPS).exists()
+    assert "install -d -m 700" in result.stdout

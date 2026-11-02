@@ -19,9 +19,9 @@ host's crontab or systemd.
 
 ```bash
 make backup DRY=1          # shows what would be backed up, writes nothing
-make backup                # makes backups/ytp-backup-<time>.tar.gz
+make backup                # makes <DATA_ROOT>/.youtube-premium-backups/ytp-backup-<time>.tar.gz
 make backup-list           # lists the archives
-scripts/ops/backup.py verify backups/ytp-backup-<time>.tar.gz   # complete? database sound?
+scripts/ops/backup.py verify /data/.youtube-premium-backups/ytp-backup-<time>.tar.gz   # complete? database sound?
 ```
 
 - **The database is copied with SQLite's online backup**, so the copy is consistent while the app
@@ -30,8 +30,8 @@ scripts/ops/backup.py verify backups/ytp-backup-<time>.tar.gz   # complete? data
 - **`config/`** is archived without the live database files, `logs/` and `cache/` folders. Symbolic
   links inside it are skipped, never followed. `config/` itself may be a symlink.
 - **`.env`** is included (a restore without it has no VPN login). That is why the archive
-  **contains secrets**: it is mode 600 in a folder with mode 700, `backups/` is ignored by Git, and
-  the archive carries no owner names. Never commit it, never put it on a share others can read.
+  **contains secrets**: it is mode 600 in a folder with mode 700 and carries no owner names. Never
+  commit it, never put it on a share others can read.
 - **Rotation:** the newest 14 archives are kept (`--keep N`); older ones of the script's own name
   pattern are removed after a successful run, nothing else in the folder is touched.
 - **Failing loudly:** if a file cannot be read (run it as the owner of `config/`, the stack's
@@ -40,19 +40,42 @@ scripts/ops/backup.py verify backups/ytp-backup-<time>.tar.gz   # complete? data
 - Every run writes under a temporary name and renames when finished, so a crash never leaves a
   half archive that looks real.
 
-### Where the backups go (an open question for the owner)
+### Where the backups go (decided: on the media drive)
 
-The default is `backups/` inside the checkout. **That is on the same disk as everything else and
-does not survive losing it.** Choose one or more of:
+By default `<DATA_ROOT>/.youtube-premium-backups`: on the VM `/data/.youtube-premium-backups`,
+which is the Proxmox host's ZFS pool at `/Vault/Jellyfin/.youtube-premium-backups`. Why there:
 
-1. `YTP_BACKUP_DIR=/mnt/nas/ytp-backups` (or `--target`) pointing at a mounted NAS share, ideally
-   one that only you can read; the archive is mode 600 but the share's own rules apply.
-2. A Proxmox backup of the whole VM (`vzdump`, or a ZFS snapshot of its disk) on the node's
-   schedule: it covers `.env`, `config/` and the database in one go, but is crash-consistent only.
-   This is a good second layer next to the archives, not a replacement for them.
-3. Copying the newest archive off site; encrypt it first, for example with
-   `age -p -o file.age file` or `gpg -c file`. The script does not encrypt, so the choice of tool
-   and key handling stays with you.
+* **It survives the loss of the VM's disk** and is part of the pool's ZFS snapshots, which a folder
+  inside the checkout is not.
+* **Jellyfin never indexes it:** the folder is hidden (leading dot) and lies directly under
+  `DATA_ROOT`, outside `downloads/` and every library folder. Jellyfin's libraries point at the
+  library folders, not at the share as a whole ([jellyfin.md](jellyfin.md)).
+* **It is private:** owned by `PUID:PGID`, mode `700`, archives mode `600`. The Jellyfin LXC
+  (uid 103) reads the share through the "other" permission bits, which `700` does not grant.
+* `scripts/host/create-layout.sh` creates it (and never touches an existing one or its contents),
+  `scripts/host/check-host.sh` (check `backups`) verifies it: a real folder, no group/other bits,
+  archives private, not inside a library or `downloads/`, owned by `PUID:PGID`, and on the same
+  filesystem as the media. The installer uses it and names it in its closing summary.
+* `backup.py` itself **refuses** a target that is readable by group or others, inside `config/`,
+  `downloads/` or a library, a symbolic link, or whose parent folder is missing (an unmounted
+  media drive must not make it fill the system disk). It never creates missing parents.
+* Run with `sudo`, the archive is handed to the folder's owner (`PUID:PGID`), so the stack's user
+  can read and prune it.
+
+**What this does not give you:** a copy on another disk. The backups sit on the **same physical
+pool as the media**. A damaged pool, a ransomware encryption of the share or a deleted dataset
+takes them too. An **off-site copy** is the next step and an open decision of the owner: copy the
+newest archive somewhere else, encrypted first (for example `age -p -o file.age file` or
+`gpg -c file`; the script does not encrypt, so tool and key handling stay with you). A Proxmox
+backup of the whole VM (`vzdump`) is a good second layer next to the archives.
+
+Other places, if you want them: `YTP_BACKUP_DIR=/mnt/nas/ytp-backups` in `.env` (or in the
+environment, or `--target`) for a NAS share, ideally one only you can read; the same safety rules
+apply, and `create-layout.sh` then creates nothing and `check-host.sh` checks that folder instead.
+
+**Archives from before this change** are in `backups/` inside the checkout. Move them once, by
+hand, as the stack's user: `mv backups/ytp-backup-*.tar.gz /data/.youtube-premium-backups/` and
+check one with `scripts/ops/backup.py verify`. The old folder stays ignored by Git.
 
 ### Scheduling it (snippets to install yourself)
 
@@ -69,7 +92,7 @@ Type=oneshot
 # the owner of config/ (the stack's PUID:PGID), so every file can be read
 User=media
 WorkingDirectory=/opt/youtube-premium
-# optional: a mounted share instead of ./backups
+# optional: a mounted share instead of the default <DATA_ROOT>/.youtube-premium-backups
 # Environment=YTP_BACKUP_DIR=/mnt/nas/ytp-backups
 ExecStart=/opt/youtube-premium/scripts/ops/backup.py
 
@@ -90,10 +113,10 @@ WantedBy=timers.target
 Or, if you prefer cron (`crontab -e` as that user; the line runs daily at 03:30 and keeps the output):
 
 ```cron
-30 3 * * * cd /opt/youtube-premium && scripts/ops/backup.py >> backups/backup.log 2>&1
+30 3 * * * cd /opt/youtube-premium && scripts/ops/backup.py >> /var/log/ytp-backup.log 2>&1
 ```
 
-Look at `systemctl list-timers` / `journalctl -u ytp-backup` (or `backups/backup.log`) now and
+Look at `systemctl list-timers` / `journalctl -u ytp-backup` (or `/var/log/ytp-backup.log`) now and
 then, and run `scripts/ops/backup.py verify` on a recent archive once in a while: a backup that
 was never read back is a hope, not a backup.
 

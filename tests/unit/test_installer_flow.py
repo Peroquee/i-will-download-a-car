@@ -140,6 +140,7 @@ def test_the_summary_hides_secrets_and_the_end_explains_what_to_do(repo, tmp_pat
     assert 'user "admin"' in text
     assert "AI-HELP.md" in text
     assert "sudo make backup" in text
+    assert "/data/.youtube-premium-backups, on the media drive" in text
 
 
 def test_the_german_conversation(repo, tmp_path, ovpn):

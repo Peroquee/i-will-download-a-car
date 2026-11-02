@@ -158,7 +158,7 @@ meldet sich an und legt in **Jellyfin** pro Ordner eine Bibliothek an (Typ *Musi
 - **Platte voll**: `df -h` zeigt es. Medien brauchen viel Platz; der Ordner `downloads` enthält
   unfertige Dateien.
 - **Aktualisieren**: `./update.sh` (Sicherung, neue Version, neu bauen, prüfen). Sicherungen:
-  `sudo make backup` (Ordner `backups/`, enthält Geheimnisse, privat halten).
+  `sudo make backup` (Ordner `.youtube-premium-backups` im Medienordner, z. B. `/data/.youtube-premium-backups`; enthält Geheimnisse, privat halten).
 
 ## Wo die Dokumentation liegt
 

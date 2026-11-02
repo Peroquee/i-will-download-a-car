@@ -93,6 +93,7 @@ library folders):
     movies/ series/ audiobooks/ music/
     incomplete/         <- unfinished torrents, moved to the category folder when done
   Filme/ Serien/ Hörbücher/ Musik/ Podcasts/ Youtube/    <- the library folders
+  .youtube-premium-backups/   <- backups (mode 700, hidden, not a library; docs/operations.md)
 ```
 
 The library folder names are settings in `.env` (relative to `DATA_ROOT`), so another setup
