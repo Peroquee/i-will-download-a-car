@@ -63,8 +63,8 @@ OVERFLOW_PROBE = """
   for (const el of document.querySelectorAll('body *')) {
     const box = el.getBoundingClientRect();
     if (box.width > 0 && box.right > width + 1) {
-      const name = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
-        (typeof el.className === 'string' && el.className ? '.' + el.className.replace(/ /g, '.') : '');
+      const cls = typeof el.className === 'string' ? el.className.replace(/ /g, '.') : '';
+      const name = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (cls ? '.' + cls : '');
       wide.push(name + ' right=' + Math.round(box.right) + ' width=' + Math.round(box.width));
     }
   }
