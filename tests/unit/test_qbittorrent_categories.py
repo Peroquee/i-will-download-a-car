@@ -299,3 +299,82 @@ def test_the_categories_match_the_download_folders_created_by_the_layout_script(
 def test_the_incomplete_folder_is_inside_downloads_but_is_not_a_category():
     assert mod.INCOMPLETE_DIR.startswith(mod.DOWNLOAD_ROOT + "/")
     assert "incomplete" not in mod.CATEGORIES
+
+
+# --- --from-env: the password from .env instead of stdin ----------------------------------------
+
+
+def run_from_env(url: str, env_text: str | None, tmp_path, *args: str):
+    env_file = tmp_path / ".env"
+    if env_text is not None:
+        env_file.write_text(env_text)
+    return subprocess.run(
+        [
+            sys.executable, "-I", str(SCRIPT), "--url", url, "--from-env",
+            "--env-file", str(env_file), *args,
+        ],
+        input="",
+        capture_output=True,
+        text=True,
+        check=False,
+    )  # fmt: skip
+
+
+def test_from_env_reads_user_and_password_from_the_env_file(server, tmp_path):
+    fake, url = server
+    result = run_from_env(url, f"TZ=UTC\nQBIT_USER={USER}\nQBIT_PASSWORD='{PASSWORD}'\n", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert set(fake.categories) == {"movies", "series", "audiobooks", "music"}
+    assert fake.logins == 1
+
+
+def test_from_env_with_an_explicit_user_prefers_it(server, tmp_path):
+    fake, url = server
+    result = run_from_env(
+        url, f"QBIT_USER=someone-else\nQBIT_PASSWORD={PASSWORD}\n", tmp_path, "--user", USER
+    )
+    assert result.returncode == 0, result.stderr
+    assert fake.logins == 1
+
+
+@pytest.mark.parametrize(
+    "env_text", ["QBIT_PASSWORD=\n", "TZ=UTC\n", "# QBIT_PASSWORD=commented-out-value\n"]
+)
+def test_from_env_without_a_password_says_so_and_contacts_nothing(server, tmp_path, env_text):
+    fake, url = server
+    result = run_from_env(url, env_text, tmp_path)
+    assert result.returncode == 1
+    assert "QBIT_PASSWORD is empty or missing" in result.stderr
+    assert fake.logins == 0
+
+
+def test_from_env_with_a_missing_file_says_so(server, tmp_path):
+    fake, url = server
+    result = run_from_env(url, None, tmp_path)
+    assert result.returncode == 1
+    assert "cannot read" in result.stderr
+    assert fake.logins == 0
+
+
+@pytest.mark.security
+def test_from_env_never_prints_the_password(server, tmp_path):
+    _, url = server
+    result = run_from_env(url, f"QBIT_USER={USER}\nQBIT_PASSWORD={PASSWORD}\n", tmp_path)
+    assert PASSWORD not in result.stdout + result.stderr
+    wrong = run_from_env(url, f"QBIT_USER={USER}\nQBIT_PASSWORD=not the password\n", tmp_path)
+    assert wrong.returncode == 1
+    assert "not the password" not in wrong.stdout + wrong.stderr
+
+
+def test_from_env_and_password_stdin_exclude_each_other(server, tmp_path):
+    _, url = server
+    result = run_from_env(url, "QBIT_PASSWORD=x\n", tmp_path, "--password-stdin")
+    assert result.returncode == 2
+    assert "not allowed with" in result.stderr
+
+
+def test_the_stdin_path_still_works_without_any_env_file(server):
+    fake, url = server
+    result = run(url)
+    assert result.returncode == 0, result.stderr
+    assert fake.logins == 1

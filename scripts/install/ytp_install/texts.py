@@ -393,6 +393,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "de": 'Eine frühere Installation wurde bei Schritt "{step}" unterbrochen. Es geht dort weiter.',
         "en": 'An earlier installation stopped at the step "{step}". It carries on from there.',
     },
+    "checks.menu.intro": {
+        "de": "Der letzte Schritt (alles prüfen) ist offen oder hat etwas gemeldet. Oft hilft es, die Schritte {first} bis {last} noch einmal sauber durchlaufen zu lassen (Reparieren): das ist gefahrlos und ändert nur, was nicht stimmt.",
+        "en": "The last step (checking everything) is open or reported something. It often helps to run steps {first} to {last} again (Repair): that is safe and only changes what is not right.",
+    },
+    "checks.menu.options": {
+        "de": "  1 = Reparieren (Schritte {first} bis {last} noch einmal)\n  2 = Nur noch einmal prüfen\n  3 = Beenden\nAuswahl",
+        "en": "  1 = Repair (run steps {first} to {last} again)\n  2 = Only check again\n  3 = Quit\nChoice",
+    },
     "menu.change_note": {
         "de": "Die bisherigen Werte stehen in eckigen Klammern. Bei Passwörtern behält Enter den gespeicherten Wert.",
         "en": "The current values are in square brackets. For passwords, Enter keeps the saved value.",

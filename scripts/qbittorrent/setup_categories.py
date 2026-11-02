@@ -18,12 +18,16 @@ Other categories and all other settings are left alone. Safe to re-run: it chang
 what differs and says so.
 
 Usage:
-    scripts/qbittorrent/setup_categories.py [--url URL] [--user NAME] [--password-stdin]
+    scripts/qbittorrent/setup_categories.py [--url URL] [--user NAME]
+                                            [--password-stdin | --from-env [--env-file PATH]]
                                             [--dry-run]
 
     --url             Web UI address (default http://127.0.0.1:8080, what compose publishes)
     --user            Web UI user (default admin; set by scripts/qbittorrent/seed_config.py)
     --password-stdin  read the password from stdin instead of asking on the terminal
+    --from-env        take QBIT_PASSWORD (and QBIT_USER, unless --user is given) from the .env
+                      file (--env-file, default: the .env of this checkout); for a re-run by
+                      hand, where typing the generated password is no fun
     --dry-run         print what would be set, contact nothing
 
 The password is never put on the command line, in a file or in the output.
@@ -39,6 +43,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 # The container-side view of DATA_ROOT (docker-compose.yml mounts it at /data).
 DOWNLOAD_ROOT = "/data/downloads"
@@ -168,6 +173,38 @@ def apply(api: Api) -> list[str]:
     return changes
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_FILE = REPO_ROOT / ".env"
+
+
+def read_env(path: Path) -> dict[str, str]:
+    """KEY=VALUE lines of a dotenv file (last one wins), without surrounding quotes."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SetupError(f"cannot read {path}: {exc.strerror or exc}") from exc
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, _, value = stripped.partition("=")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        values[name.strip()] = value
+    return values
+
+
+def credentials_from_env(path: Path, user: str | None) -> tuple[str, str]:
+    """(user, password) from .env: QBIT_PASSWORD must be set; QBIT_USER only if no user is given."""
+    values = read_env(path)
+    password = values.get("QBIT_PASSWORD", "")
+    if not password:
+        raise SetupError(f"QBIT_PASSWORD is empty or missing in {path}")
+    return (user or values.get("QBIT_USER") or "admin"), password
+
+
 def read_password(from_stdin: bool) -> str:
     password = sys.stdin.readline().rstrip("\r\n") if from_stdin else getpass.getpass("Password: ")
     if not password:
@@ -178,8 +215,15 @@ def read_password(from_stdin: bool) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Set up qBittorrent categories and save paths.")
     parser.add_argument("--url", default="http://127.0.0.1:8080")
-    parser.add_argument("--user", default="admin")
-    parser.add_argument("--password-stdin", action="store_true")
+    parser.add_argument("--user", default=None, help="Web UI user (default: QBIT_USER, else admin)")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--password-stdin", action="store_true")
+    source.add_argument(
+        "--from-env", action="store_true", help="read QBIT_PASSWORD (and QBIT_USER) from .env"
+    )
+    parser.add_argument(
+        "--env-file", type=Path, default=DEFAULT_ENV_FILE, help=".env for --from-env"
+    )
     parser.add_argument("--dry-run", action="store_true", help="print the plan, contact nothing")
     args = parser.parse_args(argv)
 
@@ -190,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         api = Api(args.url)
-        api.login(args.user, read_password(args.password_stdin))
+        if args.from_env:
+            user, password = credentials_from_env(args.env_file, args.user)
+        else:
+            user, password = args.user or "admin", read_password(args.password_stdin)
+        api.login(user, password)
         changes = apply(api)
     except SetupError as exc:
         print(f"error: {exc}", file=sys.stderr)

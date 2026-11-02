@@ -173,9 +173,9 @@ class Conversation:
             return default
         return answer[0] in marks
 
-    def choice(self, key: str, options: list[str], default: str) -> str:
+    def choice(self, key: str, options: list[str], default: str, **values: object) -> str:
         while True:
-            answer = self.term.ask(self.tr(key), default)
+            answer = self.term.ask(self.tr(key, **values), default)
             if answer in options:
                 return answer
             self.say(self.tr("err.choice", options=" / ".join(options)))
@@ -509,6 +509,56 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+REPAIR_STEPS = ["logins", "start", "qbit", "checks"]  # steps 5 to 8: safe to run again
+
+
+def checks_menu(conv: Conversation, state: State, dry_run: bool) -> str:
+    """The last step (check everything) is open or just failed: offer to repair or only check.
+
+    Returns "repair" (steps 5 to 8 run again, each one idempotent), "check" (only the last
+    step) or "quit". The steps to run are forgotten here; the caller runs the open ones.
+    """
+    first, last = STEP_IDS.index(REPAIR_STEPS[0]) + 1, STEP_IDS.index(REPAIR_STEPS[-1]) + 1
+    conv.say("")
+    conv.say(conv.tr("checks.menu.intro", first=first, last=last))
+    choice = conv.choice("checks.menu.options", ["1", "2", "3"], "1", first=first, last=last)
+    if choice == "3":
+        return "quit"
+    state.forget(REPAIR_STEPS if choice == "1" else ["checks"], dry_run)
+    return "repair" if choice == "1" else "check"
+
+
+def report_failure(conv: Conversation, error: StepError, log_path: Path) -> None:
+    step_id = getattr(error, "step_id", "")
+    conv.say("")
+    conv.say(
+        conv.tr("step.failed", title=conv.tr(f"step.{step_id}.title"))
+        if step_id
+        else conv.tr(error.hint)
+    )
+    conv.say(conv.tr(error.hint))
+    if error.detail and error.detail != error.hint:
+        conv.say("  " + error.detail.splitlines()[-1][:300])
+    conv.say(conv.tr("step.failed_more", log=str(log_path)))
+
+
+def run_steps_with_menu(
+    ctx: Context, state: State, conv: Conversation, log_path: Path, interactive: bool
+) -> int | None:
+    """Run the open steps. When the last step (the checks) fails and a person is there, offer
+    the repair menu instead of just stopping. Returns None on success, else the exit code."""
+    while True:
+        try:
+            run_steps(ctx, state)
+            return None
+        except StepError as error:
+            report_failure(conv, error, log_path)
+            if not interactive or getattr(error, "step_id", "") != "checks":
+                return 1
+            if checks_menu(conv, state, ctx.dry_run) == "quit":
+                return 1
+
+
 def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
     from .update import run_update
 
@@ -624,6 +674,7 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
             return run_update(context(Answers.from_env(env)), state, conv)
 
         previous: Answers | None = None
+        repairing = False  # the checks menu chose to run steps 5 to 8 again
         if mode == "new":
             if args.answers:
                 defaults = Answers(language=lang, timezone=deps.timezone or detect_timezone())
@@ -659,10 +710,22 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
             answers_.language = lang
             if mode == "resume":
                 term.say(conv.tr("menu.resume", step=conv.tr(f"step.{open_step}.title")))
+                # Resuming alone would only repeat the checks, but an earlier step may need to be
+                # run again (a setting added since): ask.
+                ask = open_step == "checks" and not args.answers and not args.dry_run
+                if ask:
+                    picked = checks_menu(conv, state, args.dry_run)
+                    if picked == "quit":
+                        return 0
+                    repairing = picked == "repair"
             else:
                 state.forget(STEP_IDS, args.dry_run)
             hash_open = env.get("PROXY_PASSWORD_HASH", "changeme") == "changeme"
-            if hash_open or (mode == "resume" and "logins" not in state.completed):
+            # A stored hash needs no password again; the repair menu forgets the logins step
+            # only to run it again, which is no reason to ask.
+            if hash_open or (
+                mode == "resume" and "logins" not in state.completed and not repairing
+            ):
                 answers_.web_password = conv.secret(
                     "web_password.ask", ans.check_web_password, twice=True, n=ans.MIN_WEB_PASSWORD
                 )
@@ -671,21 +734,9 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
 
         ctx = context(answers_, previous)
         state.save(args.dry_run)
-        try:
-            run_steps(ctx, state)
-        except StepError as error:
-            step_id = getattr(error, "step_id", "")
-            term.say("")
-            term.say(
-                conv.tr("step.failed", title=conv.tr(f"step.{step_id}.title"))
-                if step_id
-                else conv.tr(error.hint)
-            )
-            term.say(conv.tr(error.hint))
-            if error.detail and error.detail != error.hint:
-                term.say("  " + error.detail.splitlines()[-1][:300])
-            term.say(conv.tr("step.failed_more", log=str(log_path)))
-            return 1
+        failed = run_steps_with_menu(ctx, state, conv, log_path, interactive=not args.answers)
+        if failed is not None:
+            return failed
         autodeploy_failed = False
         try:
             setup_autodeploy(ctx)
