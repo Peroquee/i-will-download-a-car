@@ -28,6 +28,7 @@ from pathlib import Path
 
 from . import answers as ans
 from .answers import Answers
+from .autodeploy import setup_autodeploy
 from .envfile import missing_settings, parse_env
 from .runner import Runner, file_logger
 from .steps import (
@@ -326,6 +327,18 @@ def collect(
         a.jellyfin_key = ""
     conv.why("alert_url.why")
     a.alert_url = conv.secret("alert_url.ask", ans.check_http_url, a.alert_url, optional=True)
+    # --- automatic updates (#42): off unless asked for; the token is never stored in .env
+    conv.why("autodeploy.why")
+    if conv.yes("autodeploy.ask", bool(a.autodeploy_remote)):
+        a.autodeploy_remote = conv.text(
+            "autodeploy_remote.ask", a.autodeploy_remote or ans.DEFAULT_REMOTE, ans.check_git_remote
+        )
+        has_token = (root / "config" / "autodeploy" / "token").exists()
+        a.autodeploy_token = conv.secret(
+            "autodeploy_token.ask", ans.check_gitlab_token, a.autodeploy_token, optional=has_token
+        )
+    else:
+        a.autodeploy_remote = a.autodeploy_token = ""
     conv.why("home_prefix.why")
     a.home_prefix = ans.normalise_prefixes(
         conv.text(
@@ -425,6 +438,10 @@ def check_answers(a: Answers) -> list[str]:
         need("alert_url", ans.check_http_url(a.alert_url))
     if a.home_prefix:
         need("home_prefix", ans.check_prefixes(a.home_prefix))
+    if a.autodeploy_remote:
+        need("autodeploy_remote", ans.check_git_remote(a.autodeploy_remote))
+        if a.autodeploy_token:
+            need("autodeploy_token", ans.check_gitlab_token(a.autodeploy_token))
     need("timezone", ans.check_timezone(a.timezone, timezone_known(a.timezone)))
     return problems
 
@@ -563,7 +580,8 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
         def context(answers: Answers, previous: Answers | None = None) -> Context:
             runner.register_secrets(
                 [answers.vpn_password, answers.wireguard_key, answers.qbit_password,
-                 answers.jellyfin_key, answers.alert_url, answers.web_password]
+                 answers.jellyfin_key, answers.alert_url, answers.web_password,
+                 answers.autodeploy_token]
             )  # fmt: skip
             ctx = Context(
                 root=root, answers=answers, runner=runner, say=term.say, lang=lang, login=login,
@@ -668,6 +686,15 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
                 term.say("  " + error.detail.splitlines()[-1][:300])
             term.say(conv.tr("step.failed_more", log=str(log_path)))
             return 1
+        autodeploy_failed = False
+        try:
+            setup_autodeploy(ctx)
+        except StepError as error:
+            term.say("")
+            term.say(conv.tr(error.hint))
+            if error.detail and error.detail != error.hint:
+                term.say("  " + error.detail.splitlines()[-1][:300])
+            autodeploy_failed = True
         if args.dry_run:
             term.say("")
             term.say(conv.tr("done.dry"))
@@ -680,7 +707,7 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
             else {},
             True,
         )
-        return 0
+        return 3 if autodeploy_failed else 0
     except (KeyboardInterrupt, EOFError):
         term.say("")
         term.say(t(lang if lang in ("de", "en") else "en", "interrupted"))

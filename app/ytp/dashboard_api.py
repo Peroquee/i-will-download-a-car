@@ -5,12 +5,16 @@
      "recent": [{id, type, kind, label, status, error, can_retry, created_at, updated_at}, ...],
      "vpn": {"current": {state, since, paused, egress, country}, "history": [{time, condition,
              paused, reason}, ...]},
-     "disk": {free_percent, free_gb, total_gb} | null}
+     "disk": {free_percent, free_gb, total_gb} | null,
+     "deploy": {deployed, deployed_at, result, message, paused, halted, checked_at} | null}
 
 * `active`: everything queued, downloading or organizing, of every kind (torrent, YouTube,
   podcast). `progress` is a percent, `done_bytes`/`total_bytes` sizes, `speed` bytes per second and
   `eta` seconds; each is null while unknown (a queued job, metadata still loading, the worker has
   not reported yet). Torrent numbers come from the same cached qBittorrent call as the job list.
+* `deploy` (#42) is the small status file the automatic update writes into the app's config
+  folder (`autodeploy-status.json`: the installed version, the last result, paused or halted; no
+  address and no secret), or null when automatic updates are not set up.
 * `recent`: the 20 newest done/failed jobs with the reason for a failure; `can_retry` is true for
   a failed one (the retry itself is POST /api/jobs/{id}/retry).
 * `vpn.current` is the watchdog's status reduced to what is safe to show (no address); `history`
@@ -20,6 +24,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -38,6 +44,20 @@ RECENT = 20
 HISTORY = 30
 ETA_UNKNOWN = 8640000  # qBittorrent's "infinity"
 SAFE_VPN_KEYS = ("state", "since", "paused", "egress", "egress_country")
+
+
+DEPLOY_KEYS = ("deployed", "deployed_at", "result", "message", "paused", "halted", "checked_at")
+
+
+def deploy_status(config_dir: Path) -> dict[str, Any] | None:
+    """The automatic update's public status, reduced to known keys; None if there is none."""
+    try:
+        data = json.loads((config_dir / "autodeploy-status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("enabled") is not True:
+        return None
+    return {key: data.get(key) for key in DEPLOY_KEYS}
 
 
 def active_row(
@@ -122,6 +142,7 @@ async def dashboard(request: Request):
             "recent": [recent_row(j) for j in recent],
             "vpn": {"current": current, "history": history},
             "disk": disk,
+            "deploy": await asyncio.to_thread(deploy_status, state.settings.config_dir),
         }
     )
 

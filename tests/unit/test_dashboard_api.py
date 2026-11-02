@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -287,3 +288,27 @@ def test_the_podcast_hook_records_size_and_derives_speed(client):
     assert (details["done_bytes"], details["total_bytes"]) == (500, 1000)
     assert details["speed"] is None or details["speed"] > 0
     hook(0, None)  # unknown size: nothing recorded, nothing breaks
+
+
+# --- the automatic update's status (#42) ---------------------------------------------------
+
+
+def test_the_dashboard_shows_the_automatic_updates_status_when_there_is_one(client, tmp_path):
+    assert client.get("/api/dashboard").json()["deploy"] is None
+    status = {
+        "enabled": True, "paused": False, "halted": False, "deployed": "abc123def456",
+        "deployed_at": "2026-11-02T10:00:00Z", "result": "deployed", "message": "m",
+        "checked_at": "2026-11-02T10:05:00Z", "secret_extra": "must not pass",
+    }  # fmt: skip
+    (tmp_path / "config" / "autodeploy-status.json").write_text(json.dumps(status))
+    deploy = client.get("/api/dashboard").json()["deploy"]
+    assert deploy["deployed"] == "abc123def456"
+    assert deploy["result"] == "deployed"
+    assert "secret_extra" not in deploy
+    assert "enabled" not in deploy
+
+
+@pytest.mark.parametrize("text", ["not json", "[]", '{"enabled": false}', ""])
+def test_a_broken_or_disabled_status_file_is_ignored(client, tmp_path, text):
+    (tmp_path / "config" / "autodeploy-status.json").write_text(text)
+    assert client.get("/api/dashboard").json()["deploy"] is None

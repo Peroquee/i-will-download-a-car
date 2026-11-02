@@ -99,6 +99,7 @@ neuer Start von `./install.sh` macht dort weiter, wo es aufgehört hat.
 | Jellyfin-Adresse und API-Schlüssel (freiwillig) | damit Jellyfin nach einem Download neu einliest | `JELLYFIN_URL`, `JELLYFIN_API_KEY` |
 | Adresse für Warnungen (freiwillig) | Nachricht, wenn das VPN ausfällt | `ALERT_URL` |
 | Öffentliche Adresse / IPv6-Präfix des Anschlusses (freiwillig) | Zusatzprüfung: sie darf nie im VPN-Verkehr auftauchen | `HOME_PUBLIC_IP` |
+| Adresse des Repositorys für automatische Updates (freiwillig) | die App sucht dort alle 5 Minuten nach neuen Versionen und installiert grüne (Token in `config/autodeploy/token`, siehe docs/autodeploy.md) | `AUTODEPLOY_REMOTE` |
 | Zeitzone | Uhrzeiten in Protokollen | `TZ` |
 | (wird nicht gefragt) | die Mediendateien gehören Benutzer und Gruppe 1000; es wird keine VPN-Stadt gewählt | `PUID`, `PGID`, `VPN_SERVER_CITIES` |
 

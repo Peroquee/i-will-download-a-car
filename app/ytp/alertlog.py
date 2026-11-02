@@ -102,6 +102,48 @@ def _clean_params(params: dict[str, Any] | None) -> dict[str, Any]:
     return cleaned
 
 
+def insert(
+    conn: sqlite3.Connection,
+    kind: str,
+    severity: str,
+    title: str,
+    detail: str = "",
+    params: dict[str, Any] | None = None,
+    *,
+    key: str | None = None,
+) -> sqlite3.Row | None:
+    """The insert itself, on a connection (inside the caller's transaction, `row_factory` Row).
+
+    Shared by `add` and by host scripts that write to the app's database directly (the automatic
+    update, #42). Returns the new row, or None if `key` was recorded before.
+    """
+    if not KIND.fullmatch(kind):
+        raise ValueError(f"bad alert kind {kind!r}")
+    if severity not in SEVERITIES:
+        raise ValueError(f"severity must be one of {', '.join(SEVERITIES)}")
+    cursor = conn.execute(
+        "INSERT INTO alerts (kind, severity, title, detail, params, dedupe_key) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING",
+        (
+            kind,
+            severity,
+            _clean(title, MAX_TEXT),
+            _clean(detail, MAX_TEXT),
+            json.dumps(_clean_params(params), ensure_ascii=False),
+            key,
+        ),
+    )
+    if cursor.rowcount != 1:
+        return None
+    row = conn.execute("SELECT * FROM alerts WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    conn.execute(
+        "DELETE FROM alerts WHERE id NOT IN (SELECT id FROM alerts ORDER BY id DESC LIMIT ?) "
+        "OR created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
+        (MAX_ALERTS, f"-{MAX_AGE_DAYS} days"),
+    )
+    return row
+
+
 def add(
     db: Database,
     kind: str,
@@ -113,32 +155,9 @@ def add(
     key: str | None = None,
 ) -> Alert | None:
     """Record an alert. Returns it, or None if `key` was recorded before."""
-    if not KIND.fullmatch(kind):
-        raise ValueError(f"bad alert kind {kind!r}")
-    if severity not in SEVERITIES:
-        raise ValueError(f"severity must be one of {', '.join(SEVERITIES)}")
     with db.transaction() as conn:
-        cursor = conn.execute(
-            "INSERT INTO alerts (kind, severity, title, detail, params, dedupe_key) "
-            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING",
-            (
-                kind,
-                severity,
-                _clean(title, MAX_TEXT),
-                _clean(detail, MAX_TEXT),
-                json.dumps(_clean_params(params), ensure_ascii=False),
-                key,
-            ),
-        )
-        if cursor.rowcount != 1:
-            return None
-        row = conn.execute("SELECT * FROM alerts WHERE id = ?", (cursor.lastrowid,)).fetchone()
-        conn.execute(
-            "DELETE FROM alerts WHERE id NOT IN (SELECT id FROM alerts ORDER BY id DESC LIMIT ?) "
-            "OR created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
-            (MAX_ALERTS, f"-{MAX_AGE_DAYS} days"),
-        )
-    return Alert.from_row(row)
+        row = insert(conn, kind, severity, title, detail, params, key=key)
+    return Alert.from_row(row) if row is not None else None
 
 
 def list_alerts(db: Database, *, limit: int = 50, unread_only: bool = False) -> list[Alert]:

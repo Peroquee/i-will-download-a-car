@@ -293,6 +293,12 @@ The app keeps its jobs and YouTube subscriptions in one SQLite file, `/config/ap
   **refuses to start the database** (and says so) if an applied file was edited afterwards, or
   if the database is from a newer version than the image. To change the schema, add a file;
   never edit one that has shipped.
+- **Migrations only add, in one release** (rule since the automatic update, #42, see
+  [autodeploy.md](autodeploy.md)): new tables, new nullable or defaulted columns. Dropping or
+  renaming happens in a *later* release, once no code uses it, so that the previous version can
+  still run on the new schema. A table rebuild (0005) must keep every row and id. A unit test
+  fails for `DROP`/`RENAME`/`DELETE FROM` in a new migration; an exception is added to its allow
+  list on purpose.
 
 Tables (`0001_initial.sql`): `jobs` (type `magnet`|`youtube`, `external_id` = infohash or video
 id, unique per type; `metadata` is a JSON object; `status` queued, downloading, organizing, done

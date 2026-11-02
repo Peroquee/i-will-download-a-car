@@ -60,6 +60,7 @@ can read the VPN.
 | YouTube | `youtube.py`, `youtube_download.py`, `youtube_jobs.py` | probe (title, channel), download with yt-dlp through gluetun's proxy, file into `Youtube/<channel>/` |
 | Subscriptions | `channels.py`, `subscriptions.py`, `feeds.py`, `subscription_poller.py` | resolve a channel once, poll its RSS feed slowly, queue only videos published after subscribing |
 | Alerts and dashboard | `alertlog.py`, `monitor.py`, `alerts_api.py`, `dashboard_api.py`, `static/dashboard.js` | an alert log written by a scheduled monitor (VPN changes seen through the watchdog's status, failed jobs, feed errors, disk space), the strip under the VPN bar and `/dashboard` ([dashboard.md](dashboard.md)) |
+| Automatic updates | `scripts/ops/autodeploy.py`, `scripts/ops/systemd/` | a host timer pulls a green, healthy `main` with a read-only token, backs up, deploys and rolls back on failure ([autodeploy.md](autodeploy.md)) |
 | Jellyfin | `clients/jellyfin.py` | debounced library refresh |
 | VPN view | `clients/watchdog.py` | reads the watchdog's status for the page |
 | Scheduler | `scheduler.py` | the one place that runs periodic jobs (reconciler, poller, Jellyfin refresh, heartbeat) |
