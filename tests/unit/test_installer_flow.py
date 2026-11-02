@@ -644,3 +644,55 @@ def test_no_warning_about_the_vpn_type_that_is_not_used(repo, tmp_path, ovpn):
     _, term, _ = play(repo, tmp_path, new_install_rules(ovpn))
     assert "still missing" not in term.text
     assert "WIREGUARD" not in term.text
+
+
+# --- qBittorrent behind the proxy: the Web UI settings go in through its API ---------------------
+
+
+def test_the_settings_for_the_proxy_are_applied_through_the_api_without_stopping_qbittorrent(
+    repo, tmp_path, ovpn
+):
+    _, _, runner = play(repo, tmp_path, new_install_rules(ovpn))
+    assert runner.ran("setup_categories.py")
+    assert not runner.ran("compose stop qbittorrent")
+    assert not runner.ran("--fix-host-header")
+
+
+def test_repair_applies_them_again_after_the_stack_is_up(repo, tmp_path, ovpn):
+    play(repo, tmp_path, new_install_rules(ovpn))
+    _, _, runner = play(repo, tmp_path, [("1 = Change settings", "3")])
+    assert runner.index("docker compose up -d --build") < runner.index("setup_categories.py")
+    assert not runner.ran("compose stop qbittorrent")
+
+
+def test_update_applies_them_after_the_new_version_is_up_and_before_the_host_checks(
+    repo, tmp_path, ovpn
+):
+    play(repo, tmp_path, new_install_rules(ovpn))
+    _, _, runner = play(repo, tmp_path, [], argv=["--update"])
+    up = max(i for i, c in enumerate(runner.commands) if c[:4] == ["docker", "compose", "up", "-d"])
+    api = max(i for i, c in enumerate(runner.commands) if "setup_categories.py" in " ".join(c))
+    checks = runner.index("check-host.sh --env-file")
+    assert up < api < checks
+    stdin = [text for argv, text in runner.inputs if "setup_categories.py" in " ".join(argv)]
+    assert stdin
+    assert stdin[-1].strip() == SECRETS["qbit"], "the password goes in through stdin"
+
+
+def test_update_without_a_qbittorrent_password_skips_the_step_instead_of_failing(
+    repo, tmp_path, ovpn
+):
+    play(repo, tmp_path, new_install_rules(ovpn))
+    env = (repo / ".env").read_text().replace(f"QBIT_PASSWORD={SECRETS['qbit']}", "QBIT_PASSWORD=")
+    (repo / ".env").write_text(env)
+    code, term, runner = play(repo, tmp_path, [], argv=["--update"])
+    assert code == 0, term.text
+    assert len(runner.ran("setup_categories.py")) == 0
+
+
+def test_a_failing_api_step_stops_the_update_with_its_hint(repo, tmp_path, ovpn):
+    play(repo, tmp_path, new_install_rules(ovpn))
+    runner = FakeRunner(repo)
+    runner.fail("setup_categories.py", 1, "boom")
+    code, _, _ = play(repo, tmp_path, [], argv=["--update"], runner=runner)
+    assert code == 1

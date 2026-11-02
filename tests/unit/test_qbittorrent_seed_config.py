@@ -185,3 +185,29 @@ def test_a_bad_port_is_refused(tmp_path, port):
     result = run(tmp_path / "c.conf", "--port", port)
     assert result.returncode == 2
     assert not (tmp_path / "c.conf").exists()
+
+
+# --- the proxy on :8081 (qBittorrent answered 401 to a Host header with another port) -----------
+
+
+def test_a_new_config_turns_host_header_validation_off_and_keeps_csrf_protection_on(tmp_path: Path):
+    config = tmp_path / "qBittorrent.conf"
+    assert run(config).returncode == 0
+    text = config.read_text()
+    assert "WebUI\\HostHeaderValidation=false" in text
+    assert "WebUI\\CSRFProtection=true" in text
+    assert "WebUI\\CSRFProtection=false" not in text
+    assert text.count("WebUI\\HostHeaderValidation=") == 1
+
+
+def test_an_old_csrf_off_or_validation_on_line_is_overwritten(tmp_path: Path):
+    config = tmp_path / "qBittorrent.conf"
+    config.write_text(
+        "[Preferences]\nWebUI\\CSRFProtection=false\nWebUI\\HostHeaderValidation=true\n"
+    )
+    assert run(config).returncode == 0
+    text = config.read_text()
+    assert text.count("WebUI\\CSRFProtection=") == 1
+    assert "WebUI\\CSRFProtection=true" in text
+    assert "WebUI\\HostHeaderValidation=false" in text
+    assert "HostHeaderValidation=true" not in text

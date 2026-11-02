@@ -9,7 +9,10 @@ stores everything) and makes sure that:
   * the default save path is /data/downloads, unfinished torrents sit in
     /data/downloads/incomplete (so half-finished files are never in a category folder);
   * Automatic Torrent Management is on for new torrents, which is what makes a torrent
-    added with a category land in that category's folder.
+    added with a category land in that category's folder;
+  * the Web UI accepts the Host header of the proxy (host header validation off, CSRF protection
+    on), see docs/proxy.md. Through the API this also repairs a qBittorrent.conf that was made
+    before the proxy existed, without stopping qBittorrent or editing its file.
 
 Other categories and all other settings are left alone. Safe to re-run: it changes only
 what differs and says so.
@@ -52,6 +55,11 @@ WANTED_PREFERENCES: dict[str, object] = {
     "torrent_changed_tmm_enabled": True,
     "save_path_changed_tmm_enabled": True,
     "category_changed_tmm_enabled": True,
+    # The proxy on :8081 sends "Host: <lan address>:8081" to the Web UI on :8080, which qBittorrent
+    # refuses (401) while its host header validation is on. CSRF protection (Origin against Host)
+    # stays on. Only Caddy (LAN check + login) and localhost reach the port; docs/proxy.md.
+    "web_ui_host_header_validation_enabled": False,
+    "web_ui_csrf_protection_enabled": True,
 }
 
 

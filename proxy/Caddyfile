@@ -47,7 +47,8 @@
 # qBittorrent's Web UI, which lives in gluetun's network namespace and is therefore
 # reached as gluetun:8080 over the bridge. Its own login stays on as a second layer.
 # The Host header is passed through unchanged, which is what qBittorrent's CSRF check
-# (Origin against Host) needs: it would answer 401 if the port differed.
+# (Origin against Host) needs. qBittorrent's separate Host header validation is switched off
+# (seed_config.py): with it on, a Host with port 8081 on a Web UI at 8080 gets a 401.
 :8081 {
 	log {
 		output stdout

@@ -17,6 +17,15 @@ the host, with the qbittorrent container STOPPED: qBittorrent rewrites its confi
 on exit and would overwrite the change. Safe to re-run; it replaces only the keys
 it owns and keeps everything else in the file.
 
+**Host header check off, CSRF protection on.** qBittorrent answers 401 to any request whose `Host`
+header names another port than its own (8080 inside gluetun). Through the proxy on 8081 the
+browser's `Host` is `<lan address>:8081`, so the Web UI could never be reached that way. The key
+`WebUI\\HostHeaderValidation` is therefore set to false, and `WebUI\\CSRFProtection` is set to
+true explicitly. Only Caddy (LAN check, then login) and localhost on the VM can reach the port;
+see docs/proxy.md. This covers a NEW config. For one that already exists (and may be rewritten by
+a running qBittorrent), `scripts/qbittorrent/setup_categories.py` sets the same two preferences
+through the Web API, which needs no stop and no file editing.
+
 Test hook: none needed, --config points it at any file.
 """
 
@@ -44,6 +53,13 @@ KEY_BYTES = 64
 MIN_PASSWORD_LENGTH = 10
 USER_PATTERN = re.compile(r"[A-Za-z0-9._-]{3,64}")
 
+# The proxy on :8081 sends Host "<lan address>:8081" to a Web UI on :8080, which qBittorrent
+# refuses (401) while host header validation is on. CSRF protection (Origin against Host) stays on.
+PROXY_SETTINGS = {
+    "WebUI\\HostHeaderValidation": "false",
+    "WebUI\\CSRFProtection": "true",
+}
+
 VPN_INTERFACE = "tun0"
 WEBUI_PORT = "8080"  # the container-side port gluetun publishes (docker-compose.yml)
 
@@ -67,6 +83,7 @@ def wanted_settings(user: str, password: str, port: str = WEBUI_PORT) -> dict[st
             # Ask for the login from every client, localhost and LAN included.
             "WebUI\\LocalHostAuth": "true",
             "WebUI\\AuthSubnetWhitelistEnabled": "false",
+            **PROXY_SETTINGS,
         },
         "BitTorrent": {
             "Session\\Interface": VPN_INTERFACE,

@@ -9,7 +9,9 @@ In this order, and it stops at the first failure with the old version still runn
    setting would stop `docker compose`); nothing the owner set is touched;
 4. the VPN file is rendered again (server addresses rotate);
 5. `docker compose up -d --build` and the wait until every service is healthy;
-6. the host checks.
+6. qBittorrent's categories and the Web UI settings of the proxy are applied again through its
+   API (a qBittorrent.conf from before the proxy lacks them; this needs no stop of qBittorrent);
+7. the host checks.
 """
 
 from __future__ import annotations
@@ -17,7 +19,13 @@ from __future__ import annotations
 import os
 
 from .envfile import apply_settings, missing_settings, parse_env, write_env
-from .steps import PLACEHOLDER, Context, StepError, wait_healthy
+from .steps import (
+    PLACEHOLDER,
+    Context,
+    StepError,
+    step_qbit,
+    wait_healthy,
+)
 
 
 def sync_env_defaults(ctx: Context) -> list[str]:
@@ -74,6 +82,9 @@ def run_update(ctx: Context, state, conv) -> int:
         if not runner.run(["docker", "compose", "up", "-d", "--build"], stream=True).ok:
             raise StepError("step.start.hint")
         wait_healthy(ctx)
+        if ctx.answers.qbit_password:
+            # categories and the Web UI settings of the proxy, through its API (idempotent)
+            step_qbit(ctx)
         if not runner.run(
             [ctx.script("host", "check-host.sh"), "--env-file", ".env"], stream=True
         ).ok:
