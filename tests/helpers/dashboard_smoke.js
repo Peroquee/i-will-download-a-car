@@ -12,6 +12,14 @@ class Node {
   }
   appendChild(child) { this.children.push(child); return child; }
   setAttribute(k, v) { this.attrs[k] = v; }
+  removeAttribute(k) { delete this.attrs[k]; }
+  get classList() {
+    const node = this;
+    return {
+      add(name) { if (!node.className.split(" ").includes(name)) node.className = (node.className + " " + name).trim(); },
+      remove(name) { node.className = node.className.split(" ").filter((c) => c && c !== name).join(" "); },
+    };
+  }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
   click() { (this.listeners.click || []).forEach((fn) => fn()); }
   scrollIntoView() { this.scrolled = true; }
@@ -70,7 +78,7 @@ setTimeout(() => {
 function finish() {
   dash.render();
   const out = { calls, nodes: {} };
-  for (const id of Object.keys(byId)) out.nodes[id] = { text: byId[id].textContent, hidden: byId[id].hidden, children: byId[id].children.map((c) => ({ cls: c.className, text: c.textContent, id: c.id })) };
+  for (const id of Object.keys(byId)) out.nodes[id] = { text: byId[id].textContent, hidden: byId[id].hidden, attrs: byId[id].attrs, cls: byId[id].className, scrolled: !!byId[id].scrolled, children: byId[id].children.map((c) => ({ cls: c.className, text: c.textContent, id: c.id })) };
   out.views = viewNodes.map((n) => [n.dataset.view, n.hidden]);
   out.strip = document.getElementById("alert-strip-list").children.map((c) => ({ cls: c.className, text: c.textContent, href: (c.children[0] || {}).href }));
   console.log(JSON.stringify(out));

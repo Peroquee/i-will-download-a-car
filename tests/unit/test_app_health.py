@@ -94,6 +94,8 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/alerts/{alert_id}",
         "/api/alerts/{alert_id}/ack",
         "/api/dashboard",
+        "/api/version",  # the static version, to notice an update (#43)
+        "/reload-needed",  # where a form goes that the scripts did not take over
         "/",
         "/dashboard",  # the same page, in its dashboard view (#38)
         "/static",  # the form's files (#25)

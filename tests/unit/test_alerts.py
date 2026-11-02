@@ -523,6 +523,7 @@ def test_api_vpn_shows_the_watchdogs_state(tmp_path, gluetun, qbit_server, targe
 
 def test_api_vpn_is_unknown_when_the_watchdog_is_away_and_health_does_not_care(tmp_path):
     with make_app(tmp_path, f"http://127.0.0.1:{free_port()}") as client:
+        client.app.state.started_at -= 120  # past the first minute (#43: "starting" before that)
         response = client.get("/api/vpn")
         assert response.status_code == 200
         assert response.json()["state"] == "unknown"

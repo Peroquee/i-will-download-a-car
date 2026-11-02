@@ -15,6 +15,7 @@ placed anywhere else.
 Cross-cutting markers, combinable with any level:
 
 - `security`: guards a ground rule (VPN-only traffic, LAN-only, no secrets in git). `pytest -m security` must always pass.
+- `tests/system/test_c43_browser.py` is a **real browser** test (headless Chromium in the Playwright container against the app running in the test process; gated by `YTP_NETWORK_TESTS=1` and Docker, not part of the pipeline, run on the VM; `YTP_PLAYWRIGHT_IMAGE` overrides the image). The script it runs is `tests/system/browser/ui_checks.py`.
 - The browser-side tests in `test_web_ui.py` (about 110, including the dashboard smoke test) need `node`: `test:unit` installs Debian's 18 series; in CI they **fail** if it is missing, locally they skip with a loud reason.
 - Tests that build real git repositories (`test_autodeploy.py`) need `git`: the `test:unit` job installs it (Debian's 2.39 series) and the tests **fail** in CI if it is missing; locally they skip with a loud reason.
 - `compose`, `docker`, `tun`, `network`: required capabilities. Missing ones **skip with a reason** locally and **fail** in CI (`REQUIRE_CAPABILITIES=1`), so a broken runner can't produce a green pipeline.

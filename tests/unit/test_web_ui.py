@@ -52,7 +52,7 @@ def test_the_form_is_served_at_the_root(client):
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-cache"
     assert "<html" in response.text
-    assert 'src="/static/app.js"' in response.text
+    assert re.search(r'src="/static/app\.js\?v=[0-9a-f]{12}"', response.text)
 
 
 @pytest.mark.parametrize(
@@ -339,6 +339,8 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "subs.target_podcast",
         "yt.podcast",
         "yt.album",
+        "nav.dashboard",  # the same word in both languages
+        "vpn.details",
     }, same
 
 
@@ -640,7 +642,9 @@ def test_the_guide_is_a_dialog_with_a_close_button_and_a_visible_opener():
     assert 'id="howto-title"' in HTML
     assert re.search(r'<button type="button" id="howto-open"[^>]*aria-haspopup="dialog"', HTML)
     assert 'id="howto-close"' in HTML
-    assert HTML.index('id="howto-open"') < HTML.index('id="lang"'), "next to the language button"
+    nav = re.search(r'<nav id="topnav".*?</nav>', HTML, re.S)
+    assert nav
+    assert 'id="howto-open"' in nav.group(0), "the guide is an item of the main navigation"
     assert "showModal" in APP_JS, "the native dialog gives Esc and a focus trap"
 
 
@@ -989,7 +993,7 @@ def test_alert_texts_only_use_values_the_monitor_provides():
 
 def test_the_strip_sits_under_the_vpn_bar_and_the_dashboard_is_a_view_of_the_same_page():
     assert HTML.index('id="vpn"') < HTML.index('id="alert-strip"') < HTML.index('class="wrap"')
-    assert 'id="nav-link"' in HTML
+    assert 'id="topnav"' in HTML
     assert 'id="dashboard"' in HTML
     assert 'data-view="dashboard"' in HTML
     assert 'data-view="input"' in HTML
@@ -1131,7 +1135,8 @@ def test_the_strip_lists_unread_alerts_with_links_to_their_detail_on_the_dashboa
     assert chips[1]["text"].startswith("English fallback title")
     assert out["nodes"]["alert-strip"]["hidden"] is False
     assert out["nodes"]["alert-strip-ack"]["hidden"] is False, "two unread: the 'all' button shows"
-    assert out["nodes"]["nav-link"]["text"] == "Dashboard"
+    assert out["nodes"]["nav-input"]["attrs"].get("aria-current") == "page"
+    assert "aria-current" not in out["nodes"]["nav-dashboard"]["attrs"]
     assert ["GET", "/api/dashboard"] not in out["calls"], (
         "the input page does not load the dashboard"
     )
@@ -1176,7 +1181,8 @@ def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
     assert "no sources for 7 days" in log[0]["text"]
     assert "What you can do:" in log[0]["text"]
     assert "English fallback detail" in log[1]["text"], "an unknown kind shows the server's text"
-    assert out["nodes"]["nav-link"]["text"] == "Input form"
+    assert out["nodes"]["nav-dashboard"]["attrs"].get("aria-current") == "page"
+    assert "aria-current" not in out["nodes"]["nav-input"]["attrs"]
     assert out["nodes"]["dash-alerts-ack"]["hidden"] is False
 
 
