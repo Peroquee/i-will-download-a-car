@@ -667,3 +667,26 @@ def test_the_followers_of_a_subscription_show_for_the_admin_and_only_a_count_for
     assert user["reads"]["#subs-list"]["children"] == 1
     assert "1 other person(s) follow this too" in user["reads"]["#subs-list"]["text"]
     assert "alice" not in user["reads"]["#subs-list"]["text"]
+
+
+@needs_node
+def test_the_page_scrolls_to_its_anchor_once_the_sign_in_is_known():
+    """The browser scrolls to #subscriptions on load, when that part is still hidden (the
+    sign-in is not known yet): the script has to do it afterwards (found in the real browser)."""
+    out = page("/", "#subscriptions")
+    assert out["errors"] == [], out["errors"]
+    assert "subscriptions" in out["scrolled"]
+
+
+@needs_node
+def test_a_visitor_is_not_scrolled_anywhere():
+    out = page("/", "#subscriptions", answers=SIGNED_OUT)
+    assert out["scrolled"] == []
+
+
+@needs_node
+def test_an_odd_hash_scrolls_nowhere_and_breaks_nothing():
+    for hash_ in ("#", "#nope", "#a b", "#" + "x" * 50):
+        out = page("/", hash_)
+        assert out["errors"] == [], out["errors"]
+        assert out["scrolled"] == []

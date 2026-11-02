@@ -985,7 +985,17 @@
     auth.check().then(function (account) {
       if (account) startApp();
       auth.start(dash ? dash.view() : "input");
+      scrollToAnchor();
     });
+  }
+
+  /* The browser scrolls to #subscriptions when the page loads, but until the sign-in is known that
+     part is hidden and there is nothing to scroll to: do it once it shows. */
+  function scrollToAnchor() {
+    var id = (window.location.hash || "").replace(/^#/, "");
+    if (!/^[A-Za-z][\w-]*$/.test(id) || (auth && !auth.isIn())) return;
+    var target = document.getElementById(id);
+    if (target && !target.hidden && typeof target.scrollIntoView === "function") target.scrollIntoView();
   }
 
   function startApp() {

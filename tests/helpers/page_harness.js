@@ -12,6 +12,7 @@ const steps = JSON.parse(stepsJson || "[]");
 const answers = JSON.parse(answersJson || "{}");
 
 // ------------------------------------------------------------------ the DOM
+const scrolled = [];
 const VOID = new Set(["meta", "link", "input", "br", "img", "hr", "source", "path", "ellipse", "circle", "text", "rect", "line"]);
 class TextNode { constructor(t) { this.nodeType = 3; this._text = t; this.parentNode = null; } get textContent() { return this._text; } }
 class El {
@@ -72,7 +73,7 @@ class El {
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   removeEventListener() {}
   dispatchEvent(e) { (this.listeners[e.type] || []).forEach((f) => f(e)); return true; }
-  focus() {} blur() {} select() {} scrollIntoView() {} click() { this.dispatchEvent({ type: "click", target: this, preventDefault() {} }); }
+  focus() {} blur() {} select() {} scrollIntoView() { scrolled.push(this.id); } click() { this.dispatchEvent({ type: "click", target: this, preventDefault() {} }); }
   showModal() { this.open = true; } close() { this.open = false; }
   closest(sel) { let n = this; while (n && n.nodeType === 1) { if (matches(n, parseCompound(sel.trim()))) return n; n = n.parentNode; } return null; }
   querySelectorAll(sel) { return queryAll(this, sel); }
@@ -199,7 +200,7 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
   }
   const warning = document.getElementById("js-warning");
   console.log(JSON.stringify({
-    errors, warningHidden: warning ? warning.hidden : null, fetched, reads, prevented, reloads,
+    errors, warningHidden: warning ? warning.hidden : null, fetched, reads, prevented, reloads, scrolled,
     auth: tree.attrs["data-auth"] || null, role: tree.attrs["data-role"] || null, href: location.href,
     version: (document.querySelector('meta[name="ytp-static-version"]') || { attrs: {} }).attrs.content || null,
     banner: document.getElementById("update-banner").hidden,
