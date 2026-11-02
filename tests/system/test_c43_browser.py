@@ -123,4 +123,4 @@ def test_the_page_works_in_a_real_browser(base_url):
     )  # fmt: skip
     output = result.stdout + "\n" + result.stderr
     assert result.returncode == 0, output
-    assert output.count("ok  ") >= 9, output
+    assert output.count("ok  ") >= 10, output
