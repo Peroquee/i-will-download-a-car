@@ -152,6 +152,8 @@ services:
       # .env to fetch directly. (No colon: unset = default.) How often feeds are checked, in minutes.
       PODCAST_PROXY: ${PODCAST_PROXY-http://gluetun:8888}
       PODCAST_POLL_MINUTES: ${PODCAST_POLL_MINUTES:-240}
+      # Give up on a magnet link that shows no progress for this many days; 0 = never (#40).
+      MAGNET_STALL_DAYS: ${MAGNET_STALL_DAYS:-7}
       # Networks podcast fetches never go to, besides the private ones: the home line's own global
       # addresses (DS-Lite: the LAN has native global IPv6), see docs/podcasts.md. HOME_PUBLIC_IP is
       # the same setting the watchdog's egress check uses (#23).

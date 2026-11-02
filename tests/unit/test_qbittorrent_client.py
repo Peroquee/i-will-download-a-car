@@ -564,3 +564,28 @@ def test_from_settings_uses_url_user_and_password():
     client = QbitClient.from_settings(settings)
     assert client.base_url == "http://gluetun:8080"
     assert "p" * 12 not in repr(client)
+
+
+def test_delete_torrents_sends_the_hash_and_the_files_flag_in_the_body(fake):
+    fake.torrents = [{"hash": "a" * 40}, {"hash": "b" * 40}]
+    client_for(fake).delete_torrents(["A" * 40], delete_files=True)
+    call = fake.calls("torrents/delete")[0]
+    assert call.method == "POST"
+    assert call.form == {"hashes": ["a" * 40], "deleteFiles": ["true"]}
+    assert call.query == {}
+    assert [t["hash"] for t in fake.torrents] == ["b" * 40]
+    client_for(fake).delete_torrents(["b" * 40], delete_files=False)
+    assert fake.calls("torrents/delete")[1].form["deleteFiles"] == ["false"]
+
+
+def test_delete_torrents_refuses_anything_that_is_not_an_infohash(fake):
+    for bad in ([], ["all"], ["a" * 40 + "|" + "b" * 40], ["../x"]):
+        with pytest.raises(ValueError, match="infohash"):
+            client_for(fake).delete_torrents(bad, delete_files=True)
+    assert fake.calls("torrents/delete") == []
+
+
+def test_delete_torrents_reports_a_refusal(fake):
+    fake.delete_status = 500
+    with pytest.raises(QbitUnavailable):  # a 5xx answer, like every other call
+        client_for(fake).delete_torrents(["a" * 40], delete_files=True)

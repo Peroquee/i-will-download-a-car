@@ -40,6 +40,7 @@ class FakeQbittorrent:
     list_status: int = 200
     fail_status: int | None = None  # answer every authenticated call with this status
     reject_sessions: bool = False  # even a fresh login does not help: every API call is 403
+    delete_status: int = 200  # torrents/delete answers this (anything else: nothing is removed)
     bad_filters: set[str] = field(default_factory=set)  # torrents/info?filter=<these> -> 400
     seen: list[Seen] = field(default_factory=list)
     sid: str = "SID-0001"
@@ -173,6 +174,12 @@ class FakeQbittorrent:
                     if "filter" in query:
                         items = [t for t in items if query["filter"][0] in t.get("_filters", [])]
                     return self.reply(200, json.dumps(items), {"Content-Type": "application/json"})
+                if path == "torrents/delete":
+                    if fake.delete_status != 200:
+                        return self.reply(fake.delete_status, "bad")
+                    gone = form.get("hashes", [""])[0].split("|")
+                    fake.torrents = [t for t in fake.torrents if t["hash"] not in gone]
+                    return self.reply(200, "")
                 names_5, names_4 = {"stop", "start"}, {"pause", "resume"}
                 leaf = path.removeprefix("torrents/")
                 if path.startswith("torrents/") and leaf in names_5 | names_4:

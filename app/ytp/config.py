@@ -78,6 +78,8 @@ class Settings:
     # How often a subscribed podcast's feed is looked at, in minutes (0 = never). Slower than the
     # YouTube channels: a podcast publishes a few times a week at most.
     podcast_poll_minutes: int = 240
+    # Give up on a magnet link with no progress for this many days; 0 = never (#40).
+    magnet_stall_days: int = 7
     # Networks the app never fetches from (podcasts): HOME_PUBLIC_IP plus FETCH_BLOCKED_NETWORKS,
     # i.e. the home network's own global IPv6 prefixes. Semi-secret like HOME_PUBLIC_IP: never in
     # repr/str or a log line, only the count (see `summary`).
@@ -235,6 +237,13 @@ class Settings:
         else:
             problems.append("PODCAST_POLL_MINUTES must be 0 (off) or between 30 and 1440")
 
+        raw_stall = text("MAGNET_STALL_DAYS", "7")
+        stall_days = 7
+        if raw_stall.isdigit() and 0 <= int(raw_stall) <= 365:
+            stall_days = int(raw_stall)
+        else:
+            problems.append("MAGNET_STALL_DAYS must be 0 (never) or a number of days up to 365")
+
         blocked: list = []
         for name in ("HOME_PUBLIC_IP", "FETCH_BLOCKED_NETWORKS"):
             try:
@@ -264,6 +273,7 @@ class Settings:
             subscription_poll_minutes=poll_minutes,
             podcast_proxy=podcast_proxy,
             podcast_poll_minutes=podcast_poll,
+            magnet_stall_days=stall_days,
             fetch_blocked_networks=tuple(blocked),
         )
 
