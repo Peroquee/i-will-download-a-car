@@ -7,8 +7,8 @@ lookup and for the download so nothing leaves the machine). Headless Chromium ru
 container with the host's network and executes `browser/ui_checks.py`: the form makes a job, the
 navigation and the VPN bar go where they say, a page without its scripts ends on the reload page,
 and an update while a page is open gets a banner. Not part of the pipeline: the image is large; run
-it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the browsers; the matching `playwright`
-package is installed with pip inside the container, `YTP_PLAYWRIGHT_VERSION` names its version).
+it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the browsers); the matching
+`playwright` package is installed with pip inside the container (`YTP_PLAYWRIGHT_VERSION`).
 """
 
 from __future__ import annotations
@@ -109,7 +109,8 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
 def test_the_page_works_in_a_real_browser(base_url):
     install_and_run = (
-        f"python -m pip install --quiet --disable-pip-version-check playwright=={PLAYWRIGHT_VERSION}"
+        "python -m pip install --quiet --disable-pip-version-check "
+        f"playwright=={PLAYWRIGHT_VERSION}"
         ' && exec python /checks/ui_checks.py "$0"'
     )
     result = docker.run(
