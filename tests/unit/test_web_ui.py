@@ -6,6 +6,7 @@ the browser-side helpers (run with node when it is installed; skipped otherwise)
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -384,12 +385,23 @@ def test_the_page_names_umlauts_correctly():
 # --- the browser helpers, with node ----------------------
 
 NODE = shutil.which("node")
-needs_node = pytest.mark.skipif(
-    NODE is None, reason="node is not installed (runs on developer machines)"
+NODE_MISSING = (
+    "node is NOT installed: the browser-side tests (about 110) are SKIPPED and prove nothing. "
+    "Install it (apt install nodejs)."
 )
+# Locally a missing node skips with the loud reason above. In CI (GitLab sets CI) the tests are
+# NOT skipped: they reach `require_node` and fail, so a pipeline cannot go green without them.
+needs_node = pytest.mark.skipif(NODE is None and not os.environ.get("CI"), reason=NODE_MISSING)
+
+
+def require_node() -> str:
+    if NODE is None:
+        pytest.fail(NODE_MISSING + " The test:unit job installs it in its before_script.")
+    return NODE
 
 
 def run_node(expression: str):
+    require_node()
     script = f"const L = require({json.dumps(str(STATIC_DIR / 'logic.js'))}); console.log(JSON.stringify({expression}));"
     result = subprocess.run(
         [NODE, "-e", script], capture_output=True, text=True, timeout=30, check=False
@@ -1065,7 +1077,7 @@ def smoke(path, hash_, answers, click=None):
         "click": click,
     }
     result = subprocess.run(
-        [NODE, str(STATIC_DIR.parents[2] / "tests/helpers/dashboard_smoke.js"), str(STATIC_DIR),
+        [require_node(), str(STATIC_DIR.parents[2] / "tests/helpers/dashboard_smoke.js"), str(STATIC_DIR),
          path, hash_, json.dumps(scenario)],
         capture_output=True, text=True, timeout=30, check=False,
     )  # fmt: skip
