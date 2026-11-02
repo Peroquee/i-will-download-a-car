@@ -662,7 +662,14 @@ def test_the_subscriptions_are_a_view_for_managing_them_without_a_form():
     assert "<input" not in view.group(1)
     for element_id in ("subs-list", "subs-empty", "subs-result", "subs-load-error"):
         assert f'id="{element_id}"' in view.group(1)
-    for gone in ("subs-form", "subs-channel", "subs-backfill", "subs-add", "subs-target", "subs-audio"):
+    for gone in (
+        "subs-form",
+        "subs-channel",
+        "subs-backfill",
+        "subs-add",
+        "subs-target",
+        "subs-audio",
+    ):
         assert f'id="{gone}"' not in HTML, gone
     for route in ("/api/subscriptions", "/poll"):
         assert route in APP_JS
