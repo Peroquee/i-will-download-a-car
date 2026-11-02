@@ -15,6 +15,8 @@
     var value = String(text || "").trim().toLowerCase();
     if (value.indexOf("magnet:") === 0) return "magnet";
     if (/^https?:\/\/([a-z0-9-]+\.)*(youtube\.com|youtu\.be)(\/|$)/.test(value)) return "youtube";
+    /* Any other web address is taken for a podcast feed; the server decides whether it is one. */
+    if (/^https?:\/\/[^\s\/?#]+/.test(value)) return "podcast";
     return null;
   }
 
@@ -22,6 +24,11 @@
   function looksLikeVideoUrl(text) {
     var value = String(text || "").trim();
     return detectMode(value) === "youtube" && /(v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)[A-Za-z0-9_-]{11}/.test(value);
+  }
+
+  /* Worth reading as a feed: a web address that is not YouTube. */
+  function looksLikeFeedUrl(text) {
+    return detectMode(String(text || "").trim()) === "podcast";
   }
 
   function format(template, vars) {
@@ -53,8 +60,48 @@
     return { magnet: String(link).trim(), metadata: magnetMetadata(type, values) };
   }
 
-  function youtubePayload(link, channel, title) {
-    return { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
+  /* target: "video" (the default), "podcast" or "music"; audioOnly means nothing for a video. */
+  function youtubePayload(link, channel, title, target, audioOnly, album) {
+    var body = { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
+    if (target === "podcast" || target === "music") {
+      body.target = target;
+      if (audioOnly) body.audio_only = true;
+    }
+    /* Music: channel is the artist, title the track; an empty album means a single (the server names it). */
+    if (target === "music" && album != null && String(album).trim()) body.album = String(album).trim();
+    return body;
+  }
+
+  /* The body of POST /api/subscriptions for a channel; target "video" sends nothing extra. */
+  function subscribePayload(channel, name, backfill, target, audioOnly) {
+    var body = { channel: String(channel).trim() };
+    if (name && String(name).trim()) body.name = String(name).trim();
+    if (backfill != null) body.backfill = backfill;
+    if (target === "podcast") {
+      body.target = "podcast";
+      if (audioOnly) body.audio_only = true;
+    }
+    return body;
+  }
+
+  var MAX_PODCAST_BACKFILL = 20;
+
+  /* The requests a podcast form sends: {episode, subscribe}, each null when not wanted.
+     values: {name, episode (a key or ""), subscribe (bool), backfill (text)} */
+  function podcastPayloads(link, values) {
+    var feed = String(link).trim();
+    var name = String(values.name == null ? "" : values.name).trim();
+    var episode = null;
+    var subscribe = null;
+    if (values.episode) {
+      episode = { feed: feed, key: String(values.episode) };
+      if (name) episode.name = name;
+    }
+    if (values.subscribe) {
+      subscribe = { feed: feed, backfill: toNumber(values.backfill === "" ? "0" : values.backfill) };
+      if (name) subscribe.name = name;
+    }
+    return { episode: episode, subscribe: subscribe };
   }
 
   var REQUIRED = {
@@ -71,6 +118,15 @@
     if (mode === "youtube") {
       if (!String(values.channel || "").trim()) errors.channel = "err.required";
       if (!String(values.title || "").trim()) errors.title = "err.required";
+      return errors;
+    }
+    if (mode === "podcast") {
+      if (!String(values.name || "").trim()) errors.name = "err.required";
+      if (!values.episode && !values.subscribe) errors.episode = "pc.nothing";
+      var back = String(values.backfill == null ? "" : values.backfill).trim();
+      if (values.subscribe && back !== "" && (!/^\d+$/.test(back) || +back > MAX_PODCAST_BACKFILL)) {
+        errors.backfill = "err.int_out_of_range_20";
+      }
       return errors;
     }
     (REQUIRED[type] || []).forEach(function (key) {
@@ -94,7 +150,7 @@
       var loc = item.loc || [];
       var last = loc[loc.length - 1];
       var field;
-      if (loc[1] === "magnet" || loc[1] === "url") field = "link";
+      if (loc[1] === "magnet" || loc[1] === "url" || loc[1] === "feed") field = "link";
       else if (loc[1] === "metadata") field = typeof last === "string" ? last : "link";
       else field = typeof last === "string" ? last : "link";
       if (!(field in result)) result[field] = { type: item.type, msg: item.msg };
@@ -116,7 +172,7 @@
   /* Which i18n key names a job's kind (the library it ends up in). */
   function kindKey(kind) {
     return { movies: "type.movies", series: "type.series", audiobooks: "type.audiobooks",
-             music: "type.music", youtube: "mode.youtube" }[kind] || null;
+             music: "type.music", youtube: "mode.youtube", podcast: "type.podcast" }[kind] || null;
   }
 
   /* What the VPN bar shows for an /api/vpn answer. `view` is the colour/state, in order of
@@ -143,10 +199,14 @@
     vpnView: vpnView,
     detectMode: detectMode,
     looksLikeVideoUrl: looksLikeVideoUrl,
+    looksLikeFeedUrl: looksLikeFeedUrl,
+    podcastPayloads: podcastPayloads,
+    MAX_PODCAST_BACKFILL: MAX_PODCAST_BACKFILL,
     format: format,
     magnetMetadata: magnetMetadata,
     magnetPayload: magnetPayload,
     youtubePayload: youtubePayload,
+    subscribePayload: subscribePayload,
     clientErrors: clientErrors,
     serverErrors: serverErrors,
     MIN_YEAR: MIN_YEAR,

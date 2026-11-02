@@ -2,14 +2,19 @@
 
 POST /api/subscriptions
     {"channel": "<channel id | @handle | channel address | video address>",
-     "name": "<folder name, optional>", "backfill": 0}
+     "name": "<folder name, optional>", "backfill": 0,
+     "target": "video", "audio_only": false}
 
     Resolves the channel once (the RSS feed needs its id, not the handle), stores id and name and
     answers 201 with the subscription (`duplicate: false`), or 200 `duplicate: true` if the
     channel is already subscribed (nothing changes). `name` is the library folder the channel's
     videos go to (default: YouTube's channel name, made safe); `backfill` (0-15) is how many of
     the channel's existing videos the first poll should also fetch: 0 = only videos published
-    after subscribing, never the back catalogue.
+    after subscribing, never the back catalogue. `target` (issue #35) says where new videos go:
+    "video" (default: the Youtube library) or "podcast" (episodes of a podcast named `name`, by
+    default the channel, in the Podcasts library); `audio_only` (only with "podcast") keeps just the
+    audio, tagged, with the thumbnail as cover. Subscribing again to a channel that is already
+    subscribed changes nothing, the target included.
 
     422 invalid input (field-level)   409 the limit of 200 subscriptions
     404/403/502/504/429 {"detail", "kind"}: the lookup failed (see POST /api/youtube/probe)
@@ -32,10 +37,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
 from . import subscriptions
@@ -55,6 +61,16 @@ class SubscribeRequest(BaseModel):
     channel: str
     name: Name | None = None
     backfill: int = Field(default=0, ge=0, le=subscriptions.MAX_BACKFILL, strict=True)
+    target: Literal["video", "podcast"] = "video"
+    audio_only: StrictBool = False
+
+    @model_validator(mode="after")
+    def _audio_needs_a_target(self) -> SubscribeRequest:
+        if self.audio_only and self.target == "video":
+            raise PydanticCustomError(
+                "audio_only_invalid", "Audio only is for podcast episodes, not for videos"
+            )
+        return self
 
     @field_validator("channel")
     @classmethod
@@ -82,7 +98,13 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
     name = body.name or sanitize_name(channel.name, channel.channel_id)
     try:
         subscription, created = await asyncio.to_thread(
-            subscriptions.add, db, channel.channel_id, name, body.backfill
+            subscriptions.add,
+            db,
+            channel.channel_id,
+            name,
+            body.backfill,
+            body.target,
+            body.audio_only,
         )
     except subscriptions.TooManySubscriptions:
         return problem(

@@ -30,6 +30,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 
@@ -37,7 +38,7 @@ ENV = {
 class AlwaysFails:
     """A downloader that never reaches the network: every video fails, quickly."""
 
-    def download(self, ref, workdir, progress=None):
+    def download(self, ref, workdir, progress=None, *, audio_only=False):
         raise DownloadFailed("still not available")
 
 

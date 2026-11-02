@@ -39,7 +39,7 @@ from .db import Database
 from .feeds import FeedClient, FeedEntry, FeedError, parse_feed, parse_time
 from .metadata import sanitize_name
 from .subscriptions import Subscription
-from .youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker
+from .youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker, job_external_id
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +61,19 @@ class RunResult:
     failed: int = 0
 
 
-def interval_for(sub: Subscription, base_minutes: int) -> timedelta:
-    """How long to wait after the last check: the base interval times a per-channel factor in
-    [0.8, 1.2] (stable, derived from the channel id), or the short retry time after an error."""
-    if sub.last_error:
+def spread_interval(key: str, last_error: str | None, base_minutes: int) -> timedelta:
+    """How long to wait after the last check: the base interval times a factor in [0.8, 1.2]
+    (stable, derived from `key`), or the short retry time after an error."""
+    if last_error:
         return timedelta(minutes=min(RETRY_MINUTES, base_minutes))
-    digest = hashlib.sha256(sub.channel_id.encode()).digest()
+    digest = hashlib.sha256(key.encode()).digest()
     fraction = int.from_bytes(digest[:2], "big") / 0xFFFF
     return timedelta(minutes=base_minutes * (0.8 + 0.4 * fraction))
+
+
+def interval_for(sub: Subscription, base_minutes: int) -> timedelta:
+    """`spread_interval` for a channel (the key is the channel id)."""
+    return spread_interval(sub.channel_id, sub.last_error, base_minutes)
 
 
 def new_entries(sub: Subscription, entries: list[FeedEntry]) -> list[FeedEntry]:
@@ -83,6 +88,9 @@ def new_entries(sub: Subscription, entries: list[FeedEntry]) -> list[FeedEntry]:
 
 
 class SubscriptionPoller:
+    # What `poll` may raise for a feed that cannot be read (PodcastPoller overrides this).
+    feed_errors: tuple[type[Exception], ...] = (FeedError,)
+
     def __init__(
         self,
         db: Database,
@@ -106,17 +114,28 @@ class SubscriptionPoller:
         self.stop = threading.Event()  # set at shutdown: a run in progress ends early
         self._manual = threading.Lock()
 
+    # -- what differs between channels and podcasts (PodcastPoller overrides these) ---------------
+
+    def _all(self) -> list[Subscription]:
+        return subscriptions.list_all(self.db)
+
+    def _interval(self, sub: Subscription) -> timedelta:
+        return interval_for(sub, self.poll_minutes)
+
+    def _record(self, sub: Subscription, error: str | None) -> None:
+        subscriptions.record_poll(self.db, sub.id, error, self._now())
+
     # -- which channels ----------------------------------------------------------------------
 
     def due(self) -> list[Subscription]:
         """Enabled channels whose interval has passed; never-checked first, then the longest ago."""
         now = self._now()
         result: list[tuple[datetime, Subscription]] = []
-        for sub in subscriptions.list_all(self.db):
+        for sub in self._all():
             if not sub.enabled:
                 continue
             checked = parse_time(sub.last_checked) if sub.last_checked else None
-            if checked is None or now - checked >= interval_for(sub, self.poll_minutes):
+            if checked is None or now - checked >= self._interval(sub):
                 result.append((checked or datetime.min.replace(tzinfo=UTC), sub))
         result.sort(key=lambda pair: pair[0])
         return [sub for _, sub in result]
@@ -137,12 +156,15 @@ class SubscriptionPoller:
                 video_id=entry.video_id,
                 channel=sub.channel_name,
                 title=sanitize_name(entry.title, entry.video_id),
+                target=sub.target,
+                audio_only=sub.audio_only,
+                published=(entry.published.date().isoformat() if sub.target == "podcast" else None),
             )
             _, outcome = jobs.submit_job(
                 self.db,
                 JOB_TYPE,
-                entry.video_id,
-                metadata.model_dump_json(),
+                job_external_id(entry.video_id, sub.target),
+                metadata.to_json(),
                 retry_failed=False,
             )
             queued += outcome == "created"
@@ -178,7 +200,7 @@ class SubscriptionPoller:
                 self._sleep(self._rng.uniform(*self._pause))
             try:
                 result.queued += self.poll(sub)
-            except FeedError as error:
+            except self.feed_errors as error:
                 result.failed += 1
                 logger.warning(
                     "channel poll failed",
@@ -189,9 +211,7 @@ class SubscriptionPoller:
             except Exception:  # a bug in one channel must not stop the others
                 result.failed += 1
                 logger.exception("channel poll crashed", extra={"subscription_id": sub.id})
-                subscriptions.record_poll(
-                    self.db, sub.id, "internal error while polling", self._now()
-                )
+                self._record(sub, "internal error while polling")
             result.polled += 1
         if result.queued and self.worker is not None:
             self.worker.wake()

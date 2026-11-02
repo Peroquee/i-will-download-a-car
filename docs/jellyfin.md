@@ -33,7 +33,7 @@ and shows that in its job list instead of failing silently.
 ## How the libraries relate to this stack
 
 - **Jellyfin manages its libraries itself** (Dashboard > Libraries). They already point at the
-  media subfolders: `Filme`, `Serien`, `Hörbücher`, `Musik`, `Youtube`. Nothing in this repo
+  media subfolders: `Filme`, `Serien`, `Hörbücher`, `Musik`, `Podcasts`, `Youtube`. Nothing in this repo
   creates or changes a library.
 - **A library must never point at `/media/jellyfin` as a whole.** That share also holds
   `downloads/` (unfinished and seeding torrents), which would then show up in Jellyfin.
@@ -45,6 +45,12 @@ and shows that in its job list instead of failing silently.
 - **Permissions.** Jellyfin runs as uid 103 / gid 112 and reads through the "other" permission
   bits; the new files hardlinked by the app inherit mode 664/775 from `UMASK=002`, which keeps
   them readable.
+
+## Podcasts: which library type (issue #34)
+
+Jellyfin has no podcast library type. Recommended: a library of type **Music** pointing at
+`/media/jellyfin/Podcasts`; each podcast is then an artist/album and each episode a track, from
+the tags in the files. Details and the alternative (Audiobookshelf) in [podcasts.md](podcasts.md#jellyfin).
 
 ## Audiobooks: open question for the owner
 

@@ -34,6 +34,8 @@ class Subscription:
     created_at: str
     last_checked: str | None
     last_error: str | None
+    target: str = "video"  # "video" or "podcast" (issue #35)
+    audio_only: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subscription:
@@ -46,6 +48,8 @@ class Subscription:
             created_at=row["created_at"],
             last_checked=row["last_checked"],
             last_error=row["last_error"],
+            target=row["target"],
+            audio_only=bool(row["audio_only"]),
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -59,11 +63,18 @@ class Subscription:
             "created_at": self.created_at,
             "last_checked": self.last_checked,
             "last_error": self.last_error,
+            "target": self.target,
+            "audio_only": self.audio_only,
         }
 
 
 def add(
-    db: Database, channel_id: str, channel_name: str, backfill: int = 0
+    db: Database,
+    channel_id: str,
+    channel_name: str,
+    backfill: int = 0,
+    target: str = "video",
+    audio_only: bool = False,
 ) -> tuple[Subscription, bool]:
     """Subscribe to a channel. Returns (subscription, created); an existing one is unchanged."""
     with db.transaction() as conn:
@@ -76,8 +87,9 @@ def add(
         if count >= MAX_SUBSCRIPTIONS:
             raise TooManySubscriptions
         cursor = conn.execute(
-            "INSERT INTO subscriptions (channel_id, channel_name, backfill) VALUES (?, ?, ?)",
-            (channel_id, channel_name, backfill),
+            "INSERT INTO subscriptions (channel_id, channel_name, backfill, target, audio_only) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (channel_id, channel_name, backfill, target, int(audio_only)),
         )
         row = conn.execute(
             "SELECT * FROM subscriptions WHERE id = ?", (cursor.lastrowid,)

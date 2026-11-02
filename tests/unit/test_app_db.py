@@ -138,6 +138,7 @@ def _media_env() -> dict[str, str]:
         "MEDIA_DIR_SERIES": "b",
         "MEDIA_DIR_AUDIOBOOKS": "c",
         "MEDIA_DIR_MUSIC": "d",
+        "MEDIA_DIR_PODCASTS": "f",
         "MEDIA_DIR_YOUTUBE": "e",
     }
 
@@ -168,6 +169,8 @@ def test_a_new_database_gets_the_initial_schema(database):
         "enabled",
         "created_at",
         "backfill",
+        "target",
+        "audio_only",
     ]
 
 
@@ -203,7 +206,8 @@ def test_timestamps_are_utc_iso_8601_with_milliseconds(database):
 
 
 def test_the_check_constraints_match_the_python_constants(database):
-    sql = (dbmod.MIGRATIONS_DIR / "0001_initial.sql").read_text(encoding="utf-8")
+    # 0005 rebuilt the jobs table, so its CHECK constraints live there now.
+    sql = (dbmod.MIGRATIONS_DIR / "0005_podcasts.sql").read_text(encoding="utf-8")
     for value in (*JOB_TYPES, *JOB_STATUSES):
         assert f"'{value}'" in sql
     with database.transaction() as conn:
@@ -522,3 +526,43 @@ def test_check_reports_a_closed_connection(tmp_path):
     database = Database.open(tmp_path / "app.db")
     database.close()
     assert "query failed" in (database.check() or "")
+
+
+def test_the_podcast_migration_keeps_every_job_and_its_indexes(tmp_path):
+    """0005 rebuilds the jobs table to allow type 'podcast': nothing may be lost or renumbered."""
+    conn = dbmod.connect(tmp_path / "app.db")
+    migrations = dbmod.load_migrations()
+    dbmod.migrate(conn, migrations[:4])
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "INSERT INTO jobs (type, external_id, metadata, status, error, source) VALUES "
+        "('magnet', 'aaaa', '{\"type\":\"movies\"}', 'done', NULL, 'magnet:?xt=urn:btih:aaaa'), "
+        "('youtube', 'bbbbbbbbbbb', '{}', 'failed', 'boom', NULL), "
+        "('youtube', 'ccccccccccc', '{}', 'queued', NULL, NULL)"
+    )
+    conn.execute("DELETE FROM jobs WHERE external_id = 'ccccccccccc'")  # a gap in the ids
+    conn.execute("COMMIT")
+    before = [tuple(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id")]
+
+    assert dbmod.migrate(conn, migrations[:5]) == ["0005_podcasts.sql"]
+
+    after = [tuple(r) for r in conn.execute("SELECT * FROM jobs ORDER BY id")]
+    assert after == before
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    assert columns == [
+        *("id", "type", "external_id", "metadata", "status", "error"),
+        *("created_at", "updated_at", "source"),
+    ]
+    indexes = {r[1] for r in conn.execute("PRAGMA index_list(jobs)")}
+    assert {"jobs_type_external_id", "jobs_status", "jobs_created_at"} <= indexes
+    assert conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchone()[0] == (
+        "jobs_touch_updated_at"
+    )
+    # the new type is allowed, the unique index still decides, ids go on after the old ones
+    conn.execute("INSERT INTO jobs (type, external_id) VALUES ('podcast', 'k1')")
+    assert conn.execute("SELECT MAX(id) FROM jobs").fetchone()[0] > max(r[0] for r in before)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO jobs (type, external_id) VALUES ('podcast', 'k1')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO jobs (type, external_id) VALUES ('radio', 'k1')")
+    conn.close()

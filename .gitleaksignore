@@ -1,0 +1,5 @@
+# Fake passwords and keys in the installer's tests (commit 2b8b953, replaced by low-entropy values in
+# the next commit). They are made up on purpose to prove that no secret reaches a log or a command line.
+2b8b9530139bf3f01dede4e63544599acc089e18:tests/helpers/installer.py:generic-api-key:26
+2b8b9530139bf3f01dede4e63544599acc089e18:tests/unit/test_installer_logic.py:generic-api-key:202
+2b8b9530139bf3f01dede4e63544599acc089e18:tests/unit/test_installer_flow.py:generic-api-key:169

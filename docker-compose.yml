@@ -125,6 +125,7 @@ services:
       MEDIA_DIR_SERIES: ${MEDIA_DIR_SERIES:?MEDIA_DIR_SERIES must be set in .env}
       MEDIA_DIR_AUDIOBOOKS: ${MEDIA_DIR_AUDIOBOOKS:?MEDIA_DIR_AUDIOBOOKS must be set in .env}
       MEDIA_DIR_MUSIC: ${MEDIA_DIR_MUSIC:?MEDIA_DIR_MUSIC must be set in .env}
+      MEDIA_DIR_PODCASTS: ${MEDIA_DIR_PODCASTS:?MEDIA_DIR_PODCASTS must be set in .env}
       MEDIA_DIR_YOUTUBE: ${MEDIA_DIR_YOUTUBE:?MEDIA_DIR_YOUTUBE must be set in .env}
       # Jellyfin runs outside this stack (own LXC); the app only calls its API to refresh
       # libraries. Optional in compose: the key is a secret the owner creates in Jellyfin
@@ -147,6 +148,15 @@ services:
       YOUTUBE_MAX_HEIGHT: ${YOUTUBE_MAX_HEIGHT:-1080}
       # How often subscribed channels are checked for new videos, in minutes; 0 = never (#20).
       SUBSCRIPTION_POLL_MINUTES: ${SUBSCRIPTION_POLL_MINUTES:-60}
+      # Podcast feeds and episodes (#34) are fetched through the same proxy (the VPN); set EMPTY in
+      # .env to fetch directly. (No colon: unset = default.) How often feeds are checked, in minutes.
+      PODCAST_PROXY: ${PODCAST_PROXY-http://gluetun:8888}
+      PODCAST_POLL_MINUTES: ${PODCAST_POLL_MINUTES:-240}
+      # Networks podcast fetches never go to, besides the private ones: the home line's own global
+      # addresses (DS-Lite: the LAN has native global IPv6), see docs/podcasts.md. HOME_PUBLIC_IP is
+      # the same setting the watchdog's egress check uses (#23).
+      HOME_PUBLIC_IP: ${HOME_PUBLIC_IP:-}
+      FETCH_BLOCKED_NETWORKS: ${FETCH_BLOCKED_NETWORKS:-}
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.

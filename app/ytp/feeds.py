@@ -61,13 +61,13 @@ def parse_time(text: str) -> datetime | None:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
-    """The videos of a feed, newest first. Raises FeedError("bad_feed") for anything unreadable.
+def read_xml(data: bytes, max_bytes: int) -> ET.Element:
+    """The root element of an untrusted XML document, or FeedError("bad_feed").
 
-    Entries with an invalid video id or time are skipped (one odd entry must not hide the rest).
-    If `channel_id` is given, the feed must say it belongs to that channel.
+    The refusals that make the standard library parser safe: too large, not UTF-8, and any DTD
+    or entity declaration (see the module description). Shared with the podcast feeds.
     """
-    if len(data) > MAX_FEED_BYTES:
+    if len(data) > max_bytes:
         raise FeedError("bad_feed", "the feed is unexpectedly large")
     # Only UTF-8 is read. Another encoding (UTF-16 with or without a byte order mark, which has
     # NUL bytes between the letters) would hide "<!DOCTYPE" from the check below.
@@ -80,9 +80,18 @@ def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
     if _DTD.search(text):
         raise FeedError("bad_feed", "the feed contains a DTD or entity declaration; refused")
     try:
-        root = ET.fromstring(data)
+        return ET.fromstring(data)
     except (ET.ParseError, ValueError):
         raise FeedError("bad_feed", "the feed is not valid XML") from None
+
+
+def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
+    """The videos of a feed, newest first. Raises FeedError("bad_feed") for anything unreadable.
+
+    Entries with an invalid video id or time are skipped (one odd entry must not hide the rest).
+    If `channel_id` is given, the feed must say it belongs to that channel.
+    """
+    root = read_xml(data, MAX_FEED_BYTES)
     if root.tag != f"{ATOM}feed":
         raise FeedError("bad_feed", "this is not an Atom feed")
     if channel_id is not None:

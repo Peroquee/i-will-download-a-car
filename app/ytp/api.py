@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import jobs, jobs_api, subscriptions_api
+from . import jobs, jobs_api, podcasts_api, subscriptions_api
 from .apiutil import PROBE_STATUS, hand_to_qbittorrent, problem
 from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
@@ -38,7 +39,7 @@ from .magnet import InvalidMagnet, infohash_from_magnet
 from .metadata import Metadata, Name, metadata_to_json
 from .youtube import InvalidVideoUrl, ProbeError, YoutubeProbe, parse_video_url
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
-from .youtube_jobs import YoutubeJobMetadata, YoutubeWorker
+from .youtube_jobs import YoutubeJobMetadata, YoutubeWorker, job_external_id
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +109,24 @@ class DownloadRequest(BaseModel):
 
     url: str
     # The names the user confirmed (the probe suggests them): they become folder and file names.
+    # For target "podcast" `channel` is the podcast and `title` the episode (issue #35).
     channel: Name
     title: Name
+    target: Literal["video", "podcast", "music"] = "video"
+    audio_only: StrictBool = False
+    # Music only (issue #36): `channel` is then the artist, `title` the track. Left out, the track
+    # is a single: the album is named like the track.
+    album: Name | None = None
+
+    @model_validator(mode="after")
+    def _target_rules(self) -> DownloadRequest:
+        if self.audio_only and self.target == "video":
+            raise PydanticCustomError(
+                "audio_only_invalid", "Audio only is for podcast episodes and music, not for videos"
+            )
+        if self.album is not None and self.target != "music":
+            raise PydanticCustomError("album_invalid", "An album is only for music")
+        return self
 
     @field_validator("url")
     @classmethod
@@ -155,20 +172,49 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
     (queued, downloading, organizing, done, failed with a reason). Sending a failed video again
     retries it. Files end up in `<MEDIA_DIR_YOUTUBE>/<channel>/<title> [<id>].mp4` with a
     thumbnail and a small `.info.json`.
+
+    Optional `target` ("video", the default, "podcast" or "music") and `audio_only` (true only
+    with "podcast" or "music"). With "podcast" the video becomes an episode in
+    `<MEDIA_DIR_PODCASTS>/<podcast>/` (`channel` is the podcast, `title` the episode), named like
+    an RSS episode; with `audio_only` the audio stream is kept (m4a/opus, no re-encode) with tags
+    and cover. The same video can be queued once per target. 422 `audio_only_invalid` for audio
+    only with the video target.
+
+    "music" (issue #36): `channel` is the artist, `title` the track, `album` the album (default:
+    the track's title, a single); the file goes to
+    `<MEDIA_DIR_MUSIC>/<artist>/<album>/<title>.<ext>` like a torrent album, with
+    artist/album/title tags and the cover when audio only.
     """
     db: Database | None = request.app.state.db
     worker: YoutubeWorker | None = request.app.state.youtube_worker
     if db is None or worker is None:
         return problem(503, "The database is not available; see /health.")
     ref = parse_video_url(body.url)
-    metadata = YoutubeJobMetadata(video_id=ref.video_id, channel=body.channel, title=body.title)
+    metadata = YoutubeJobMetadata(
+        video_id=ref.video_id,
+        channel=body.channel,
+        title=body.title,
+        target=body.target,
+        audio_only=body.audio_only,
+        album=(body.album or body.title) if body.target == "music" else None,
+    )
     job, outcome = await asyncio.to_thread(
-        jobs.submit_job, db, YOUTUBE_JOB_TYPE, ref.video_id, metadata.model_dump_json()
+        jobs.submit_job,
+        db,
+        YOUTUBE_JOB_TYPE,
+        job_external_id(ref.video_id, body.target),
+        metadata.to_json(),
     )
     logger.info(
         "youtube job", extra={"job_id": job.id, "video_id": ref.video_id, "outcome": outcome}
     )
-    summary = {"id": job.id, "video_id": ref.video_id, "type": "youtube", "status": job.status}
+    summary = {
+        "id": job.id,
+        "video_id": ref.video_id,
+        "type": "youtube",
+        "target": body.target,
+        "status": job.status,
+    }
     if outcome == "duplicate":
         return JSONResponse({**summary, "duplicate": True}, status_code=200)
     worker.wake()
@@ -195,3 +241,4 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/youtube/download", youtube_download, methods=["POST"])
     jobs_api.register(app)
     subscriptions_api.register(app)
+    podcasts_api.register(app)

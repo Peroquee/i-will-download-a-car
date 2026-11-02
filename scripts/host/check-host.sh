@@ -199,7 +199,7 @@ check_layout() {
     return
   fi
   local -a types=(movies series audiobooks music) names=()
-  for var in MEDIA_DIR_MOVIES MEDIA_DIR_SERIES MEDIA_DIR_AUDIOBOOKS MEDIA_DIR_MUSIC MEDIA_DIR_YOUTUBE; do
+  for var in MEDIA_DIR_MOVIES MEDIA_DIR_SERIES MEDIA_DIR_AUDIOBOOKS MEDIA_DIR_MUSIC MEDIA_DIR_PODCASTS MEDIA_DIR_YOUTUBE; do
     name="$(env_value "$var" || true)"
     if [ -n "$name" ]; then names+=("$name"); else missing="$missing $var"; fi
   done

@@ -21,6 +21,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 
@@ -83,6 +84,11 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/subscriptions",  # channel subscriptions (#19)
         "/api/subscriptions/{subscription_id}",
         "/api/subscriptions/{subscription_id}/poll",  # check now (#27)
+        "/api/podcasts/probe",  # podcasts (#34)
+        "/api/podcasts/episode",
+        "/api/podcasts",
+        "/api/podcasts/{subscription_id}",
+        "/api/podcasts/{subscription_id}/poll",
         "/",
         "/static",  # the form's files (#25)
     }

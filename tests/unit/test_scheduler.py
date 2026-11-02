@@ -32,6 +32,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 
@@ -77,6 +78,8 @@ def test_the_migration_creates_app_state_without_touching_the_first_tables(datab
         "0002_app_state.sql",
         "0003_job_source.sql",
         "0004_subscription_backfill.sql",
+        "0005_podcasts.sql",
+        "0006_subscription_target.sql",
     ]
 
 
@@ -305,7 +308,9 @@ def test_the_scheduler_runs_with_the_app_and_stops_with_it(tmp_path):
     with make_client(tmp_path) as client:
         scheduler = client.app.state.scheduler
         assert scheduler.running
-        assert sorted(scheduler.job_ids()) == sorted([HEARTBEAT_JOB_ID, "subscription-poll"])
+        assert sorted(scheduler.job_ids()) == sorted(
+            [HEARTBEAT_JOB_ID, "subscription-poll", "podcast-poll"]
+        )
         assert client.get("/health").json()["checks"]["scheduler"] == "ok"
         assert get_state(client.app.state.db, KEY_LAST_HEARTBEAT) is not None
     assert not scheduler.running

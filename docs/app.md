@@ -332,6 +332,11 @@ scripts and styles.
   `POST /api/subscriptions` with the video's address and the confirmed channel name once the
   download is queued (see youtube.md, "Subscriptions"); the result line says whether it worked,
   and a failed subscription never undoes the download.
+- **Target (issues #35, #36):** a YouTube download can be filed as a *Podcast episode* or as
+  *Music* (artist, track, album) instead of a video, optionally *Audio only*; the two name fields
+  then mean podcast and episode, or artist and track. The
+  *Subscribe* checkbox and the subscription form take the same choice. See
+  [youtube.md](youtube.md#as-a-podcast-episode-optionally-audio-only-issue-35).
 - **Magnet branch:** a media type (movie, series, audiobook, music) swaps the fields: movie title +
   year; series title + season + episode, or "whole season" (no episode); audiobook author + title;
   music artist + album. Submit sends `POST /api/magnet`.
@@ -356,6 +361,17 @@ Security headers on every answer: `Content-Security-Policy`, `X-Content-Type-Opt
 
 Not part of this form: the how-to guide (#33).
 
+## Podcasts in the form (issue #34)
+
+A third type, **Podcast**, is picked automatically for any web address that is not YouTube. On
+paste the page asks `POST /api/podcasts/probe` and fills the folder name and a list of episodes
+(newest first); *Add* sends `POST /api/podcasts/episode` for the chosen episode and/or
+`POST /api/podcasts` for the subscription, one request each, and reports both results. The
+subscription list shows channels and podcasts together (`GET /api/subscriptions` and
+`GET /api/podcasts`). Episode titles come from a stranger's feed: they are set with `textContent`
+only (a test fails on `innerHTML`). The API, the file layout and the fetcher's safety rules are in
+[podcasts.md](podcasts.md).
+
 ## VPN indicator (issue #28)
 
 A bar across the top of the page, sticky while scrolling, shows the state from `GET /api/vpn`
@@ -376,30 +392,27 @@ a warning sign and the icon turns red (`favicon-alert.svg`), so it is visible fr
 and the bar gets `role="alert"` for screen readers. No sound or animation. The exit country is the
 only detail from the egress check shown; addresses are never sent to the page.
 
-## The "How to" guide (issue #33, draft)
+## The "How to" guide (issue #33)
 
-A button **"So geht's" / "How to"** at the top right of the page (next to the language switch)
+A button **"Anleitung" / "How to"** at the top right of the page (next to the language switch)
 opens a guide for the household: five illustrated steps (find a magnet link, copy it, paste it and
 fill in the fields, watch the job list, find the result in Jellyfin), a part on YouTube videos and
-channel subscriptions, and "Where do you find magnet links?" with what such a link looks like, a
-notice that only things you are allowed to download belong here, and a list of legal sources.
+channel subscriptions, and "Where do you find magnet links?" with what such a link looks like and
+where the magnet button usually is, plus a notice that only things you are allowed to download
+belong here. There is deliberately **no list of places to get torrents** (the owner decided that
+the guide must not recommend sources).
 
 - It is a native `<dialog>` opened with `showModal()`: **Esc** and the **Close** button close it
   (so does a click on the dark area), the keyboard focus stays inside while it is open and returns
   to the button afterwards. Each illustration is an inline SVG with a text alternative
   (`aria-label`) in both languages; the words inside the pictures follow the language switch.
-- **No external requests:** the pictures are inline, the page loads nothing from other sites.
-  The guide's links to the legal sources are plain links that only do something when clicked
-  (they open the other website in a new tab, without a referrer).
+- **No external requests and no links:** the pictures are inline, the page loads nothing from other
+  sites, and the guide contains no addresses to click (a test checks the dialog for `href`, `src`
+  and `http`).
 - **The wording** is in `index.html` with the other texts (keys `howto.*`, German first, simple
   words, English next to it).
-- **The list of sources is data, not code:** `app/ytp/static/howto-sources.json`. One entry per
-  place with `id`, `name`, `url` (https only), `magnet` (`direct` = the page shows magnet links,
-  `torrent-file` = only .torrent files) and a `text` in `de` and `en`. Edit the file to change the
-  list; a unit test checks its shape. Only plain `https://` addresses become links.
-- The app takes **magnet links only**, not .torrent files. Sources that only offer .torrent files
-  (the Internet Archive, Ubuntu) are listed with a note that this does not work here yet; whether
-  to support .torrent files, or to drop such sources from the list, is the owner's decision.
+- The app takes **magnet links only**, not .torrent files; the guide says what a magnet link looks
+  like ("starts with `magnet:?xt=urn:btih:`") and that a link starting with `http` is not one.
 
 ## Subscription view (issue #27)
 

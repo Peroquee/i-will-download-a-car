@@ -15,6 +15,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 
@@ -183,3 +184,38 @@ def test_library_variables_match_env_example_and_the_compose_app_service():
 def test_the_env_example_is_a_valid_configuration():
     example = {k: v for k, v in parse_env_file(ENV_EXAMPLE).items() if k != "DATA_ROOT"}
     assert Settings.from_env(example).library_dirs["audiobooks"] == "Hörbücher"
+
+
+# --- networks podcast fetches never go to (issue #34 follow-up) --------------------------------
+
+
+def test_the_blocked_networks_come_from_the_home_ip_and_the_extra_setting():
+    settings = Settings.from_env(
+        {
+            **ENV,
+            "HOME_PUBLIC_IP": "84.150.20.30, 2003:abcd:1200::/56",
+            "FETCH_BLOCKED_NETWORKS": "2a02:1:2::/48",
+        }
+    )
+    assert [str(n) for n in settings.fetch_blocked_networks] == [
+        "84.150.20.30/32",
+        "2003:abcd:1200::/56",
+        "2a02:1:2::/48",
+    ]
+    assert Settings.from_env(ENV).fetch_blocked_networks == ()
+
+
+def test_the_blocked_networks_are_never_shown():
+    settings = Settings.from_env({**ENV, "HOME_PUBLIC_IP": "2003:abcd:1200::/56"})
+    assert "2003" not in repr(settings)
+    assert "2003" not in str(settings.summary())
+    assert settings.summary()["fetch_blocked_networks"] == 1
+
+
+@pytest.mark.parametrize("name", ["HOME_PUBLIC_IP", "FETCH_BLOCKED_NETWORKS"])
+def test_a_bad_entry_is_named_by_position_not_by_value(name):
+    with pytest.raises(ConfigError) as error:
+        Settings.from_env({**ENV, name: "2003:abcd:1200::/56, secret-garbage"})
+    assert name in str(error.value)
+    assert "entry 2" in str(error.value)
+    assert "secret-garbage" not in str(error.value)

@@ -160,7 +160,7 @@ for the stack (`--wait`) and prints one line per check, never an address:
 |---|---|
 | reboot | the boot id changed (`--no-reboot-check` for a test that only restarts containers) |
 | every service | running again, **started after** the reboot, healthy, with a restart policy that brings it back |
-| order | gluetun started before qbittorrent, app before proxy, and qbittorrent was started only after gluetun's log says healthy (a WARN if the log cannot be read: then only the start order is judged) |
+| order | gluetun started before qbittorrent, app before proxy, and qbittorrent was started only after gluetun's log said its tunnel was up (`[openvpn] Initialization Sequence Completed`) and its DNS ready (`[dns] ready`), since gluetun never logs \"healthy\" (a WARN if those lines cannot be read, for example with WireGuard: then only the start order is judged) |
 | VPN before traffic | the watchdog says `ok`; qBittorrent's public address is a VPN one, not the home one (`VPN IP`, never `HOME IP LEAK`); no torrent is running while the VPN is not ok |
 | jobs | each job that was in progress is `done`, `failed` **with a reason**, or on its way again (`queued`/`downloading`); one stuck in `organizing` for over 10 minutes, one that failed without a reason or one that vanished is a failure; with no job in progress it WARNs (`--require-jobs` makes that a failure) |
 

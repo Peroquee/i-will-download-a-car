@@ -113,6 +113,7 @@ def test_compose_passes_the_app_what_its_config_reads():
         "MEDIA_DIR_SERIES",
         "MEDIA_DIR_AUDIOBOOKS",
         "MEDIA_DIR_MUSIC",
+        "MEDIA_DIR_PODCASTS",
         "MEDIA_DIR_YOUTUBE",
     }
 

@@ -19,6 +19,14 @@ by the video id, so nothing untrusted decides a path until we build it ourselves
   address in them, which must not sit in a library Jellyfin reads. We write a small summary of
   the harmless fields instead (title, channel, duration, upload date, description, tags).
 * A failure never leaves a partial file in the library; the work folder is removed either way.
+
+**Audio only** (issues #35, #36): `audio_only=True` asks yt-dlp for the best audio stream and keeps
+it as it is. YouTube serves AAC in an mp4 container and Opus in webm; yt-dlp's
+`FFmpegExtractAudio` with `preferredcodec: best` copies the audio into `.m4a` (AAC) or `.opus`
+(Opus) **without re-encoding**: no quality loss and no CPU. AAC (m4a) is preferred because every
+player, phone and Jellyfin client plays it and it can carry a cover picture and tags; Opus is the
+fallback when no AAC stream exists. Nothing is ever converted to mp3 (that would be a lossy
+re-encode of a lossy stream). Tags and the cover are added afterwards by `ytp.audiotags`.
 """
 
 from __future__ import annotations
@@ -30,6 +38,7 @@ import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +49,8 @@ logger = logging.getLogger(__name__)
 MIN_FREE_BYTES = 2 * 1024**3  # refuse to start with less than 2 GiB free
 MAX_NAME_BYTES = 255
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov")
+AUDIO_EXTENSIONS = (".m4a", ".opus", ".ogg", ".aac", ".mp3")
+AUDIO_FORMAT = "ba[ext=m4a]/ba[acodec^=mp4a]/ba"  # AAC first, then whatever audio is best
 THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
@@ -67,9 +78,10 @@ def download_options(
     max_height: int,
     socket_timeout: float,
     progress_hook: Callable[[dict[str, Any]], None] | None = None,
+    audio_only: bool = False,
 ) -> dict[str, Any]:
     """The yt-dlp options for a download (fixed in code; pinned by tests)."""
-    return {
+    options = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
@@ -99,6 +111,15 @@ def download_options(
         "progress_hooks": [progress_hook] if progress_hook else [],
         **({"proxy": proxy} if proxy else {}),
     }
+    if audio_only:
+        options["format"] = AUDIO_FORMAT
+        del options["merge_output_format"]
+        options["postprocessors"] = [
+            {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+            # "best" = copy the stream into its natural container (m4a for AAC, opus for Opus).
+            {"key": "FFmpegExtractAudio", "preferredcodec": "best"},
+        ]
+    return options
 
 
 def _download_with_ytdlp(url: str, options: dict[str, Any]) -> dict[str, Any]:
@@ -127,11 +148,23 @@ def summary(info: dict[str, Any], ref: VideoRef) -> dict[str, Any]:
     return result
 
 
+def upload_date(info: dict[str, Any]) -> date | None:
+    """The video's upload date from yt-dlp's `YYYYMMDD`, or None."""
+    text = str(info.get("upload_date") or "")
+    if len(text) != 8 or not text.isdigit():
+        return None
+    try:
+        return date(int(text[:4]), int(text[4:6]), int(text[6:]))
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class Downloaded:
-    video: Path
+    video: Path  # the main file: the video, or the audio file for audio_only
     thumbnail: Path | None
     info: dict[str, Any]
+    audio_only: bool = False
 
 
 class YoutubeDownloader:
@@ -155,6 +188,8 @@ class YoutubeDownloader:
         ref: VideoRef,
         workdir: Path,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        audio_only: bool = False,
     ) -> Downloaded:
         """Download into `workdir` (created fresh). Raises ProbeError or DownloadFailed."""
         if workdir.exists():
@@ -172,6 +207,7 @@ class YoutubeDownloader:
             max_height=self.max_height,
             socket_timeout=self._socket_timeout,
             progress_hook=progress,
+            audio_only=audio_only,
         )
         try:
             info = self._download(ref.url, options)
@@ -182,11 +218,17 @@ class YoutubeDownloader:
         except Exception as exc:  # a bug or odd failure in yt-dlp must end as a failed job
             logger.exception("yt-dlp download crashed", extra={"video_id": ref.video_id})
             raise DownloadFailed(f"the download failed: {type(exc).__name__}") from exc
-        video = _find(workdir, ref.video_id, VIDEO_EXTENSIONS)
-        if video is None or video.stat().st_size == 0:
-            raise DownloadFailed("yt-dlp finished without producing a video file")
+        media = _find(workdir, ref.video_id, AUDIO_EXTENSIONS if audio_only else VIDEO_EXTENSIONS)
+        if media is None or media.stat().st_size == 0:
+            raise DownloadFailed(
+                "yt-dlp finished without producing "
+                + ("an audio file" if audio_only else "a video file")
+            )
         return Downloaded(
-            video, _find(workdir, ref.video_id, THUMBNAIL_EXTENSIONS), summary(info, ref)
+            media,
+            _find(workdir, ref.video_id, THUMBNAIL_EXTENSIONS),
+            summary(info, ref),
+            audio_only,
         )
 
 

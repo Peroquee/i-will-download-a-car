@@ -1,8 +1,63 @@
 # youtube-premium
 
 Self-hosted web app on the home LAN that gets media into Jellyfin: paste a
-YouTube link or a magnet, it downloads in the background (torrents only through
-the VPN) and files the result into the right library.
+YouTube link, a magnet link or a podcast feed, it downloads in the background (torrents only
+through the VPN) and files the result into the right library.
+
+## What is this? / Was ist das?
+
+**English.** A small program for your home network. You open a web page, paste a link (a YouTube
+video, a torrent "magnet" link or a podcast), and a few minutes later the film, episode, song or
+podcast shows up in your Jellyfin media server, in the right folder, with a proper name. Torrents
+are only ever downloaded through a VPN: if the VPN drops, they stop by themselves. Nothing is
+reachable from the internet; the web page needs a login and answers only inside your home network.
+
+**Deutsch.** Ein kleines Programm für dein Heimnetz. Du öffnest eine Webseite, fügst einen Link ein
+(ein YouTube-Video, einen Torrent-„Magnet“-Link oder einen Podcast), und wenige Minuten später
+erscheint der Film, die Folge, das Lied oder der Podcast in deinem Jellyfin-Medienserver, im
+richtigen Ordner und mit ordentlichem Namen. Torrents werden nur über ein VPN geladen: fällt das
+VPN aus, stoppen sie von selbst. Aus dem Internet ist nichts erreichbar; die Webseite braucht
+eine Anmeldung und antwortet nur in deinem Heimnetz.
+
+## Installation in 5 steps / Installation in 5 Schritten
+
+No Linux knowledge needed. / Linux-Kenntnisse sind nicht nötig.
+
+1. **A computer with Debian 12 / Ein Computer mit Debian 12.** A virtual machine (4 CPU cores,
+   4 GB RAM, 32 GB disk) or a small PC, freshly installed with **Debian 12 "bookworm"**, with
+   internet and a user that may use `sudo`. Creating the VM on Proxmox: [docs/host-setup.md](docs/host-setup.md).
+   Other systems are refused by the installer.
+2. **Your VPN details / Deine VPN-Zugangsdaten.** A VPN subscription. For ExpressVPN download the
+   *OpenVPN* `.ovpn` file (account page → "Set up on more devices" → "Manual configuration") and
+   copy it to the computer (WinSCP or `scp`); note the user name and password shown there (they are
+   not your e-mail and password). Other providers: their name, user/password or WireGuard key.
+3. **Download and start / Herunterladen und starten.** Copy these lines into the terminal of the
+   Debian computer (it asks for your password once):
+
+   ```bash
+   sudo apt-get update && sudo apt-get install -y git   # makes sure git is there
+   git clone https://github.com/Peroquee/i-will-download-a-car.git youtube-premium   # downloads the project
+   cd youtube-premium && ./install.sh                   # starts the installer
+   ```
+
+4. **Answer the questions / Fragen beantworten.** The installer speaks German or English (it asks
+   first), asks one question at a time and explains why it needs each answer. Press Enter to take
+   the value in `[brackets]`. It asks for: the VPN details, where your media lives (default `/data`)
+   and the folder names, a user name and password for the web page, your home network (it detects
+   it), and optionally Jellyfin's address and key, a notification address and your internet line's
+   IPv6 prefix. Then it installs Docker, creates the folders, builds and starts everything and
+   checks it (15 to 30 minutes). Stopping with Ctrl+C is fine: running `./install.sh` again carries
+   on where it stopped.
+5. **Open the web page / Webseite öffnen.** At the end it prints the address, for example
+   `http://192.168.178.20/`. Open it in a browser on any device in your home network, log in with
+   the user and password from step 4, paste a link. In Jellyfin create one library per folder
+   (e.g. `Filme`, `Serien`, `Musik`, `Podcasts`).
+
+Later: `./install.sh` on an existing installation offers *change settings / update / repair /
+state*; `./update.sh` updates (with a backup first). **Stuck?** Copy the file
+[AI-HELP.md](AI-HELP.md) (English) or [HILFE-MIT-KI.md](HILFE-MIT-KI.md) (Deutsch) into an AI chat
+assistant: it explains every step and every error message in plain language. Never send it
+passwords, keys or the file `.env`. Details for experts: [docs/installer.md](docs/installer.md).
 
 ## Layout
 
@@ -31,6 +86,11 @@ docs/testing.md        test levels, markers and rules
 docs/operations.md     backups and restore, updates (pinned versions), log rotation
 scripts/ops/           backup/restore and the yt-dlp update check
 docs/youtube.md        YouTube probe and download, the VPN route, yt-dlp upkeep
+docs/installer.md      the guided installer: what it does, re-running, updating, the answers file
+install.sh, update.sh  the guided installer and updater (start here)
+AI-HELP.md             paste into an AI chat for step-by-step help (English)
+HILFE-MIT-KI.md        dasselbe auf Deutsch
+docs/podcasts.md       podcasts: RSS feeds, episodes, the library, the SSRF-safe fetcher
 ```
 
 ## Quick start

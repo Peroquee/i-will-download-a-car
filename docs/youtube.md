@@ -162,6 +162,77 @@ after that is the normal download path: job list, retry, filing, Jellyfin refres
   yt-dlp refuses them, so such a job fails with "This is a live stream or premiere that has not
   ended yet"; the same video can be retried from the job list later.
 
+## As a podcast episode, optionally audio only (issue #35)
+
+The download form has a **Target**: *Video* (as before, into `Youtube/<channel>/`) or *Podcast
+episode*. For an episode the two name fields mean **podcast** (default: the channel) and
+**episode** (default: the video's title), and the file goes where an RSS episode would
+([podcasts.md](podcasts.md)): `Podcasts/<podcast>/<YYYY-MM-DD> - <episode>.<ext>`, dated with the
+video's upload date. A podcast fed from YouTube and one fed from RSS therefore share one folder,
+and nothing is overwritten (`(2)`).
+
+**Audio only** (offered for episodes) keeps just the sound:
+
+* yt-dlp is asked for the best AAC stream (`ba[ext=m4a]/ba[acodec^=mp4a]/ba`) and its
+  `FFmpegExtractAudio` with `preferredcodec: best` **copies** it into `.m4a`; when YouTube has no
+  AAC stream the Opus stream is copied into `.opus`. **Nothing is re-encoded** (no CPU, no quality
+  loss) and nothing is ever converted to mp3 (a lossy copy of a lossy stream). m4a is preferred
+  because every player, phone and Jellyfin client plays it and it can carry a cover; Opus is the
+  fallback.
+* The confirmed names are written into the file as tags with ffmpeg, again by copying the audio
+  (`ytp/audiotags.py`): title = episode, artist = album = album artist = podcast, date = upload
+  date, genre = Podcast, and the video's thumbnail as the **cover** (m4a and mp3; Ogg/Opus has no
+  simple attached picture, so an `.opus` episode gets tags only). Tagging is best effort: if ffmpeg
+  fails the untagged file is filed anyway and a warning is logged.
+* Without *Audio only* the video itself goes into the podcast folder, with its thumbnail next to it
+  (`<name>.jpg`), untagged.
+* Why no `folder.jpg` from the thumbnail: the first video's picture would be the whole podcast's
+  cover and would block the real cover of an RSS feed with the same name. The picture is embedded
+  in each audio file instead.
+
+The same video can be queued once as a video and once per target as an episode (the job key is
+`<id>` for a video and `<id>@podcast` for an episode); asking twice for the same target is "already
+in the system". `audio_only` is refused (422) together with the video target.
+
+**Subscriptions**: a channel can be subscribed with the same target (`target: "podcast"`,
+`audio_only`): its new videos are then queued as episodes of a podcast named after the channel (or
+the name given), dated with the feed's publication date. Existing subscriptions stay on *video*.
+Subscribing again to an already subscribed channel changes nothing, the target included: remove it
+and subscribe again to change it.
+
+Real test: `YTP_NETWORK_TESTS=1 make test-system` runs `tests/system/test_c35_audio_only.py` (needs
+Docker): a real audio-only download, tags and cover read back with ffprobe, codec aac or opus.
+
+## As music, optionally audio only (issue #36)
+
+The same *Target* select has a third choice, **Music**. The two name fields become **artist**
+(default: the channel) and **track title**, and an **album** field appears. The file goes where the
+torrent organizer puts music albums, so tracks from YouTube and albums from torrents sit side by
+side in Jellyfin's music library:
+
+```
+Musik/<artist>/<album>/<title>.<ext>
+```
+
+* **Album:** left empty it is a *single*: the album is named like the track (`Musik/Kraftwerk/Autobahn/Autobahn.m4a`).
+  Typing a name such as `YouTube` collects tracks of one artist in one album folder. The server
+  applies the default, so API users get the same.
+* **Audio only** is offered like for podcasts and is switched on by the form when *Music* is chosen
+  (a video file does not belong in a music library). It is the same helper as for episodes
+  (docs above): AAC copied into `.m4a`, else Opus into `.opus`, never re-encoded. The tags written
+  are title, artist, album, album artist, the upload date and the thumbnail as cover (m4a/mp3).
+  Without audio only the video goes in with its picture beside it; Jellyfin's music library ignores
+  it, which is the reason for the default.
+* Names are the confirmed ones through the same name check as everywhere; the title is shortened to
+  fit the file system; nothing is overwritten (`Autobahn (2).m4a`), and a symlink inside the library
+  cannot lead the track outside it.
+* The job key is `<id>@music`: one video can be a video, an episode and a track, once each. A
+  subscription cannot target music (an artist/album per channel is not a sensible rule); a single
+  track at a time.
+* After the file is in, the app asks Jellyfin to refresh the music library (`MEDIA_DIR_MUSIC`).
+
+Real test: `YTP_NETWORK_TESTS=1 make test-system` runs `tests/system/test_c36_music.py` (Docker).
+
 ## Through the VPN or not (recommendation; the owner decides)
 
 By default yt-dlp asks YouTube **through the VPN**: `YTDLP_PROXY=http://gluetun:8888` is gluetun's

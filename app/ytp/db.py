@@ -45,7 +45,7 @@ TRANSACTION_CONTROL = re.compile(
 
 # The values the CHECK constraints in 0001_initial.sql allow. tests/unit/test_app_db.py proves
 # they match, so code and schema cannot drift apart.
-JOB_TYPES = ("magnet", "youtube")
+JOB_TYPES = ("magnet", "youtube", "podcast")
 JOB_STATUSES = ("queued", "downloading", "organizing", "done", "failed")
 
 LAYOUT_HINT = (

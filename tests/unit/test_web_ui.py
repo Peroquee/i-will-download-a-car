@@ -23,6 +23,7 @@ ENV = {
     "MEDIA_DIR_SERIES": "Serien",
     "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
     "MEDIA_DIR_MUSIC": "Musik",
+    "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
 HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -166,6 +167,11 @@ def test_requests_from_other_sites_are_refused_before_anything_happens(client, h
         ("POST", "/api/subscriptions", {"channel": "@kurzgesagt"}),
         ("DELETE", "/api/subscriptions/1", None),
         ("POST", "/api/subscriptions/1/poll", None),
+        ("POST", "/api/podcasts/probe", {"feed": "https://podcast.example/feed.xml"}),
+        ("POST", "/api/podcasts/episode", {"feed": "https://podcast.example/feed.xml", "key": "0" * 40}),
+        ("POST", "/api/podcasts", {"feed": "https://podcast.example/feed.xml"}),
+        ("DELETE", "/api/podcasts/1", None),
+        ("POST", "/api/podcasts/1/poll", None),
     ],
 )  # fmt: skip
 def test_every_state_changing_route_is_protected_and_nothing_is_created(client, method, path, body):
@@ -270,7 +276,9 @@ def test_the_ids_the_script_uses_exist_in_the_page():
 
 
 def test_the_media_types_offered_are_the_ones_the_server_knows():
-    options = re.findall(r'<option value="(\w+)"', HTML)
+    select = re.search(r'<select id="media-type".*?</select>', HTML, re.S)
+    assert select
+    options = re.findall(r'<option value="(\w+)"', select.group(0))
     assert options == list(METADATA_TYPES)
 
 
@@ -324,6 +332,12 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "field.album",
         "mode.magnet",
         "yt.title",
+        "mode.podcast",
+        "type.podcast",
+        "subs.podcast",
+        "subs.target_podcast",
+        "yt.podcast",
+        "yt.album",
     }, same
 
 
@@ -337,7 +351,6 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
     used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
-    used |= {"howto.source.direct", "howto.source.torrent-file", "howto.source.open"}
     used |= {"subs.polling", "subs.poll", "subs.confirm", "subs.remove", "subs.ok"}
     missing = {k for k in used if k not in t}
     assert not missing, sorted(missing)
@@ -350,8 +363,12 @@ def test_every_server_error_and_probe_kind_has_a_text():
     for lang in ("de", "en"):
         for kind in PROBE_STATUS:
             assert f"kind.{kind}" in t[lang], (lang, kind)
+        from ytp.podcasts_api import KIND, STATUS
+
+        for kind in STATUS:
+            assert f"kind.{KIND.get(kind, f'feed_{kind}')}" in t[lang], (lang, kind)
         for error_type in (
-            "missing", "name_empty", "name_too_long", "name_path_separator", "name_control_character",
+            "missing", "feed_invalid", "name_empty", "name_too_long", "name_path_separator", "name_control_character",
             "name_dots_only", "year_out_of_range", "int_parsing", "greater_than_equal",
             "less_than_equal", "magnet_invalid", "video_url_invalid", "channel_invalid", "extra_forbidden",
         ):  # fmt: skip
@@ -390,8 +407,12 @@ def run_node(expression: str):
         ("http://music.youtube.com/watch?v=dQw4w9WgXcQ", "youtube"),
         ("MAGNET:?xt=urn:btih:abc", "magnet"),
         ("magnet:?xt=urn:btih:abc", "magnet"),
-        ("https://vimeo.com/1", None),
-        ("https://youtube.com.evil.example/x", None),
+        ("https://vimeo.com/1", "podcast"),
+        ("https://feeds.example.org/show.xml", "podcast"),
+        ("http://podcast.example/feed", "podcast"),
+        ("https://youtube.com.evil.example/x", "podcast"),
+        ("ftp://example.org/feed", None),
+        ("https://", None),
         ("hello", None),
         ("", None),
     ],
@@ -517,7 +538,7 @@ def test_the_age_of_a_timestamp(iso, expected):
 @needs_node
 def test_job_kinds_map_to_known_translations():
     t = translations()["en"]
-    for kind in ("movies", "series", "audiobooks", "music", "youtube"):
+    for kind in ("movies", "series", "audiobooks", "music", "youtube", "podcast"):
         assert run_node(f"L.kindKey({json.dumps(kind)})") in t
     assert run_node("L.kindKey('nonsense')") is None
 
@@ -602,9 +623,6 @@ def test_the_page_has_the_subscription_view_built_without_innerhtml():
 # --- the How to guide (#33) ----------------------
 
 
-SOURCES_FILE = STATIC_DIR / "howto-sources.json"
-
-
 def test_the_guide_is_a_dialog_with_a_close_button_and_a_visible_opener():
     assert re.search(r'<dialog id="howto"[^>]*aria-labelledby="howto-title"', HTML)
     assert 'id="howto-title"' in HTML
@@ -644,31 +662,252 @@ def test_the_guide_loads_nothing_from_another_site():
     assert "https://" not in dialog
 
 
-def test_the_sources_file_is_valid_editable_data():
-    data = json.loads(SOURCES_FILE.read_text(encoding="utf-8"))
-    sources = data["sources"]
-    assert 2 <= len(sources) <= 20
-    assert len({s["id"] for s in sources}) == len(sources)
-    for source in sources:
-        assert set(source) == {"id", "name", "url", "magnet", "text"}, source["id"]
-        assert re.fullmatch(r"https://[a-z0-9.-]+\.[a-z]{2,}(/[^\s]*)?", source["url"]), source[
-            "url"
-        ]
-        assert source["magnet"] in {"direct", "torrent-file"}
-        assert 3 <= len(source["name"]) <= 80
-        for lang in ("de", "en"):
-            assert 20 <= len(source["text"][lang]) <= 400, (source["id"], lang)
-    assert any(s["magnet"] == "direct" for s in sources), "at least one the app can use"
+def test_the_guide_has_no_list_of_sources():
+    """The owner decided: the guide explains what a magnet link looks like and where the button
+    usually is, and that only things one may download belong here. No list of places to get
+    torrents, no data file for one."""
+    assert not (STATIC_DIR / "howto-sources.json").exists()
+    assert 'id="howto-sources"' not in HTML
+    for text in (HTML, APP_JS, CSS):
+        assert "howto-sources" not in text
+        assert "howto.source" not in text
+    t = translations()
+    for lang in ("de", "en"):
+        assert not [k for k in t[lang] if k.startswith("howto.source") or k == "howto.find.sources"]
 
 
-def test_the_sources_file_is_served_to_the_page(client):
-    response = client.get("/static/howto-sources.json")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.json()["sources"]
+def test_the_sources_file_is_not_served(client):
+    assert client.get("/static/howto-sources.json").status_code == 404
 
 
-def test_only_plain_https_addresses_become_links_in_the_guide():
-    assert "/^https:" in APP_JS
-    assert 'link.rel = "noopener noreferrer"' in APP_JS
+def test_the_guide_button_is_called_anleitung_and_how_to():
+    t = translations()
+    assert t["de"]["howto.button"] == "Anleitung"
+    assert t["en"]["howto.button"] == "How to"
+    assert t["de"]["howto.title"] == "Anleitung"
+    assert t["en"]["howto.title"] == "How to"
+
+
+def test_the_guide_explains_the_magnet_link_and_the_legal_notice():
+    t = translations()
+    assert "magnet:?xt=urn:btih:" in t["en"]["howto.find.looks"]
+    assert "magnet symbol" in t["en"]["howto.find.where"]
+    assert "allowed to download" in t["en"]["howto.find.legal"]
+    assert "herunterladen darfst" in t["de"]["howto.find.legal"]
+
+
+# --- podcasts (#34) -------------------------------------------------------------------------
+
+
+def test_the_page_has_the_podcast_panel_and_the_script_builds_it_without_innerhtml():
+    for element_id in ("mode-podcast", "podcast-fields", "pc-status", "f-podcast", "pc-episode",
+                       "pc-subscribe", "pc-backfill"):  # fmt: skip
+        assert f'id="{element_id}"' in HTML
+    for route in ("/api/podcasts/probe", "/api/podcasts/episode", "/api/podcasts"):
+        assert f'"{route}"' in APP_JS
     assert "innerHTML" not in APP_JS
+    assert "textContent" in APP_JS
+
+
+def test_episode_titles_from_a_feed_are_only_ever_set_as_text():
+    """A feed controls the titles: they must reach the page through textContent, never as HTML."""
+    block = APP_JS[APP_JS.index("function fillEpisodes") : APP_JS.index("function runFeedProbe")]
+    assert "option.textContent" in block
+    assert "innerHTML" not in block
+    assert "outerHTML" not in APP_JS
+    assert "insertAdjacentHTML" not in APP_JS
+
+
+def test_the_subscription_view_lists_channels_and_podcasts():
+    assert '"/api/podcasts"' in APP_JS
+    assert 'sub.kind === "podcast"' in APP_JS
+
+
+@needs_node
+def test_feed_addresses_trigger_the_feed_lookup_not_the_video_lookup():
+    assert run_node("L.looksLikeFeedUrl('https://feeds.example/show.xml')") is True
+    assert run_node("L.looksLikeFeedUrl('https://youtu.be/dQw4w9WgXcQ')") is False
+    assert run_node("L.looksLikeFeedUrl('magnet:?xt=urn:btih:abc')") is False
+    assert run_node("L.looksLikeVideoUrl('https://feeds.example/show.xml')") is False
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("values", "episode", "subscribe"),
+    [
+        ({"name": " My Cast ", "episode": "k" * 40, "subscribe": False, "backfill": "0"},
+         {"feed": "https://p.example/f", "key": "k" * 40, "name": "My Cast"}, None),
+        ({"name": "", "episode": "", "subscribe": True, "backfill": "3"},
+         None, {"feed": "https://p.example/f", "backfill": 3}),
+        ({"name": "X", "episode": "k" * 40, "subscribe": True, "backfill": ""},
+         {"feed": "https://p.example/f", "key": "k" * 40, "name": "X"},
+         {"feed": "https://p.example/f", "backfill": 0, "name": "X"}),
+        ({"name": "X", "episode": "", "subscribe": False, "backfill": "0"}, None, None),
+    ],
+)  # fmt: skip
+def test_podcast_payloads_match_what_the_server_expects(client, values, episode, subscribe):
+    got = run_node(f"L.podcastPayloads(' https://p.example/f ', {json.dumps(values)})")
+    assert got == {"episode": episode, "subscribe": subscribe}
+    # and the server accepts exactly these shapes (field names, no extras): 422 only for content
+    for body, path in (
+        (got["episode"], "/api/podcasts/episode"),
+        (got["subscribe"], "/api/podcasts"),
+    ):
+        if body is not None:
+            response = client.post(path, json=body)
+            assert response.status_code != 422 or response.json()["detail"][0]["loc"][1] != "extra"
+            assert not any(
+                e["type"] == "extra_forbidden"
+                for e in response.json().get("detail", [])
+                if isinstance(response.json().get("detail"), list)
+            )
+
+
+@needs_node
+def test_the_first_look_for_a_podcast_wants_a_folder_and_something_to_do():
+    run = "L.clientErrors('podcast', null, %s, %s, 2026)"
+    ok = {"name": "X", "episode": "k", "subscribe": False, "backfill": "0"}
+    assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(ok))) == {}
+    nothing = {"name": "X", "episode": "", "subscribe": False, "backfill": "0"}
+    assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(nothing))) == {
+        "episode": "pc.nothing"
+    }
+    nameless = {"name": " ", "episode": "k", "subscribe": False, "backfill": "0"}
+    assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(nameless))) == {
+        "name": "err.required"
+    }
+    assert run_node(run % (json.dumps(""), json.dumps(ok))) == {"link": "err.required"}
+    for bad in ("21", "x", "-1"):
+        wrong = {**ok, "subscribe": True, "backfill": bad}
+        assert run_node(run % (json.dumps("https://p.example/f"), json.dumps(wrong))) == {
+            "backfill": "err.int_out_of_range_20"
+        }
+
+
+@needs_node
+def test_server_422s_for_a_feed_land_on_the_right_fields():
+    detail = [
+        {"loc": ["body", "feed"], "type": "feed_invalid", "msg": "no"},
+        {"loc": ["body", "key"], "type": "string_pattern_mismatch", "msg": "bad"},
+        {"loc": ["body", "backfill"], "type": "less_than_equal", "msg": "big"},
+    ]
+    got = run_node(f"L.serverErrors({json.dumps(detail)})")
+    assert set(got) == {"link", "key", "backfill"}
+
+
+# --- YouTube as a podcast episode (#35) ------------------------------------------------------
+
+
+def test_the_page_has_the_target_choice_and_the_audio_checkbox():
+    for element_id in (
+        "yt-target",
+        "yt-audio",
+        "yt-audio-row",
+        "yt-channel-label",
+        "yt-title-label",
+        "subs-target",
+        "subs-audio",
+    ):
+        assert f'id="{element_id}"' in HTML
+    target = re.search(r'<select id="yt-target".*?</select>', HTML, re.S)
+    assert target
+    assert re.findall(r'<option value="(\w+)"', target.group(0)) == ["video", "podcast", "music"]
+    assert 'id="yt-audio-row" hidden' in HTML, "audio only is offered only for podcast episodes"
+
+
+@needs_node
+def test_the_youtube_payload_only_carries_the_target_when_it_is_a_podcast():
+    plain = run_node(
+        "L.youtubePayload(' https://youtu.be/dQw4w9WgXcQ ', ' Blender ', ' Big ', 'video', true)"
+    )
+    assert plain == {"url": "https://youtu.be/dQw4w9WgXcQ", "channel": "Blender", "title": "Big"}, (
+        "audio only never goes with a video"
+    )
+    assert run_node("L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T')") == plain | {
+        "channel": "B",
+        "title": "T",
+    }
+    episode = run_node(
+        "L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T', 'podcast', false)"
+    )
+    assert episode == {
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "channel": "B",
+        "title": "T",
+        "target": "podcast",
+    }
+    audio = run_node("L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T', 'podcast', true)")
+    assert audio["audio_only"] is True
+
+
+@needs_node
+def test_the_subscribe_payload():
+    assert run_node("L.subscribePayload(' @x ', null, 3)") == {"channel": "@x", "backfill": 3}
+    assert run_node("L.subscribePayload('@x', ' My Cast ', null, 'podcast', true)") == {
+        "channel": "@x", "name": "My Cast", "target": "podcast", "audio_only": True,
+    }  # fmt: skip
+    assert run_node("L.subscribePayload('@x', '', 0, 'video', true)") == {
+        "channel": "@x",
+        "backfill": 0,
+    }
+
+
+@needs_node
+def test_what_the_page_sends_is_accepted_by_the_server(client):
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    for call in (
+        f"L.youtubePayload('{url}', 'B', 'T', 'podcast', true)",
+        f"L.youtubePayload('{url}', 'B', 'T', 'podcast', false)",
+        f"L.youtubePayload('{url}', 'B', 'T', 'video', false)",
+    ):
+        response = client.post("/api/youtube/download", json=run_node(call))
+        assert response.status_code in {200, 201}, (call, response.text)
+
+
+# --- YouTube as music (#36) ---------------------------------------------------------------------
+
+
+def test_the_page_has_the_music_fields():
+    for element_id in ("yt-album-row", "f-yt-album", "f-yt-album-error", "yt-subscribe-row"):
+        assert f'id="{element_id}"' in HTML
+    assert 'id="yt-album-row" class="row" hidden' in HTML, (
+        "the album field shows for the music target only"
+    )
+    assert 'for="f-yt-album"' in HTML
+
+
+@needs_node
+def test_the_music_payload_carries_the_album_only_when_given():
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    single = run_node(f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', true, '  ')")
+    assert single == {
+        "url": url,
+        "channel": "Kraftwerk",
+        "title": "Autobahn",
+        "target": "music",
+        "audio_only": True,
+    }
+    album = run_node(
+        f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', true, ' YouTube ')"
+    )
+    assert album["album"] == "YouTube"
+    video = run_node(f"L.youtubePayload('{url}', 'K', 'A', 'video', true, 'X')")
+    assert "album" not in video
+    assert "target" not in video
+    podcast = run_node(f"L.youtubePayload('{url}', 'K', 'A', 'podcast', false, 'X')")
+    assert "album" not in podcast
+
+
+@needs_node
+def test_what_the_page_sends_for_music_is_accepted_by_the_server(client):
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    for call in (
+        f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', true, '')",
+        f"L.youtubePayload('{url}', 'Kraftwerk', 'Autobahn', 'music', false, 'Album')",
+    ):
+        response = client.post("/api/youtube/download", json=run_node(call))
+        assert response.status_code in {200, 201}, (call, response.text)
+
+
+def test_a_422_on_the_album_lands_on_the_album_field():
+    assert '{ channel: $("f-channel"), title: $("f-yt-title"), album: $("f-yt-album") }' in APP_JS

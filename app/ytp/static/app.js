@@ -8,6 +8,7 @@
   var lang = "en";
   var probeTimer = null;
   var probeSerial = 0;
+  var feedSerial = 0;
 
   /* ---------------------------------------------------------------- language */
 
@@ -34,6 +35,7 @@
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
     $("lang").textContent = lang === "de" ? "EN" : "DE";
+    applyTarget();
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
     refreshVpnText();
     renderJobs();
@@ -50,6 +52,7 @@
     $("mode-" + value).checked = true;
     $("youtube-fields").hidden = value !== "youtube";
     $("magnet-fields").hidden = value !== "magnet";
+    $("podcast-fields").hidden = value !== "podcast";
     clearErrors();
   }
 
@@ -71,7 +74,12 @@
 
   function fieldElement(field) {
     if (field === "link") return $("link");
-    if (mode() === "youtube") return field === "channel" ? $("f-channel") : field === "title" ? $("f-yt-title") : null;
+    if (mode() === "youtube") {
+      return { channel: $("f-channel"), title: $("f-yt-title"), album: $("f-yt-album") }[field] || null;
+    }
+    if (mode() === "podcast") {
+      return { name: $("f-podcast"), episode: $("pc-episode"), key: $("pc-episode"), backfill: $("pc-backfill") }[field] || null;
+    }
     var box = document.querySelector('.type-fields[data-type="' + mediaType() + '"]');
     return box.querySelector('[data-field="' + field + '"]');
   }
@@ -86,7 +94,8 @@
   }
 
   function message(item) {
-    var key = "err." + (typeof item === "string" ? item.replace(/^err\./, "") : item.type);
+    var key = typeof item === "string" && /^pc\./.test(item) ? item
+      : "err." + (typeof item === "string" ? item.replace(/^err\./, "") : item.type);
     var vars = { max: new Date().getFullYear() + 1 };
     if (I18N[lang][key] != null) return t(key, vars);
     return item.msg ? item.msg : t("err.other");
@@ -133,8 +142,52 @@
   function scheduleProbe() {
     window.clearTimeout(probeTimer);
     var link = $("link").value;
+    if (mode() === "podcast" && L.looksLikeFeedUrl(link)) {
+      probeTimer = window.setTimeout(function () { runFeedProbe(link); }, 600);
+      return;
+    }
     if (mode() !== "youtube" || !L.looksLikeVideoUrl(link)) { $("probe-status").textContent = ""; return; }
     probeTimer = window.setTimeout(function () { runProbe(link); }, 500);
+  }
+
+  /* ---------------------------------------------------------------- podcast feed (#34) */
+
+  function fillEpisodes(episodes) {
+    var select = $("pc-episode");
+    while (select.options.length > 1) select.remove(1);
+    episodes.forEach(function (episode) {
+      var option = document.createElement("option");
+      option.value = episode.key;
+      option.textContent = episode.published + " \u2013 " + episode.title;
+      select.appendChild(option);
+    });
+    select.value = "";
+  }
+
+  function runFeedProbe(link) {
+    var serial = ++feedSerial;
+    $("pc-status").textContent = t("pc.looking");
+    post("/api/podcasts/probe", { feed: link.trim() }).then(function (reply) {
+      if (serial !== feedSerial) return; // a newer paste replaced this one
+      if (reply.status === 200) {
+        $("f-podcast").value = reply.data.folder || reply.data.title || "";
+        fillEpisodes(reply.data.episodes || []);
+        $("pc-subscribe").checked = !reply.data.subscribed && !(reply.data.episodes || []).length;
+        $("pc-status").textContent = reply.data.episodes.length
+          ? t("pc.found", { title: reply.data.title, n: reply.data.episodes.length })
+          : t("pc.found_none", { title: reply.data.title });
+        return;
+      }
+      fillEpisodes([]);
+      if (reply.status === 422) {
+        $("pc-status").textContent = "";
+        showFieldErrors(L.serverErrors(reply.data.detail));
+        return;
+      }
+      $("pc-status").textContent = failureText(reply, "result.failed") + " " + t("pc.manual");
+    }).catch(function () {
+      if (serial === feedSerial) $("pc-status").textContent = t("result.network") + " " + t("pc.manual");
+    });
   }
 
   function runProbe(link) {
@@ -163,12 +216,43 @@
     });
   }
 
+  /* ---------------------------------------------------------------- YouTube target (#35) */
+
+  function ytTarget() { return $("yt-target").value; }
+  function ytAudioOnly() { return ytTarget() !== "video" && $("yt-audio").checked; }
+
+  /* The same two fields mean channel/title for a video and podcast/episode for an episode. */
+  var shownTarget = "video";
+  var TARGET_TEXT = {
+    video: ["yt.channel", "yt.title", "yt.subscribe_note"],
+    podcast: ["yt.podcast", "yt.episode", "yt.subscribe_note_podcast"],
+    music: ["yt.artist", "yt.track", "yt.subscribe_note"],
+  };
+
+  function applyTarget() {
+    var target = ytTarget();
+    $("yt-audio-row").hidden = target === "video";
+    $("yt-album-row").hidden = target !== "music";
+    $("yt-subscribe-row").hidden = target === "music";   // channels are not subscribed as music
+    if (target === "video") $("yt-audio").checked = false;
+    if (target === "music") $("subscribe").checked = false;
+    // A music track is audio by default (a video file does not belong in a music library).
+    if (target === "music" && shownTarget !== "music") $("yt-audio").checked = true;
+    if (target === "podcast" && shownTarget === "music") $("yt-audio").checked = false;
+    shownTarget = target;
+    var text = TARGET_TEXT[target];
+    var labels = [["yt-channel-label", text[0]], ["yt-title-label", text[1]], ["yt-subscribe-note", text[2]]];
+    labels.forEach(function (pair) {
+      $(pair[0]).dataset.i18n = pair[1];
+      $(pair[0]).textContent = t(pair[1]);
+    });
+  }
+
   /* ---------------------------------------------------------------- subscribe (#19) */
 
   /* Ticked "subscribe" next to a YouTube download: the video's address names the channel. */
   function subscribeToChannel(link, name, downloadText) {
-    var body = { channel: link.trim() };
-    if (name && name.trim()) body.name = name.trim();
+    var body = L.subscribePayload(link, name, null, ytTarget(), ytAudioOnly());
     post("/api/subscriptions", body).then(function (reply) {
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? "sub.duplicate" : "sub.created";
@@ -196,8 +280,9 @@
     clearErrors();
     var current = mode();
     var link = $("link").value;
+    if (current === "podcast") { submitPodcast(link); return; }
     var data = current === "youtube"
-      ? { channel: $("f-channel").value, title: $("f-yt-title").value }
+      ? { channel: $("f-channel").value, title: $("f-yt-title").value, album: $("f-yt-album").value }
       : values();
     var problems = L.clientErrors(current, mediaType(), link, data, new Date().getFullYear());
     if (Object.keys(problems).length) {
@@ -207,7 +292,7 @@
     }
     var path = current === "youtube" ? "/api/youtube/download" : "/api/magnet";
     var body = current === "youtube"
-      ? L.youtubePayload(link, data.channel, data.title)
+      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly(), data.album)
       : L.magnetPayload(link, mediaType(), data);
     $("submit").disabled = true;
     post(path, body).then(function (reply) {
@@ -237,10 +322,80 @@
     });
   }
 
+  /* Podcast: a single episode and/or a subscription, one request each (#34). */
+  function submitPodcast(link) {
+    var data = {
+      name: $("f-podcast").value,
+      episode: $("pc-episode").value,
+      subscribe: $("pc-subscribe").checked,
+      backfill: $("pc-backfill").value,
+    };
+    var problems = L.clientErrors("podcast", null, link, data, new Date().getFullYear());
+    if (Object.keys(problems).length) {
+      showFieldErrors(problems);
+      showResult(t("result.fix"), false);
+      return;
+    }
+    var payloads = L.podcastPayloads(link, data);
+    var lines = [];
+    var good = true;
+    var fieldErrors = null;
+
+    function failed(reply, fallbackKey) {
+      good = false;
+      if (reply.status === 422) { fieldErrors = L.serverErrors(reply.data.detail); return; }
+      lines.push(failureText(reply, fallbackKey));
+    }
+
+    $("submit").disabled = true;
+    var steps = Promise.resolve();
+    if (payloads.episode) {
+      steps = steps.then(function () {
+        return post("/api/podcasts/episode", payloads.episode).then(function (reply) {
+          if (reply.status === 201 || reply.status === 200) {
+            var vars = { id: reply.data.id, status: statusText(reply.data.status) };
+            lines.push(t(reply.data.duplicate ? "pc.queued_again" : "pc.queued", vars));
+          } else {
+            failed(reply, "result.failed");
+          }
+        });
+      });
+    }
+    if (payloads.subscribe) {
+      steps = steps.then(function () {
+        return post("/api/podcasts", payloads.subscribe).then(function (reply) {
+          if (reply.status === 201 || reply.status === 200) {
+            lines.push(t(reply.data.duplicate ? "pc.already" : "pc.subscribed", { name: reply.data.title }));
+          } else {
+            failed(reply, "pc.sub_failed");
+          }
+        });
+      });
+    }
+    steps.then(function () {
+      $("submit").disabled = false;
+      if (fieldErrors) { showFieldErrors(fieldErrors); lines.push(t("result.fix")); }
+      showResult(lines.join(" "), good);
+      if (good) resetFields();
+      pollJobs();
+      loadSubs();
+    }).catch(function () {
+      $("submit").disabled = false;
+      showResult(lines.concat([t("result.network")]).join(" "), false);
+    });
+  }
+
   function resetFields() {
     document.querySelectorAll("#form input[type=text]").forEach(function (input) { input.value = ""; });
     $("pack").checked = false;
     $("subscribe").checked = false;
+    $("yt-target").value = "video";
+    shownTarget = "video";
+    applyTarget();
+    $("pc-subscribe").checked = false;
+    $("pc-backfill").value = "0";
+    fillEpisodes([]);
+    $("pc-status").textContent = "";
     $("f-episode").disabled = false;
     $("probe-status").textContent = "";
     $("probe-duration").textContent = "";
@@ -438,15 +593,31 @@
   var subsConfirm = {};       // id -> true after the first click on Remove
   var subsMessages = {};      // id -> {text, ok} shown under the row
 
-  function loadSubs() {
-    if (subsLoading) return;
-    subsLoading = true;
-    fetch("/api/subscriptions", { credentials: "same-origin", headers: { "Accept": "application/json" } })
+  /* Channels and podcasts share one list; the kind says which API a row belongs to. */
+  function subKey(sub) { return sub.kind + ":" + sub.id; }
+  function subPath(sub) { return (sub.kind === "podcast" ? "/api/podcasts/" : "/api/subscriptions/") + sub.id; }
+  function subName(sub) { return sub.kind === "podcast" ? sub.title : sub.channel_name; }
+
+  function getJson(path) {
+    return fetch(path, { credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (response) {
         if (!response.ok) throw new Error("status " + response.status);
         return response.json();
+      });
+  }
+
+  function loadSubs() {
+    if (subsLoading) return;
+    subsLoading = true;
+    Promise.all([getJson("/api/subscriptions"), getJson("/api/podcasts")])
+      .then(function (answers) {
+        var channels = answers[0].subscriptions.map(function (sub) { sub.kind = "channel"; return sub; });
+        var podcasts = answers[1].podcasts;   // these carry kind: "podcast" already
+        subsData = channels.concat(podcasts).sort(function (a, b) {
+          return subName(a).toLowerCase().localeCompare(subName(b).toLowerCase());
+        });
+        subsLoadFailed = false;
       })
-      .then(function (data) { subsData = data.subscriptions; subsLoadFailed = false; })
       .catch(function () { subsLoadFailed = true; })
       .then(function () { subsLoading = false; renderSubs(); });
   }
@@ -478,15 +649,17 @@
     top.className = "job-top";
     var name = document.createElement("span");
     name.className = "job-name";
-    name.textContent = sub.channel_name;
+    name.textContent = subName(sub);
     top.appendChild(name);
     li.appendChild(top);
 
     var meta = document.createElement("div");
     meta.className = "job-meta";
-    meta.textContent = sub.last_checked
+    var tag = sub.kind === "podcast" ? t("subs.podcast") : t("subs.channel_tag");
+    if (sub.target === "podcast") tag += " \u2192 " + t(sub.audio_only ? "subs.target_audio" : "subs.target_podcast");
+    meta.textContent = tag + " \u00b7 " + (sub.last_checked
       ? t("subs.checked", { when: timeText(sub.last_checked) })
-      : t("subs.never");
+      : t("subs.never"));
     li.appendChild(meta);
 
     if (sub.last_error) {
@@ -495,28 +668,29 @@
       problem.textContent = sub.last_error;
       li.appendChild(problem);
     }
-    if (subsMessages[sub.id]) {
+    var rowKey = subKey(sub);
+    if (subsMessages[rowKey]) {
       var note = document.createElement("p");
-      note.className = subsMessages[sub.id].ok ? "job-note" : "job-error";
-      note.textContent = subsMessages[sub.id].text();
+      note.className = subsMessages[rowKey].ok ? "job-note" : "job-error";
+      note.textContent = subsMessages[rowKey].text();
       li.appendChild(note);
     }
 
     var buttons = document.createElement("div");
     buttons.className = "row-actions";
-    var busy = subsBusy[sub.id];
+    var busy = subsBusy[rowKey];
     var poll = document.createElement("button");
     poll.type = "button";
     poll.className = "ghost small";
     poll.disabled = !!busy;
     poll.textContent = t(busy === "poll" ? "subs.polling" : "subs.poll");
-    poll.addEventListener("click", function () { pollSub(sub.id); });
+    poll.addEventListener("click", function () { pollSub(sub); });
     var remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "ghost small" + (subsConfirm[sub.id] ? " danger" : "");
+    remove.className = "ghost small" + (subsConfirm[rowKey] ? " danger" : "");
     remove.disabled = !!busy;
-    remove.textContent = t(subsConfirm[sub.id] ? "subs.confirm" : "subs.remove");
-    remove.addEventListener("click", function () { removeSub(sub.id); });
+    remove.textContent = t(subsConfirm[rowKey] ? "subs.confirm" : "subs.remove");
+    remove.addEventListener("click", function () { removeSub(sub); });
     buttons.appendChild(poll);
     buttons.appendChild(remove);
     li.appendChild(buttons);
@@ -532,49 +706,51 @@
     $("subs-empty").hidden = subsData.length > 0;
   }
 
-  function pollSub(id) {
-    subsBusy[id] = "poll";
-    delete subsConfirm[id];
-    delete subsMessages[id];
+  function pollSub(sub) {
+    var key = subKey(sub);
+    subsBusy[key] = "poll";
+    delete subsConfirm[key];
+    delete subsMessages[key];
     renderSubs();
-    subsRequest("POST", "/api/subscriptions/" + id + "/poll").then(function (reply) {
+    subsRequest("POST", subPath(sub) + "/poll").then(function (reply) {
       if (reply.status === 200) {
         var n = reply.data.queued || 0;
-        subsMessages[id] = { ok: true, text: function () { return n ? t("subs.polled", { n: n }) : t("subs.polled_none"); } };
+        subsMessages[key] = { ok: true, text: function () { return n ? t("subs.polled", { n: n }) : t("subs.polled_none"); } };
         if (n) pollJobs();
       } else {
-        subsMessages[id] = { ok: false, text: function () { return failureText(reply, "subs.poll_failed"); } };
+        subsMessages[key] = { ok: false, text: function () { return failureText(reply, "subs.poll_failed"); } };
       }
     }).catch(function () {
-      subsMessages[id] = { ok: false, text: function () { return t("subs.poll_failed") + " " + t("result.network"); } };
-    }).then(function () { delete subsBusy[id]; loadSubs(); renderSubs(); });
+      subsMessages[key] = { ok: false, text: function () { return t("subs.poll_failed") + " " + t("result.network"); } };
+    }).then(function () { delete subsBusy[key]; loadSubs(); renderSubs(); });
   }
 
   /* Two clicks: the first asks "Really remove?", the second does it; the question lapses. */
-  function removeSub(id) {
-    if (!subsConfirm[id]) {
-      subsConfirm[id] = true;
+  function removeSub(sub) {
+    var key = subKey(sub);
+    if (!subsConfirm[key]) {
+      subsConfirm[key] = true;
       renderSubs();
       window.setTimeout(function () {
-        if (subsConfirm[id]) { delete subsConfirm[id]; renderSubs(); }
+        if (subsConfirm[key]) { delete subsConfirm[key]; renderSubs(); }
       }, 5000);
       return;
     }
-    delete subsConfirm[id];
-    subsBusy[id] = "remove";
+    delete subsConfirm[key];
+    subsBusy[key] = "remove";
     renderSubs();
-    subsRequest("DELETE", "/api/subscriptions/" + id).then(function (reply) {
-      delete subsBusy[id];
+    subsRequest("DELETE", subPath(sub)).then(function (reply) {
+      delete subsBusy[key];
       if (reply.status === 204 || reply.status === 404) {
-        delete subsMessages[id];
+        delete subsMessages[key];
         $("subs-result").textContent = t("subs.removed_note");
         $("subs-result").className = "result ok";
       } else {
-        subsMessages[id] = { ok: false, text: function () { return failureText(reply, "subs.remove_failed"); } };
+        subsMessages[key] = { ok: false, text: function () { return failureText(reply, "subs.remove_failed"); } };
       }
     }).catch(function () {
-      delete subsBusy[id];
-      subsMessages[id] = { ok: false, text: function () { return t("subs.remove_failed") + " " + t("result.network"); } };
+      delete subsBusy[key];
+      subsMessages[key] = { ok: false, text: function () { return t("subs.remove_failed") + " " + t("result.network"); } };
     }).then(function () { loadSubs(); renderSubs(); });
   }
 
@@ -603,7 +779,9 @@
       return;
     }
     $("subs-add").disabled = true;
-    post("/api/subscriptions", { channel: channel, backfill: +backfillText }).then(function (reply) {
+    var target = $("subs-target").value;
+    var body = L.subscribePayload(channel, null, +backfillText, target, target === "podcast" && $("subs-audio").checked);
+    post("/api/subscriptions", body).then(function (reply) {
       $("subs-add").disabled = false;
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? "subs.already" : "subs.added";
@@ -638,58 +816,8 @@
 
   /* ---------------------------------------------------------------- How to guide (#33) */
 
-  var howtoSources = null;     // from /static/howto-sources.json, loaded when first opened
-  var howtoSourcesFailed = false;
-
-  function renderHowtoSources() {
-    var list = $("howto-sources");
-    if (!list) return;
-    list.textContent = "";
-    $("howto-sources-error").textContent = howtoSourcesFailed ? t("howto.sources_error") : "";
-    (howtoSources || []).forEach(function (source) {
-      var li = document.createElement("li");
-      var name = document.createElement("strong");
-      name.textContent = source.name;
-      li.appendChild(name);
-      var tag = document.createElement("span");
-      tag.className = "howto-tag howto-tag-" + (source.magnet === "direct" ? "direct" : "file");
-      tag.textContent = t("howto.source." + (source.magnet === "direct" ? "direct" : "torrent-file"));
-      li.appendChild(tag);
-      var text = document.createElement("p");
-      text.textContent = (source.text && (source.text[lang] || source.text.en)) || "";
-      li.appendChild(text);
-      // Only plain https addresses become links (the file is editable by the owner, but a
-      // javascript: or http: address must never turn into one).
-      if (typeof source.url === "string" && /^https:\/\/[^\s]+$/.test(source.url)) {
-        var link = document.createElement("a");
-        link.href = source.url;
-        link.rel = "noopener noreferrer";
-        link.target = "_blank";
-        link.textContent = t("howto.source.open");
-        li.appendChild(link);
-      }
-      list.appendChild(li);
-    });
-  }
-
-  function loadHowtoSources() {
-    if (howtoSources) return;
-    fetch("/static/howto-sources.json", { credentials: "same-origin", headers: { "Accept": "application/json" } })
-      .then(function (response) {
-        if (!response.ok) throw new Error("status " + response.status);
-        return response.json();
-      })
-      .then(function (data) {
-        howtoSources = Array.isArray(data.sources) ? data.sources : [];
-        howtoSourcesFailed = false;
-      })
-      .catch(function () { howtoSourcesFailed = true; })
-      .then(renderHowtoSources);
-  }
-
   function openHowto() {
     var dialog = $("howto");
-    loadHowtoSources();
     if (typeof dialog.showModal === "function") {
       if (!dialog.open) dialog.showModal();   // Esc closes it, focus stays inside, then returns here
     } else {
@@ -727,6 +855,12 @@
       radio.addEventListener("change", function () { setMode(radio.value); scheduleProbe(); });
     });
     $("media-type").addEventListener("change", showType);
+    $("yt-target").addEventListener("change", applyTarget);
+    $("subs-target").addEventListener("change", function () {
+      var podcast = $("subs-target").value === "podcast";
+      $("subs-audio").disabled = !podcast;
+      if (!podcast) $("subs-audio").checked = false;
+    });
     $("pack").addEventListener("change", function () {
       $("f-episode").disabled = $("pack").checked;
       if ($("pack").checked) $("f-episode").value = "";

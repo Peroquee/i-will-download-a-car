@@ -357,7 +357,7 @@ def test_queued_metadata_is_plain_json(db):
 
 MEDIA_ENV = {
     "MEDIA_DIR_MOVIES": "Filme", "MEDIA_DIR_SERIES": "Serien", "MEDIA_DIR_AUDIOBOOKS": "Hb",
-    "MEDIA_DIR_MUSIC": "Musik", "MEDIA_DIR_YOUTUBE": "Youtube",
+    "MEDIA_DIR_MUSIC": "Musik", "MEDIA_DIR_YOUTUBE": "Youtube", "MEDIA_DIR_PODCASTS": "Podcasts",
 }  # fmt: skip
 
 
