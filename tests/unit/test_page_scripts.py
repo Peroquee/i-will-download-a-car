@@ -193,3 +193,147 @@ def test_a_newer_server_version_shows_the_reload_banner_and_the_same_version_doe
 @needs_node
 def test_the_page_names_its_version_in_the_meta_tag():
     assert page("/")["version"] == PLACEHOLDER
+
+
+# --- the lookup of a YouTube address: why it failed, and the fields stay open (issue: the owner saw
+# nothing when YouTube answered "not a bot") -----------------------------------------------------
+
+
+def probe_steps(*extra):
+    return [
+        {"set": "#link", "value": VIDEO},
+        {"fire": "#link", "type": "input"},
+        {"tick": 1},
+        {"read": "#probe-status"},
+        *extra,
+    ]
+
+
+def posts(out, path):
+    return [f for f in out["fetched"] if f == ["POST", path]]
+
+
+BOT = {"__status": 502, "body": {"detail": "YouTube wants proof", "kind": "bot_check"}}
+
+
+@needs_node
+def test_a_bot_check_is_explained_next_to_the_address_in_german_and_the_fields_stay_editable():
+    out = page(
+        "/",
+        language="de-DE",
+        answers={"POST /api/youtube/probe": BOT},
+        steps=probe_steps({"read": "#f-channel"}, {"read": "#f-yt-title"}),
+    )
+    assert out["errors"] == [], out["errors"]
+    status = out["reads"]["#probe-status"]
+    assert status["text"] == (
+        "YouTube verlangt einen Nachweis, dass du kein Bot bist; das passiert oft über VPN. "
+        "Kanal und Titel kannst du selbst eintragen."
+    )
+    assert "probe-failed" in status["cls"]
+    for field in ("#f-channel", "#f-yt-title"):
+        assert out["reads"][field]["disabled"] is False
+        assert out["reads"][field]["value"] == ""
+
+
+@needs_node
+def test_after_a_failed_lookup_the_job_can_be_submitted_with_channel_and_title_typed_by_hand():
+    out = page(
+        "/",
+        answers={"POST /api/youtube/probe": BOT},
+        steps=probe_steps(
+            {"set": "#f-channel", "value": "Blender Foundation"},
+            {"set": "#f-yt-title", "value": "Big Buck Bunny"},
+            {"submit": "#form"},
+            {"read": "#result"},
+        ),
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/youtube/download"] in out["fetched"]
+    assert "Job #1" in out["reads"]["#result"]["text"]
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("status", "kind", "expected"),
+    [
+        (504, "timeout", "YouTube did not answer"),
+        (502, "network", "YouTube could not be reached"),
+        (404, "unavailable", "deleted or no longer available"),
+        (502, "something_new", "The lookup at YouTube did not work."),
+    ],
+)
+def test_every_failure_of_the_lookup_says_why_and_that_it_can_be_typed_in(status, kind, expected):
+    out = page(
+        "/",
+        answers={
+            "POST /api/youtube/probe": {"__status": status, "body": {"detail": "x", "kind": kind}}
+        },
+        steps=probe_steps(),
+    )
+    text = out["reads"]["#probe-status"]["text"]
+    assert expected.lower() in text.lower() or (
+        kind == "unavailable" and "deleted" in text.lower()
+    ), text
+    assert text.endswith("You can enter channel and title yourself.")
+    assert "probe-failed" in out["reads"]["#probe-status"]["cls"]
+
+
+@needs_node
+@pytest.mark.parametrize("event", ["input", "change", "blur", "paste"])
+def test_every_way_an_address_arrives_starts_the_lookup(event):
+    out = page(
+        "/",
+        steps=[
+            {"set": "#link", "value": VIDEO},
+            {"fire": "#link", "type": event},
+            {"tick": 1},  # a paste is handled one timer later ...
+            {"tick": 1},  # ... and then the lookup itself waits half a second
+            {"read": "#f-yt-title"},
+        ],
+    )
+    assert len(posts(out, "/api/youtube/probe")) == 1
+    assert out["reads"]["#f-yt-title"]["value"] == "Big Buck Bunny"
+
+
+@needs_node
+def test_one_paste_that_fires_several_events_asks_youtube_once():
+    steps = [{"set": "#link", "value": VIDEO}]
+    for event in ("paste", "input", "change", "blur"):
+        steps += [{"fire": "#link", "type": event}, {"tick": 1}]
+    steps += [{"tick": 1}]
+    out = page("/", steps=steps)
+    assert len(posts(out, "/api/youtube/probe")) == 1
+
+
+@needs_node
+def test_a_failed_lookup_is_tried_again_on_the_next_change_but_a_good_one_is_not():
+    again = [{"fire": "#link", "type": "blur"}, {"tick": 1}]
+    failed = page("/", answers={"POST /api/youtube/probe": BOT}, steps=probe_steps(*again))
+    assert len(posts(failed, "/api/youtube/probe")) == 2
+    good = page("/", steps=probe_steps(*again))
+    assert len(posts(good, "/api/youtube/probe")) == 1
+
+
+@needs_node
+def test_a_different_address_is_looked_up_again():
+    other = "https://youtu.be/dQw4w9WgXcQ"
+    out = page(
+        "/",
+        steps=probe_steps(
+            {"set": "#link", "value": other}, {"fire": "#link", "type": "input"}, {"tick": 1}
+        ),
+    )
+    assert len(posts(out, "/api/youtube/probe")) == 2
+
+
+def test_the_lookup_answer_sits_in_the_address_row_before_the_mode_choice():
+    from ytp.web import STATIC_DIR as static
+
+    html = (static / "index.html").read_text(encoding="utf-8")
+    assert (
+        html.index('id="link-error"')
+        < html.index('id="probe-status"')
+        < html.index('id="mode-label"')
+    )
+    assert html.count('id="probe-status"') == 1

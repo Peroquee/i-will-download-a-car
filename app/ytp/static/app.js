@@ -8,6 +8,7 @@
   var lang = "en";
   var probeTimer = null;
   var probeSerial = 0;
+  var probed = { link: "", state: "" };   // the last address looked up: "pending", "ok" or "failed"
   var feedSerial = 0;
   var dash = null;   // the alert strip and the dashboard (dashboard.js, #38)
 
@@ -151,8 +152,19 @@
       probeTimer = window.setTimeout(function () { runFeedProbe(link); }, 600);
       return;
     }
-    if (mode() !== "youtube" || !L.looksLikeVideoUrl(link)) { $("probe-status").textContent = ""; return; }
+    if (mode() !== "youtube" || !L.looksLikeVideoUrl(link)) { showProbe("", false); probed = { link: "", state: "" }; return; }
+    /* The same address is not asked twice while the first answer is pending or good (paste,
+       input, change and blur all arrive for one paste); after a failure a later change or blur
+       asks again. */
+    if (probed.link === link.trim() && probed.state !== "failed") return;
     probeTimer = window.setTimeout(function () { runProbe(link); }, 500);
+  }
+
+  /* The answer of the lookup, under the address field; a failure in red. */
+  function showProbe(text, failed) {
+    var node = $("probe-status");
+    node.textContent = text;
+    node.className = "note probe-status" + (failed ? " probe-failed" : "");
   }
 
   /* ---------------------------------------------------------------- podcast feed (#34) */
@@ -197,27 +209,33 @@
 
   function runProbe(link) {
     var serial = ++probeSerial;
-    $("probe-status").textContent = t("probe.looking");
+    probed = { link: link.trim(), state: "pending" };
+    showProbe(t("probe.looking"), false);
     post("/api/youtube/probe", { url: link.trim() }).then(function (reply) {
       if (serial !== probeSerial) return; // a newer paste replaced this one
       if (reply.status === 200) {
+        probed.state = "ok";
         $("f-channel").value = reply.data.channel || "";
         $("f-yt-title").value = reply.data.title || "";
-        $("probe-status").textContent = t("probe.ok");
+        showProbe(t("probe.ok"), false);
         $("probe-duration").textContent = reply.data.duration_text ? t("probe.duration", { value: reply.data.duration_text }) : "";
         return;
       }
+      probed.state = "failed";
       $("probe-duration").textContent = "";
       if (reply.status === 422) {
-        var errors = L.serverErrors(reply.data.detail);
-        $("probe-status").textContent = "";
-        showFieldErrors(errors);
+        showProbe("", false);
+        showFieldErrors(L.serverErrors(reply.data.detail));
         return;
       }
+      /* Why it failed, in words, and that channel and title can be typed in by hand. */
       var kind = reply.data && reply.data.kind;
-      $("probe-status").textContent = (kind && t("kind." + kind) !== "kind." + kind ? t("kind." + kind) : t("result.failed")) + " " + t("probe.manual");
+      var reason = kind && t("kind." + kind) !== "kind." + kind ? t("kind." + kind) : t("probe.failed");
+      showProbe(reason + " " + t("probe.manual"), true);
     }).catch(function () {
-      if (serial === probeSerial) $("probe-status").textContent = t("result.network") + " " + t("probe.manual");
+      if (serial !== probeSerial) return;
+      probed.state = "failed";
+      showProbe(t("result.network") + " " + t("probe.manual"), true);
     });
   }
 
@@ -402,7 +420,8 @@
     fillEpisodes([]);
     $("pc-status").textContent = "";
     $("f-episode").disabled = false;
-    $("probe-status").textContent = "";
+    showProbe("", false);
+    probed = { link: "", state: "" };
     $("probe-duration").textContent = "";
   }
 
@@ -912,6 +931,8 @@
       if ($("pack").checked) $("f-episode").value = "";
     });
     $("link").addEventListener("input", onLinkChanged);
+    $("link").addEventListener("change", onLinkChanged);   // autofill and some phone keyboards only send this
+    $("link").addEventListener("blur", onLinkChanged);
     $("link").addEventListener("paste", function () { window.setTimeout(onLinkChanged, 0); });
     $("form").addEventListener("submit", onSubmit);
     $("reset").addEventListener("click", function () { resetFields(); clearErrors(); });

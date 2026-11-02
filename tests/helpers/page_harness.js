@@ -135,6 +135,7 @@ const html = fs.readFileSync(path.join(staticDir, "index.html"), "utf8");
 const tree = parseHtml(html);
 const errors = [];
 const timers = [];
+let timerIds = 0;
 const fetched = [];
 const store = {};
 const document = {
@@ -155,8 +156,10 @@ const location = { pathname, hash, href: "http://page.test" + pathname + hash, r
 const window = {
   location, document, Logic: require(path.join(staticDir, "logic.js")),
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } },
-  setTimeout: (f, ms) => { timers.push({ f, ms, once: true }); return timers.length; }, clearTimeout() {},
-  setInterval: (f, ms) => { timers.push({ f, ms }); return timers.length; }, clearInterval() {},
+  setTimeout: (f, ms) => { const id = ++timerIds; timers.push({ id, f, ms, once: true }); return id; },
+  clearTimeout: (id) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); },
+  setInterval: (f, ms) => { const id = ++timerIds; timers.push({ id, f, ms }); return id; },
+  clearInterval: (id) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); },
   addEventListener() {}, scrollTo() {},
 };
 const navigator = { language };
@@ -165,9 +168,10 @@ const fetchStub = (url, options) => {
   const path = String(url).split("?")[0];
   const method = (options && options.method) || "GET";
   const key = method + " " + path in answers ? method + " " + path : path;
-  const body = key in answers ? answers[key] : null;
-  const ok = body !== null;
-  return Promise.resolve({ ok, status: ok ? 200 : 404, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
+  let body = key in answers ? answers[key] : null;
+  let status = body !== null ? 200 : 404;
+  if (body && typeof body === "object" && "__status" in body) { status = body.__status; body = body.body; }
+  return Promise.resolve({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
 };
 function run(file) {
   const code = fs.readFileSync(path.join(staticDir, file), "utf8");
@@ -188,7 +192,7 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
       else if ("submit" in step) { prevented[step.submit] = fireEvent(select(step.submit), "submit").defaultPrevented; }
       else if ("click" in step) { fireEvent(select(step.click), "click"); }
       else if ("tick" in step) { const due = timers.filter((t) => t.once).splice(0); timers.splice(0, timers.length, ...timers.filter((t) => !t.once)); due.forEach((t) => { try { t.f(); } catch (e) { errors.push({ file: "timer", message: String(e && e.message), stack: String(e && e.stack).split("\n").slice(0, 5).join("\n") }); } }); }
-      else if ("read" in step) { const el = select(step.read); reads[step.read] = { text: el.textContent, hidden: el.hidden, value: el.value, children: el.children.length, disabled: el.disabled }; }
+      else if ("read" in step) { const el = select(step.read); reads[step.read] = { text: el.textContent, hidden: el.hidden, value: el.value, children: el.children.length, disabled: el.disabled, cls: el.className }; }
     } catch (e) { errors.push({ file: "step " + JSON.stringify(step), message: String(e && e.message), stack: "" }); }
     await pause();
   }
