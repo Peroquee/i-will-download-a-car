@@ -146,6 +146,7 @@ def test_the_unit_job_installs_git_for_the_autodeploy_tests():
     text = script_text({"script": resolved(JOBS["test:unit"]).get("before_script")})
     assert "apt-get install" in text
     assert "git=1:2.39.*" in text
+    assert "nodejs=18.*" in text, "the UI tests need node"
 
 
 def test_the_integration_job_does_not_need_the_apps_dependencies():
