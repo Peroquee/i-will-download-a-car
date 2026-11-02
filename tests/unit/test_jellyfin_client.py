@@ -15,14 +15,11 @@ from starlette.testclient import TestClient
 from tests.helpers.fake_jellyfin import (
     API_KEY,
     BOOKS_ID,
-    MOVIES_ID,
-    SERIES_ID,
     FakeJellyfin,
 )
 from ytp.clients.jellyfin import (
     JellyfinAuthError,
     JellyfinClient,
-    JellyfinRequestError,
     JellyfinUnavailable,
     Library,
     LibraryRefresher,
@@ -68,7 +65,6 @@ def test_ping_needs_no_key_and_returns_the_version(fake):
 def test_the_key_travels_in_the_authorization_header_never_in_the_url(fake):
     client = client_for(fake)
     client.refresh_library()
-    client.refresh_item(MOVIES_ID)
     client.list_libraries()
     for seen in fake.seen:
         assert seen.headers["authorization"] == f'MediaBrowser Token="{API_KEY}"'
@@ -82,34 +78,16 @@ def test_refresh_library_posts_to_library_refresh(fake):
     assert call.method == "POST"
 
 
-def test_refresh_item_scans_one_library_recursively(fake):
-    client_for(fake).refresh_item(MOVIES_ID)
-    (call,) = fake.calls(f"/Items/{MOVIES_ID}/Refresh")
-    assert call.method == "POST"
-    assert "Recursive=true" in call.query
-    assert "ReplaceAllMetadata=false" in call.query
+def test_the_client_has_no_per_library_refresh_any_more():
+    """POST /Items/{id}/Refresh only re-reads known items (it found 0 of 21 new files on a real
+    Jellyfin 10.11.11); the library scan is the call that discovers new files."""
+    assert not hasattr(JellyfinClient, "refresh_item")
 
 
-@pytest.mark.parametrize(
-    "item", ["", "../Library/Refresh", "abc", "g" * 32, f"{MOVIES_ID}/x", "a" * 31]
-)
-def test_a_bad_item_id_never_reaches_the_url(fake, item):
-    with pytest.raises(ValueError, match="item id"):
-        client_for(fake).refresh_item(item)
-    assert fake.seen == []
-
-
-def test_dashed_item_ids_are_accepted(fake):
-    guid = "0a1b2c3d-4e5f-6789-abcd-ef0123456789"
-    fake.libraries[0]["ItemId"] = guid
-    client_for(fake).refresh_item(guid)
-    assert fake.calls(f"/Items/{guid}/Refresh")
-
-
-def test_an_unknown_item_is_a_request_error(fake):
-    with pytest.raises(JellyfinRequestError) as error:
-        client_for(fake).refresh_item("d" * 32)
-    assert error.value.status == 404
+def test_refresh_library_sends_no_body_and_no_query(fake):
+    client_for(fake).refresh_library()
+    (call,) = fake.calls("/Library/Refresh")
+    assert (call.method, call.query) == ("POST", "")
 
 
 def test_list_libraries_parses_names_ids_and_locations(fake):
@@ -203,6 +181,11 @@ class Clock:
         return self.now
 
 
+def item_refreshes(fake: FakeJellyfin) -> list:
+    """Per-library refreshes (POST /Items/{id}/Refresh): they never find new files."""
+    return [c for c in fake.seen if c.path.startswith("/Items/")]
+
+
 def refresher(fake: FakeJellyfin, clock: Clock, **kw) -> LibraryRefresher:
     return LibraryRefresher(client_for(fake), clock=clock, **kw)
 
@@ -218,8 +201,8 @@ def test_a_burst_of_requests_becomes_one_refresh_after_the_quiet_period(fake):
     assert refresher_.flush_due() is False
     clock.now += 2
     assert refresher_.flush_due() is True
-    assert len(fake.calls(f"/Items/{MOVIES_ID}/Refresh")) == 1
-    assert fake.calls("/Library/Refresh") == []
+    assert len(fake.calls("/Library/Refresh")) == 1
+    assert item_refreshes(fake) == []
     assert refresher_.flush_due() is False, "nothing pending any more"
     assert not refresher_.pending
 
@@ -244,53 +227,44 @@ def test_a_steady_trickle_is_still_refreshed_after_the_maximum_wait(fake):
         clock.now += 10  # never quiet for 30 s
         if refresher_.flush_due():
             break
-    assert len(fake.calls(f"/Items/{SERIES_ID}/Refresh")) == 1
+    assert len(fake.calls("/Library/Refresh")) == 1
     assert clock.now - 1000 <= 130
 
 
-def test_several_folders_get_one_refresh_each_and_no_full_scan(fake):
+def test_several_folders_get_one_library_scan_and_no_per_library_refresh(fake):
     clock = Clock()
     refresher_ = refresher(fake, clock)
-    for folder in ("Filme", "Serien", "Filme", "Hörbücher", "Serien"):
+    for folder in ("Filme", "Serien", "Filme", "Hörbücher", "Serien", "Musik"):
         refresher_.request_refresh(folder)
+    refresher_.request_refresh()
     clock.now += 60
     assert refresher_.flush_due()
-    sent = sorted(c.path for c in fake.seen if c.path.startswith("/Items/"))
-    assert sent == sorted(f"/Items/{i}/Refresh" for i in (MOVIES_ID, SERIES_ID, BOOKS_ID))
-    assert fake.calls("/Library/Refresh") == []
-
-
-def test_the_folder_name_in_nfd_still_finds_the_library(fake):
-    import unicodedata
-
-    clock = Clock()
-    refresher_ = refresher(fake, clock)
-    refresher_.request_refresh(unicodedata.normalize("NFD", "Hörbücher"))
-    clock.now += 60
-    refresher_.flush_due()
-    assert fake.calls(f"/Items/{BOOKS_ID}/Refresh")
-
-
-def test_a_folder_no_library_has_gets_a_full_refresh(fake):
-    clock = Clock()
-    refresher_ = refresher(fake, clock)
-    refresher_.request_refresh("Filme")
-    refresher_.request_refresh("Musik")  # no such library in the fake
-    clock.now += 60
-    refresher_.flush_due()
     assert len(fake.calls("/Library/Refresh")) == 1
-    assert len(fake.calls(f"/Items/{MOVIES_ID}/Refresh")) == 1
-
-
-def test_a_request_without_a_folder_means_everything(fake):
-    clock = Clock()
-    refresher_ = refresher(fake, clock)
-    refresher_.request_refresh()
-    refresher_.request_refresh("Filme")
-    clock.now += 60
-    refresher_.flush_due()
-    assert len(fake.calls("/Library/Refresh")) == 1
+    assert item_refreshes(fake) == []
     assert fake.calls("/Library/VirtualFolders") == [], "no need to look up libraries"
+
+
+def test_new_files_are_found_by_the_scan_the_refresher_sends(fake):
+    """The behaviour that was missing: the fake behaves like Jellyfin 10.11, where only the
+    library scan indexes files that are new on disk."""
+    clock = Clock()
+    refresher_ = refresher(fake, clock)
+    fake.disk = ["/media/jellyfin/Podcasts/episode-1.mp3"]
+    refresher_.request_refresh("Podcasts")
+    clock.now += 60
+    assert refresher_.flush_due()
+    assert fake.indexed == ["/media/jellyfin/Podcasts/episode-1.mp3"]
+
+
+def test_the_folders_are_logged_not_used(fake, caplog):
+    clock = Clock()
+    refresher_ = refresher(fake, clock)
+    refresher_.request_refresh("Hörbücher")
+    clock.now += 60
+    with caplog.at_level(logging.INFO, logger="ytp.clients.jellyfin"):
+        refresher_.flush_due()
+    (record,) = [r for r in caplog.records if r.getMessage().startswith("jellyfin: library")]
+    assert record.folders == ["Hörbücher"]
 
 
 def test_requests_after_a_flush_start_a_new_batch(fake):
@@ -302,7 +276,7 @@ def test_requests_after_a_flush_start_a_new_batch(fake):
     refresher_.request_refresh("Filme")
     clock.now += 60
     refresher_.flush_due()
-    assert len(fake.calls(f"/Items/{MOVIES_ID}/Refresh")) == 2
+    assert len(fake.calls("/Library/Refresh")) == 2
     assert refresher_.refreshes_sent == 2
 
 
@@ -386,8 +360,7 @@ def test_requests_during_a_failed_flush_are_not_lost(fake):
     fake.status_override = None
     clock.now += 11
     assert refresher_.flush_due() is True
-    assert fake.calls(f"/Items/{MOVIES_ID}/Refresh")
-    assert fake.calls(f"/Items/{SERIES_ID}/Refresh")
+    assert len(fake.calls("/Library/Refresh")) == 2, "the failed try and the retry"
 
 
 def test_many_threads_requesting_at_once_give_one_refresh(fake):
@@ -405,7 +378,7 @@ def test_many_threads_requesting_at_once_give_one_refresh(fake):
         t.join()
     clock.now += 60
     refresher_.flush_due()
-    assert len(fake.calls(f"/Items/{MOVIES_ID}/Refresh")) == 1
+    assert len(fake.calls("/Library/Refresh")) == 1
 
 
 # --- inside the app ----------------------

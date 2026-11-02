@@ -39,8 +39,9 @@ and shows that in its job list instead of failing silently.
   `downloads/` (unfinished and seeding torrents), which would then show up in Jellyfin.
   Always use the subfolders.
 - **Two views of the same folders.** The app and qBittorrent see the share as `/data/<dir>`;
-  Jellyfin sees it as `/media/jellyfin/<dir>`. The app asks Jellyfin to refresh a library (or
-  runs a full refresh) rather than passing file paths, so no path translation is needed. If a
+  Jellyfin sees it as `/media/jellyfin/<dir>`. The app asks Jellyfin to scan its libraries
+  (`POST /Library/Refresh`; the per-library refresh would not find new files) rather than passing
+  file paths, so no path translation is needed. If a
   later feature ever has to give Jellyfin a path, it must translate `/data` to `/media/jellyfin`.
 - **Permissions.** Jellyfin runs as uid 103 / gid 112 and reads through the "other" permission
   bits; the new files hardlinked by the app inherit mode 664/775 from `UMASK=002`, which keeps

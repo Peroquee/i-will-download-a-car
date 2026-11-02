@@ -158,21 +158,26 @@ heartbeats, which also catches a stuck event loop; the app turns unhealthy), or
 `ytp.clients.jellyfin` (standard library, like the qBittorrent client) talks to the external
 Jellyfin at `JELLYFIN_URL` with `JELLYFIN_API_KEY`. The key is sent in the `Authorization:
 MediaBrowser Token="..."` header, never in a URL, a log line or an error. Calls: `ping()` (public
-info, no key), `list_libraries()`, `refresh_library()` (scan everything) and `refresh_item(id)`
-(scan one library). Errors are typed: `JellyfinUnavailable` (unreachable, timeout, 5xx),
+info, no key), `list_libraries()` and `refresh_library()` (`POST /Library/Refresh`: scan
+everything, the call that finds NEW files). Errors are typed: `JellyfinUnavailable` (unreachable, timeout, 5xx),
 `JellyfinAuthError` (401/403: key missing or revoked), `JellyfinRequestError`.
 
 **Using it:** other code calls `app.state.jellyfin.request_refresh("Filme")` (the library folder
 name, as in `MEDIA_DIR_*`; no argument = "somewhere"). That call only notes the request. It never
-raises and never waits for Jellyfin, so a refresh problem cannot fail a download job.
+raises and never waits for Jellyfin, so a refresh problem cannot fail a download job. The folder
+name is only logged.
 
 - **Debounce:** the scheduler job `jellyfin-refresh` calls `flush_due()` every 5 s. A batch of
-  requests becomes ONE refresh per affected library, sent after 30 s of quiet (but at the latest
+  requests becomes ONE `POST /Library/Refresh`, sent after 30 s of quiet (but at the latest
   300 s after the first request, so a steady trickle is still refreshed).
-- **Which library:** found by the last component of one of its locations, compared as NFC text
-  and case-insensitively (`Filme` matches `/media/jellyfin/Filme`; `Hörbücher` is the same typed
-  with a combining diaeresis). No path is translated between `/data` and `/media/jellyfin`. A
-  folder that no library has gets a full refresh, so nothing is silently missed.
+- **Why the whole library scan, not one library (bug found on the VM):** the per-library call
+  `POST /Items/{libraryId}/Refresh?Recursive=true` only re-reads items Jellyfin already knows. On
+  Jellyfin 10.11.11 the Podcasts library stayed at 0 items 75 s after it with 21 mp3 files on
+  disk; `POST /Library/Refresh` found all 21 within 2 minutes. The scan is incremental, so it is
+  cheap for a home library. Alternative if a huge library ever makes it slow:
+  `POST /Library/Media/Updated` with the new files' paths (translated from `/data` to
+  `/media/jellyfin`, and every caller would have to pass paths). The gated system test
+  `tests/system/test_c11_jellyfin_discovery.py` drops a file and waits until Jellyfin lists it.
 - **Fail soft:** Jellyfin down or answering 5xx: the batch is kept and retried every 60 s, up to
   5 attempts, then dropped with an error in the log. A revoked key: logged once, batch dropped,
   not retried. No URL or key configured (a startup warning says so): everything is a no-op.
