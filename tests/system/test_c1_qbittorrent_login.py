@@ -187,7 +187,15 @@ def test_csrf_protection_is_still_on_a_foreign_origin_is_refused(qbittorrent):
 
 
 def container_ip(name: str) -> str:
-    return docker.run(["inspect", "-f", "{{.NetworkSettings.IPAddress}}", name]).stdout.strip()
+    """The container's address on whatever network it is on (the default bridge keeps it in
+    .NetworkSettings.IPAddress, a user-defined network only under .Networks.<name>)."""
+    result = docker.run(
+        ["inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", name]
+    )
+    addresses = result.stdout.split()
+    assert result.returncode == 0, result.stderr
+    assert addresses, f"no IP address found for {name}: {result.stdout!r}"
+    return addresses[0]
 
 
 def effective_settings(container: str) -> str:
