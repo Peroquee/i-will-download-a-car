@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Literal
 
 from fastapi import FastAPI, Request
@@ -226,11 +227,22 @@ async def vpn_status(request: Request) -> JSONResponse:
 
     `state` is ok, down, blind (the watchdog cannot read the VPN status), starting, or unknown
     (the watchdog does not answer). Always 200: "unknown" is an answer, not an error.
+
+    In the first `STARTUP_GRACE_SECONDS` after the app started, a watchdog that does not answer
+    yet is reported as `starting`: during an install or an update the containers restart one
+    after the other, and "the watchdog is not answering" would only alarm (issue #43).
     """
     client: WatchdogStatusClient | None = request.app.state.watchdog_status
     if client is None:
         return JSONResponse({"state": "unknown", "reason": "not configured"})
-    return JSONResponse(await asyncio.to_thread(client.fetch_status))
+    status = await asyncio.to_thread(client.fetch_status)
+    uptime = time.monotonic() - request.app.state.started_at
+    if status.get("state") == "unknown" and uptime < STARTUP_GRACE_SECONDS:
+        status = {"state": "starting", "reason": "the app has just started"}
+    return JSONResponse(status)
+
+
+STARTUP_GRACE_SECONDS = 60
 
 
 def register(app: FastAPI) -> None:

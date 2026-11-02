@@ -11,6 +11,10 @@
   var feedSerial = 0;
   var dash = null;   // the alert strip and the dashboard (dashboard.js, #38)
 
+  /* A form of this page is NEVER submitted natively (it would send the pasted link in the address
+     and create no job): whatever else fails, this guard is the first thing that runs. */
+  document.addEventListener("submit", function (event) { event.preventDefault(); }, true);
+
   /* ---------------------------------------------------------------- language */
 
   function t(key, vars) {
@@ -41,7 +45,6 @@
     refreshVpnText();
     renderJobs();
     renderSubs();
-    renderHowtoSources();
     if (dash) dash.render();
   }
 
@@ -881,16 +884,18 @@
 
   function init() {
     lang = chooseLanguage();
-    dash = window.Dash.create({
-      t: t,
-      $: $,
-      lang: function () { return lang; },
-      timeText: timeText,
-      statusText: statusText,
-      getJson: getJson,
-      post: post,
-      retryJob: function (id) { return post("/api/jobs/" + id + "/retry", {}).catch(function () { return null; }); },
-    });
+    try {
+      dash = window.Dash ? window.Dash.create({
+        t: t,
+        $: $,
+        lang: function () { return lang; },
+        timeText: timeText,
+        statusText: statusText,
+        getJson: getJson,
+        post: post,
+        retryJob: function (id) { return post("/api/jobs/" + id + "/retry", {}).catch(function () { return null; }); },
+      }) : null;   // an old cached dashboard.js must not take the form down with it
+    } catch (e) { dash = null; }
     applyLanguage();
     document.querySelectorAll("input[name=mode]").forEach(function (radio) {
       radio.addEventListener("change", function () { setMode(radio.value); scheduleProbe(); });
@@ -918,15 +923,42 @@
     });
     pollVpn();
     window.setInterval(function () {
-      if (document.visibilityState !== "hidden") { pollVpn(); dash.refreshAlerts(); }
+      if (document.visibilityState !== "hidden") { pollVpn(); if (dash) dash.refreshAlerts(); }
     }, VPN_POLL_MS);
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") { pollVpn(); dash.refreshAlerts(); }
+      if (document.visibilityState === "visible") { pollVpn(); if (dash) dash.refreshAlerts(); }
     });
-    dash.start();
+    if (dash) dash.start();
     startJobPolling();
     startSubs();
     startHowto();
+    startVersionCheck();
+    $("js-warning").hidden = true;   // everything above ran: the scripts are alive
+  }
+
+  /* ---------------------------------------------------------------- new version (#43) */
+
+  /* The page names its own version (a meta tag); the server says which one it runs now. After an
+     update an open page asks for a reload instead of mixing new data with old scripts. */
+  function startVersionCheck() {
+    var meta = document.querySelector('meta[name="ytp-static-version"]');
+    var mine = meta ? meta.getAttribute("content") : "";
+    $("update-banner-reload").addEventListener("click", function () { window.location.reload(); });
+    function check() {
+      fetch("/api/version", { credentials: "same-origin", cache: "no-store" })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (data) {
+          if (data && typeof data.version === "string" && mine && data.version !== mine) {
+            $("update-banner").hidden = false;
+          }
+        })
+        .catch(function () { /* offline: nothing to say */ });
+    }
+    window.setTimeout(check, 3000);
+    window.setInterval(function () { if (document.visibilityState !== "hidden") check(); }, 60000);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") check();
+    });
   }
 
   init();

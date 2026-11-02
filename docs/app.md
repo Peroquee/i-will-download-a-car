@@ -524,3 +524,28 @@ strips, normalises to NFC (one "ö", not "o" + diaeresis), and refuses empty or 
 and names of only dots. A colon, quotes, a leading dot and umlauts are fine; making a name safe
 for a particular file system is #16's job. #16 reuses this function for anything else it
 builds a path from.
+
+## Versioned scripts, navigation and the form (issue #43)
+
+* **Versioned static URLs.** The page (`GET /`, `/dashboard`) is served with `no-cache` and names
+  every `/static/` file with `?v=<12 hex>`, a hash of all static files computed at start. A file
+  asked for with `?v=` is cached for a year (`immutable`), one without it is revalidated every
+  time. After an update the browser therefore fetches new scripts and can no longer combine a new
+  page with old ones: that mix once made the form submit natively (the link went into the address
+  and no job was created). The hash is also in `<meta name="ytp-static-version">` and at
+  `GET /api/version`; an open page checks it every minute (and when the tab comes back) and shows
+  a banner "The app was updated, please reload".
+* **The form never submits natively.** `app.js` stops every `submit` event in the capture phase
+  before anything else runs, and the form itself is `method="post" action="/reload-needed"`: if
+  the scripts did not load at all, the browser posts to a page that says (in German and English)
+  to reload with Ctrl+F5, instead of a GET with the pasted link in the address. A red notice on the
+  page (`#js-warning`) stays visible until the scripts have run to the end; they hide it.
+  `dashboard.js` is optional for the form: an old cached copy does not take the form down.
+* **Navigation:** *Eingabe | Dashboard | Abonnements | Anleitung* (Input | Dashboard |
+  Subscriptions | How to) as tabs under the title, 44 px high, the current one marked with
+  `aria-current`. *Subscriptions* is the section of the input page (`/#subscriptions`).
+* **The VPN bar is a link** (the whole bar) to `/dashboard#vpn`: the explanation of the state and
+  the history of changes, scrolled into view.
+* **"The watchdog does not answer" in the first minute** after the app started is reported as
+  `starting` by `GET /api/vpn` (during an install or update the containers restart one after the
+  other); later it is `unknown` as before.
