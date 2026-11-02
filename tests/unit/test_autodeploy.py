@@ -242,7 +242,13 @@ class FakeShell:
 @pytest.fixture
 def world(tmp_path) -> World:
     if shutil.which("git") is None:
-        pytest.skip("git is not installed (the CI image has none; runs on developer machines)")
+        reason = (
+            "git is NOT installed: about 60 autodeploy tests that need a real repository are "
+            "SKIPPED and prove nothing. Install git (apt install git)."
+        )
+        if os.environ.get("CI"):  # GitLab sets it: a pipeline must never silently skip these
+            pytest.fail(reason + " The test:unit job installs it in its before_script.")
+        pytest.skip(reason)
     w = World(tmp_path)
     w.token()
     return w

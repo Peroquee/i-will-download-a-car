@@ -178,7 +178,13 @@ test:unit:
   extends: [.python, .reports]
   needs: []
   # The app's tests need FastAPI and its test client (requirements-app.txt).
+  # tests/unit/test_autodeploy.py builds real git repositories, so the job needs git. The slim
+  # image has none; the 2.39 series is the one Debian 12 (bookworm) ships, kept current by security
+  # updates, so the pin is to the series and not to a build that would vanish.
   before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends "git=1:2.39.*" >/dev/null
+    - git --version
     - *venv-test
     - pip install -q -r requirements-app.txt
   script:
