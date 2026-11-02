@@ -16,7 +16,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
 
-from . import __version__, api
+from . import __version__, accounts, api, auth, auth_api
+from .auth import AuthMiddleware, LoginLimiter
 from .channels import ChannelResolver
 from .clients.jellyfin import JellyfinClient, LibraryRefresher
 from .clients.qbittorrent import QbitClient
@@ -78,6 +79,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except DatabaseError as exc:
         app.state.db_error = str(exc)
         logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
+    if app.state.db is not None:
+        _set_up_accounts(app.state.db, settings)
     # YouTube downloads (#18): the database is the queue, one worker thread runs it.
     app.state.youtube_worker = None
     worker_stop = threading.Event()
@@ -188,6 +191,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("stopped")
 
 
+def _set_up_accounts(db: Database, settings: Settings) -> None:
+    """The first admin from `.env` (see `accounts.bootstrap_admin`), or a warning if there is no
+    account at all (nobody could log in)."""
+    if auth.TEST_ACCOUNT is not None:  # tests only: the account every request counts as
+        with db.transaction() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO accounts (id, username, password_hash, role) "
+                "VALUES (?, ?, 'test', ?)",
+                (auth.TEST_ACCOUNT.id, auth.TEST_ACCOUNT.username, auth.TEST_ACCOUNT.role),
+            )
+    if settings.admin_password_hash:
+        result = accounts.bootstrap_admin(db, settings.admin_user, settings.admin_password_hash)
+        logger.info("admin account", extra={"result": result, "admin_user": settings.admin_user})
+    elif not accounts.list_all(db):
+        logger.error(
+            "no account exists, so nobody can log in: set the admin password with "
+            "`make admin-password` (it writes APP_ADMIN_USER and APP_ADMIN_PASSWORD_HASH to .env), "
+            "then restart the app"
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the app. With no argument the settings come from the environment."""
     resolved = settings if settings is not None else Settings.from_env()
@@ -219,8 +243,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.channels = None
     app.state.youtube_worker = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
+    app.state.limiter = LoginLimiter()
     api.register(app)
+    auth_api.register(app)
     register_ui(app)
+    # The last middleware added is the outermost: the same-origin check and the security headers
+    # see every request first, the login check (#44) runs inside them.
+    app.add_middleware(AuthMiddleware, routes=lambda: app.routes, database=lambda: app.state.db)
     app.add_middleware(SecurityMiddleware)
 
     @app.get("/health")

@@ -417,3 +417,40 @@ def adopt_orphans(db: Database, admin_id: int) -> dict[str, int]:
             (admin_id,),
         ).rowcount
     return {"jobs": jobs, "channels": channels, "podcasts": podcasts}
+
+
+# ------------------------------------------------------------------------------------ bootstrap
+
+KEY_APPLIED = "auth.admin_hash_applied"
+
+
+def bootstrap_admin(db: Database, username: str, hashed: str) -> str:
+    """Make sure the admin named in `.env` exists, with the password hash `.env` holds.
+
+    * no such account: it is created as an active admin, and everything that has no owner yet
+      (jobs and subscriptions from before the accounts) is given to it;
+    * the account exists and `.env` holds a NEW hash (not the one applied last time): its password
+      becomes that hash, it is made an active admin again and its sessions end. This is how a lost
+      admin password is recovered: set a new one with `make admin-password`, restart the app;
+    * otherwise nothing changes (the password can be changed in the app and stays changed).
+
+    Returns "created", "reset" or "unchanged".
+    """
+    from .scheduler import get_state, set_state
+
+    marker = hashlib.sha256(hashed.encode()).hexdigest()
+    existing = find(db, username)
+    if existing is None:
+        account = create_with_hash(db, username, hashed, "admin")
+        adopt_orphans(db, account.id)
+        set_state(db, KEY_APPLIED, marker)
+        return "created"
+    account, _ = existing
+    adopt_orphans(db, account.id)
+    if get_state(db, KEY_APPLIED) == marker:
+        return "unchanged"
+    with db.transaction() as conn:
+        conn.execute("UPDATE accounts SET role = 'admin', disabled = 0 WHERE id = ?", (account.id,))
+    set_password_hash(db, account.id, hashed)
+    set_state(db, KEY_APPLIED, marker)
+    return "reset"

@@ -219,12 +219,12 @@ class FakeShell:
             if world.up_fails:
                 return mod.Result(1, "", "build failed: boom")
             world.running_sha = git(world.stack, "rev-parse", "HEAD")
-            if world.migrated_by_up and (world.stack / "app/ytp/migrations/0010_new.sql").exists():
+            if world.migrated_by_up and (world.stack / "app/ytp/migrations/0099_new.sql").exists():
                 conn = world.db()
                 with conn:
                     conn.execute(
                         "INSERT OR IGNORE INTO schema_migrations (version, name, checksum) "
-                        "VALUES (10, '0010_new.sql', 'x')"
+                        "VALUES (99, '0099_new.sql', 'x')"
                     )
                     conn.execute(
                         "INSERT INTO subscriptions (channel_id, channel_name) VALUES ('UC"
@@ -365,7 +365,7 @@ def test_new_defaults_of_the_template_are_added_to_env(world):
 
 
 def test_a_new_migration_is_counted_and_the_deploy_still_works(world):
-    world.publish("migration", **{"app__ytp__migrations__0010_new.sql": "-- new\n"})
+    world.publish("migration", **{"app__ytp__migrations__0099_new.sql": "-- new\n"})
     assert run(world).result == "deployed"
     conn = world.db()
     params = json.loads(conn.execute("SELECT params FROM alerts").fetchone()[0])
@@ -557,7 +557,7 @@ def test_a_database_that_was_migrated_by_the_failed_version_is_restored(world):
             + "', 'before the update')"
         )
     conn.close()
-    bad = world.publish("migrates", **{"app__ytp__migrations__0010_new.sql": "-- new\n"})
+    bad = world.publish("migrates", **{"app__ytp__migrations__0099_new.sql": "-- new\n"})
     world.migrated_by_up = True
     world.healthy_by_sha[bad] = False
     outcome = run(world)
@@ -568,7 +568,7 @@ def test_a_database_that_was_migrated_by_the_failed_version_is_restored(world):
     migrations = {r[0] for r in conn.execute("SELECT name FROM schema_migrations")}
     conn.close()
     assert names == {"before the update"}, "the changes of the new version are gone"
-    assert "0010_new.sql" not in migrations
+    assert "0099_new.sql" not in migrations
     assert world.docker_calls("stop", "app")
     aside = list((world.stack / "config" / "app").glob("app.db.failed-*"))
     assert len(aside) == 1
@@ -577,7 +577,7 @@ def test_a_database_that_was_migrated_by_the_failed_version_is_restored(world):
     kept = sqlite3.connect(aside[0])
     assert (
         kept.execute(
-            "SELECT COUNT(*) FROM schema_migrations WHERE name = '0010_new.sql'"
+            "SELECT COUNT(*) FROM schema_migrations WHERE name = '0099_new.sql'"
         ).fetchone()[0]
         == 1
     )
@@ -586,7 +586,7 @@ def test_a_database_that_was_migrated_by_the_failed_version_is_restored(world):
 
 
 def test_stale_wal_files_are_removed_when_the_database_is_restored(world):
-    bad = world.publish("migrates", **{"app__ytp__migrations__0010_new.sql": "-- new\n"})
+    bad = world.publish("migrates", **{"app__ytp__migrations__0099_new.sql": "-- new\n"})
     world.migrated_by_up = True
     world.healthy_by_sha[bad] = False
     db = world.stack / "config" / "app" / "app.db"
@@ -599,7 +599,7 @@ def test_stale_wal_files_are_removed_when_the_database_is_restored(world):
 
 def test_a_migration_file_the_database_never_got_does_not_cost_a_restore(world):
     """The new version failed before it could migrate: the database is untouched, keep it."""
-    bad = world.publish("migrates", **{"app__ytp__migrations__0010_new.sql": "-- new\n"})
+    bad = world.publish("migrates", **{"app__ytp__migrations__0099_new.sql": "-- new\n"})
     world.healthy_by_sha[bad] = False  # migrated_by_up stays False: the app never got to it
     conn = world.db()
     with conn:
@@ -636,7 +636,7 @@ def test_when_the_rollback_fails_too_the_app_is_left_stopped_and_nothing_is_trie
 
 
 def test_a_missing_snapshot_halts_instead_of_guessing(world):
-    bad = world.publish("migrates", **{"app__ytp__migrations__0010_new.sql": "-- new\n"})
+    bad = world.publish("migrates", **{"app__ytp__migrations__0099_new.sql": "-- new\n"})
     world.migrated_by_up = True
     world.healthy_by_sha[bad] = False
     original = mod._backups

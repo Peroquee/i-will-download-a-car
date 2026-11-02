@@ -96,6 +96,13 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/dashboard",
         "/api/version",  # the static version, to notice an update (#43)
         "/reload-needed",  # where a form goes that the scripts did not take over
+        "/api/auth/login",  # accounts (#44)
+        "/api/auth/logout",
+        "/api/auth/me",
+        "/api/auth/password",
+        "/api/accounts",
+        "/api/accounts/{account_id}",
+        "/api/accounts/{account_id}/password",
         "/",
         "/dashboard",  # the same page, in its dashboard view (#38)
         "/static",  # the form's files (#25)
