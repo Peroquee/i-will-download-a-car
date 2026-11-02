@@ -72,6 +72,7 @@
                aria-describedby="link-note link-error">
         <p id="link-note" class="note" data-i18n="link.note"></p>
         <p id="link-error" class="error" role="alert"></p>
+        <p id="probe-status" class="note probe-status" role="status" aria-live="polite"></p>
       </div>
 
       <fieldset class="row mode" aria-labelledby="mode-label">
@@ -87,7 +88,6 @@
       </fieldset>
 
       <section id="youtube-fields" class="panel" aria-live="polite">
-        <p id="probe-status" class="note"></p>
         <div class="row">
           <label class="field" for="yt-target" data-i18n="yt.target"></label>
           <select id="yt-target" name="target">
@@ -489,8 +489,9 @@
     "btn.submit": "Hinzufügen",
     "btn.reset": "Zurücksetzen",
     "probe.looking": "YouTube wird abgefragt …",
-    "probe.ok": "Gefunden. Kanal und Titel können noch geändert werden.",
-    "probe.manual": "Die Abfrage hat nicht geklappt. Kanal und Titel können von Hand eingetragen werden.",
+    "probe.ok": "Gefunden. Kanal und Titel kannst du noch ändern.",
+    "probe.manual": "Kanal und Titel kannst du selbst eintragen.",
+    "probe.failed": "Die Abfrage bei YouTube hat nicht geklappt.",
     "probe.duration": "Länge: {value}",
     "result.created": "Auftrag #{id} angelegt (Status: {status}).",
     "result.duplicate": "Ist schon im System: Auftrag #{id} (Status: {status}).",
@@ -513,7 +514,7 @@
     "kind.age": "Dieses Video ist altersbeschränkt und lässt sich ohne YouTube-Login nicht lesen.",
     "kind.members": "Dieses Video ist nur für Kanalmitglieder.",
     "kind.live": "Das ist ein Livestream oder eine Premiere, die noch nicht zu Ende ist.",
-    "kind.bot_check": "YouTube verlangt einen Nachweis, dass kein Bot fragt (bei VPN-Adressen häufig). Später noch einmal versuchen.",
+    "kind.bot_check": "YouTube verlangt einen Nachweis, dass du kein Bot bist; das passiert oft über VPN.",
     "kind.network": "YouTube ist nicht erreichbar (läuft das VPN?).",
     "kind.timeout": "YouTube hat nicht rechtzeitig geantwortet.",
     "kind.busy": "Es laufen schon mehrere Abfragen. Gleich noch einmal versuchen.",
@@ -820,8 +821,9 @@
     "btn.submit": "Add",
     "btn.reset": "Reset",
     "probe.looking": "Asking YouTube …",
-    "probe.ok": "Found it. Channel and title can still be changed.",
-    "probe.manual": "The lookup did not work. Channel and title can be entered by hand.",
+    "probe.ok": "Found it. You can still change channel and title.",
+    "probe.manual": "You can enter channel and title yourself.",
+    "probe.failed": "The lookup at YouTube did not work.",
     "probe.duration": "Length: {value}",
     "result.created": "Job #{id} created (status: {status}).",
     "result.duplicate": "Already in the system: job #{id} (status: {status}).",
@@ -844,7 +846,7 @@
     "kind.age": "This video is age-restricted and cannot be read without a YouTube login.",
     "kind.members": "This video is for channel members only.",
     "kind.live": "This is a live stream or premiere that has not ended yet.",
-    "kind.bot_check": "YouTube wants proof that this is not a bot (often the case for VPN addresses). Try again later.",
+    "kind.bot_check": "YouTube wants proof that you are not a bot; this often happens over a VPN.",
     "kind.network": "YouTube could not be reached (is the VPN up?).",
     "kind.timeout": "YouTube did not answer in time.",
     "kind.busy": "Several lookups are already running. Try again in a moment.",

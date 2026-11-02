@@ -208,6 +208,30 @@ def a_new_server_version_makes_the_open_page_offer_a_reload(ctx):
 
 
 @check
+def a_failed_youtube_lookup_says_why_and_channel_and_title_can_be_typed(ctx):
+    page = ctx.browser.new_context(locale="en-US").new_page()
+    # (not watched: the browser logs the 502 we stage here as a console error, on purpose)
+    page.route(
+        "**/api/youtube/probe",
+        lambda route: route.fulfill(
+            status=502,
+            content_type="application/json",
+            body='{"detail": "YouTube wants proof", "kind": "bot_check"}',
+        ),
+    )
+    page.goto(BASE + "/")
+    page.fill("#link", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    status = page.locator("#probe-status")
+    expect(status).to_contain_text("not a bot", timeout=15000)
+    expect(status).to_contain_text("You can enter channel and title yourself.")
+    expect(page.locator("#f-channel")).to_be_editable()
+    page.fill("#f-channel", "Rick")
+    page.fill("#f-yt-title", "Never")
+    page.click("#submit")
+    expect(page.locator("#jobs-list li")).to_have_count(2, timeout=20000)
+
+
+@check
 def no_script_errors_failed_requests_or_bad_static_answers(ctx):
     assert not ctx.problems, "; ".join(ctx.problems)
 

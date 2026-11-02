@@ -282,6 +282,49 @@ of YouTube's logs. The price: YouTube sometimes distrusts VPN addresses and answ
 not a bot" (kind `bot_check`). If that happens too often, put **`YTDLP_PROXY=`** (empty) in `.env`
 and `docker compose up -d`: yt-dlp then asks directly from the home line.
 
+## "YouTube wants proof that you are not a bot" over the VPN
+
+YouTube often refuses requests from VPN exit addresses (a data-centre address, shared by many) with
+"Sign in to confirm you're not a bot". The app reports that as `bot_check` (HTTP 502). The form
+shows the reason next to the address field and leaves channel and title open for typing, so a
+download can still be started by hand; the download itself will meet the same wall and fail with
+the same reason in the job list ("Try again" later or from another route, see below).
+
+**What was checked (yt-dlp 2026.10.26, the version pinned, which is also the newest on PyPI):**
+
+* The app image has **no JavaScript runtime** and no `yt-dlp-ejs`. yt-dlp warns "No supported
+  JavaScript runtime could be found" (reproduced with the pinned version) and then asks YouTube
+  with **one** client only, `visionos` (its `_DEFAULT_JSLESS_CLIENTS`). With a runtime it uses
+  `tv_samsung`, `visionos` and `web`, so a block of one client no longer ends the lookup.
+* Runtimes yt-dlp can use: **Deno >= 2.3** (the only one enabled by default), Bun >= 1.2.11,
+  Node >= **22** (must be enabled with `js_runtimes`) and QuickJS. Debian 12's `nodejs` is 18:
+  not usable. Deno is one static binary (`COPY --from=denoland/deno:bin-<version> /deno
+  /usr/local/bin/deno`, pinned by digest).
+* The solver script for the signature and "n" challenges comes from the package `yt-dlp-ejs`
+  (PyPI, 0.8.0), which `pip install "yt-dlp[default]"` brings; without it yt-dlp would have to
+  download it from GitHub (`remote_components`, off by default). The requirements pin only
+  `yt-dlp` today.
+* Not measured: the development machine reaches YouTube over the home line, not the VPN, so the
+  block cannot be reproduced here and **nothing below is a claim that it fixes the block**.
+
+**Recommendation, cheapest first** (the owner decides; none of it is done yet):
+
+1. **A different VPN server or country** (`VPN_SERVER_COUNTRIES` / the `.ovpn` file): exit
+   addresses differ a lot in how YouTube treats them. Costs nothing, try it first.
+2. **Give yt-dlp its JavaScript runtime**: Deno from the official image plus `yt-dlp-ejs==0.8.0`
+   in `app/requirements.txt`, so the default clients (three instead of one) are used. About 100 MB
+   more in the image and two more pinned things to keep current, but no secret and no change of
+   route. It is the most likely improvement that stays inside the VPN; to be tried on the VM with
+   `YTP_NETWORK_TESTS=1` and the real exit address.
+3. **Ask YouTube directly instead of through the VPN** (`YTDLP_PROXY` empty): works from the home
+   line almost always, but YouTube then sees the home address (and the VPN is bypassed for these
+   lookups and downloads). A privacy decision for the owner, not a technical default.
+4. **Cookies of a Google account** (`cookiesfrombrowser` / a cookie file): this works against the
+   check but ties the traffic to a personal account that YouTube can restrict or ban, and puts a
+   login into the stack. **Not to be used without the owner asking for it.**
+5. A PO-token provider (a separate service next to the app): possible, but a second moving part;
+   only if 1 to 2 are not enough.
+
 ## Keeping yt-dlp current
 
 YouTube changes its pages often and yt-dlp releases fixes within days. A probe that suddenly fails
