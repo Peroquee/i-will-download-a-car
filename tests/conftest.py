@@ -65,8 +65,12 @@ def _test_admin(request: pytest.FixtureRequest) -> Iterator[None]:
     each have to log in, so by default every request counts as a test admin (a hook that exists
     only for this: `ytp.auth.TEST_ACCOUNT`, which nothing in the app ever sets). A test of the real
     login is marked `real_auth` and gets no such account."""
-    from ytp import auth
-    from ytp.accounts import Account
+    try:
+        from ytp import auth
+        from ytp.accounts import Account
+    except ModuleNotFoundError:  # the integration job has no app dependencies: no app to log in to
+        yield
+        return
 
     previous = auth.TEST_ACCOUNT
     if request.node.get_closest_marker("real_auth"):
