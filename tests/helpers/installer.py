@@ -18,6 +18,7 @@ from ytp_install.runner import Result, Runner  # noqa: E402
 from ytp_install.system import Lan, LoginUser  # noqa: E402
 
 NOW = datetime(2026, 11, 2, 9, 30, 0)
+ADMIN_HASH = "scrypt:32768:8:1:c2FsdHNhbHRzYWx0:a2V5a2V5a2V5a2V5"  # the shape, not a real hash
 DEBIAN = 'ID=debian\nVERSION_CODENAME=bookworm\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n'
 SECRETS = {
     "vpn_password": "vpn-vpn-vpn-1",
@@ -102,6 +103,14 @@ class FakeRunner(Runner):
                     "PROXY_PASSWORD_HASH=changeme", "PROXY_PASSWORD_HASH='$2a$14$hashed'"
                 )
             )
+        if "set_admin.py" in joined:  # the real script stores a scrypt hash and the name in .env
+            env = self.root / ".env"
+            user = argv[argv.index("--user") + 1]
+            text = env.read_text()
+            for key, value in (("APP_ADMIN_USER", user), ("APP_ADMIN_PASSWORD_HASH", ADMIN_HASH)):
+                lines = [ln for ln in text.splitlines() if not ln.startswith(key + "=")]
+                text = "\n".join([*lines, f"{key}={value}"]) + "\n"
+            env.write_text(text)
         if argv[:3] == ["docker", "compose", "ps"]:
             out = (
                 self.compose_ps.pop(0)
@@ -169,7 +178,7 @@ def new_install_rules(ovpn: Path) -> list[tuple[str, str | list[str]]]:
         ("Path of the .ovpn file", str(ovpn)),
         ("VPN user name", "vpn-user"),
         ("VPN password", SECRETS["vpn_password"]),
-        ("Password for the web page", SECRETS["web_password"]),
+        ("Password of the administrator", SECRETS["web_password"]),
         ("Repeat the password", SECRETS["web_password"]),
         ("Address of your Jellyfin", "http://192.168.178.108:8096"),
         ("Jellyfin API key", SECRETS["jellyfin_key"]),

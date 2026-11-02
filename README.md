@@ -43,14 +43,14 @@ No Linux knowledge needed. / Linux-Kenntnisse sind nicht nötig.
 4. **Answer the questions / Fragen beantworten.** The installer speaks German or English (it asks
    first), asks one question at a time and explains why it needs each answer. Press Enter to take
    the value in `[brackets]`. It asks for: the VPN details, where your media lives (default `/data`)
-   and the folder names, a user name and password for the web page, your home network (it detects
+   and the folder names, a user name and password for the administrator account of the web page, your home network (it detects
    it), and optionally Jellyfin's address and key, a notification address and your internet line's
    IPv6 prefix. Then it installs Docker, creates the folders, builds and starts everything and
    checks it (15 to 30 minutes). Stopping with Ctrl+C is fine: running `./install.sh` again carries
    on where it stopped.
 5. **Open the web page / Webseite öffnen.** At the end it prints the address, for example
    `http://192.168.178.20/`. Open it in a browser on any device in your home network, log in with
-   the user and password from step 4, paste a link. In Jellyfin create one library per folder
+   the administrator user and password from step 4, paste a link. More accounts (family, friends) are made there under *Accounts*. In Jellyfin create one library per folder
    (e.g. `Filme`, `Serien`, `Musik`, `Podcasts`).
 
 Later: `./install.sh` on an existing installation offers *change settings / update / repair /

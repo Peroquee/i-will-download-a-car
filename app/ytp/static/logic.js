@@ -224,9 +224,12 @@
     return days + " d" + (hours % 24 ? " " + (hours % 24) + " h" : "");
   }
 
-  /* Which view of the one page is wanted: "dashboard" for /dashboard, else the form. */
+  /* Which view of the one page is wanted: "dashboard" for /dashboard, "accounts" for /accounts
+     (#44), else the form. */
   function pageView(pathname) {
-    return /^\/dashboard\/?$/.test(String(pathname || "")) ? "dashboard" : "input";
+    var path = String(pathname || "");
+    if (/^\/dashboard\/?$/.test(path)) return "dashboard";
+    return /^\/accounts\/?$/.test(path) ? "accounts" : "input";
   }
 
   function alertAnchor(id) { return "alert-" + id; }

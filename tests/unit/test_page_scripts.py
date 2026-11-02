@@ -1,10 +1,11 @@
 """The page's real scripts against the real index.html in a small DOM (needs node).
 
-`tests/helpers/page_harness.js` loads index.html, runs dashboard.js and app.js as the browser does
-and reports script errors, the requests made and what the page shows. This is what found that
-`renderHowtoSources` was still called after its function had been removed: `init()` threw before it
-attached a single handler, the warning stayed on the page, and the owner's form was submitted
-natively (issue #43). The unit tests of the helpers and of dashboard.js never ran `app.js`.
+`tests/helpers/page_harness.js` loads index.html, runs dashboard.js, auth.js and app.js as the
+browser does and reports script errors, the requests made and what the page shows. This is
+what found that `renderHowtoSources` was still called after its function had been removed:
+`init()` threw before it attached a single handler, the warning stayed on the page, and the
+owner's form was submitted natively (issue #43). The unit tests of the helpers and of
+dashboard.js never ran `app.js`.
 """
 
 from __future__ import annotations
@@ -35,7 +36,9 @@ PROBE = {
     "duration_text": "10:35",
     "thumbnail": "",
 }
+ACCOUNT = {"id": 1, "username": "boss", "role": "admin", "disabled": False, "last_login": None}
 ANSWERS = {
+    "/api/auth/me": {"account": ACCOUNT},
     "/api/vpn": {"state": "ok", "egress": "ok", "egress_country": "Switzerland"},
     "/api/jobs": {"jobs": [], "counts": {}},
     "/api/subscriptions": {"subscriptions": []},
@@ -337,3 +340,353 @@ def test_the_lookup_answer_sits_in_the_address_row_before_the_mode_choice():
         < html.index('id="mode-label"')
     )
     assert html.count('id="probe-status"') == 1
+
+
+# --- sign-in, the account menu and the accounts page (#44) ------------------------------------
+
+USER_ACCOUNT = {**ACCOUNT, "id": 2, "username": "alice", "role": "user"}
+SIGNED_OUT = {"/api/auth/me": {"__status": 401, "body": {"detail": "login required"}}}
+NO_ADMIN_YET = {
+    "/api/auth/me": {"__status": 401, "body": {"detail": "login required", "setup": True}}
+}
+ACCOUNTS = {
+    "/api/accounts": {
+        "accounts": [
+            ACCOUNT,
+            {**USER_ACCOUNT, "last_login": "2026-11-01T10:00:00.000Z"},
+            {**USER_ACCOUNT, "id": 3, "username": "bob", "disabled": True},
+        ]
+    }
+}
+
+
+def requests_made(out) -> list[str]:
+    return [url for _, url in out["fetched"]]
+
+
+@needs_node
+def test_signed_in_the_page_starts_and_knows_the_role():
+    out = page("/")
+    assert out["errors"] == [], out["errors"]
+    assert (out["auth"], out["role"]) == ("in", "admin")
+    assert "/api/auth/me" in requests_made(out)
+    assert "/api/jobs?limit=50" in requests_made(out)
+    assert ["GET", "/api/alerts?limit=50"] in out["fetched"]
+
+
+@needs_node
+def test_a_user_gets_the_page_without_the_admin_requests():
+    out = page("/", answers={"/api/auth/me": {"account": USER_ACCOUNT}})
+    assert out["errors"] == [], out["errors"]
+    assert (out["auth"], out["role"]) == ("in", "user")
+    assert "/api/jobs?limit=50" in requests_made(out)
+    assert not [u for u in requests_made(out) if u.startswith("/api/alerts")]
+    assert not [u for u in requests_made(out) if u.startswith("/api/accounts")]
+
+
+@needs_node
+def test_a_user_on_the_dashboard_does_not_break_on_the_reduced_answer():
+    reduced = {"active": [], "recent": [], "disk": None, "deploy": None, "vpn": {"current": {}}}
+    out = page(
+        "/dashboard",
+        answers={"/api/auth/me": {"account": USER_ACCOUNT}, "/api/dashboard": reduced},
+    )
+    assert out["errors"] == [], out["errors"]
+
+
+@needs_node
+def test_nobody_signed_in_means_the_form_and_nothing_else():
+    out = page("/", answers=SIGNED_OUT)
+    assert out["errors"] == [], out["errors"]
+    assert (out["auth"], out["role"]) == ("out", None)
+    # nothing but the question "who am I" and the version check leaves the page
+    assert set(requests_made(out)) <= {"/api/auth/me", "/api/version"}
+
+
+@needs_node
+def test_without_any_account_the_page_says_how_to_make_the_admin_in_german():
+    out = page(
+        "/",
+        language="de-DE",
+        answers=NO_ADMIN_YET,
+        steps=[{"read": "#login-setup"}, {"read": "#login-form"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    setup = out["reads"]["#login-setup"]
+    assert setup["hidden"] is False
+    assert "make admin-password" in setup["text"]
+    assert "docker compose up -d" in setup["text"]
+    assert out["reads"]["#login-form"]["hidden"] is True, "no dead login form"
+
+
+@needs_node
+def test_with_accounts_the_setup_notice_stays_away():
+    out = page("/", answers=SIGNED_OUT, steps=[{"read": "#login-setup"}, {"read": "#login-form"}])
+    assert out["reads"]["#login-setup"]["hidden"] is True
+    assert out["reads"]["#login-form"]["hidden"] is False
+
+
+def sign_in(user="boss", password="a long test password"):  # a test value
+    return [
+        {"set": "#login-user", "value": user},
+        {"set": "#login-password", "value": password},
+        {"submit": "#login-form"},
+        {"read": "#login-error"},
+    ]
+
+
+@needs_node
+def test_a_good_login_reloads_the_page_without_a_native_submit():
+    out = page(
+        "/",
+        answers={**SIGNED_OUT, "POST /api/auth/login": {"account": ACCOUNT}},
+        steps=sign_in(),
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/auth/login"] in out["fetched"]
+    assert out["prevented"]["#login-form"] is True
+    assert out["reloads"] == 1
+    assert "a long test password" not in json.dumps(out["fetched"]), "never in an address"
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("reply", "text"),
+    [
+        (
+            {"__status": 401, "body": {"detail": "wrong name or password"}},
+            "Wrong name or password.",
+        ),
+        (
+            {"__status": 429, "body": {"retry_after": 45}},
+            "Too many attempts. Please wait 45 seconds.",
+        ),
+        ({"__status": 500, "body": {}}, "Signing in did not work."),
+    ],
+)
+def test_a_failed_login_says_why_and_stays(reply, text):
+    out = page("/", answers={**SIGNED_OUT, "POST /api/auth/login": reply}, steps=sign_in())
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#login-error"]["text"] == text
+    assert out["reloads"] == 0
+    assert out["auth"] == "out"
+
+
+@needs_node
+def test_an_empty_login_is_not_sent():
+    out = page("/", answers=SIGNED_OUT, steps=sign_in("", ""))
+    assert ["POST", "/api/auth/login"] not in out["fetched"]
+    assert out["reads"]["#login-error"]["text"] == "Please enter a name and a password."
+
+
+@needs_node
+def test_the_german_login_texts_exist():
+    out = page(
+        "/",
+        language="de-DE",
+        answers={**SIGNED_OUT, "POST /api/auth/login": {"__status": 401, "body": {}}},
+        steps=sign_in(),
+    )
+    assert out["reads"]["#login-error"]["text"] == "Name oder Passwort falsch."
+
+
+@needs_node
+def test_a_session_that_ends_while_the_page_is_open_shows_the_login_again():
+    out = page(
+        "/",
+        answers={"/api/jobs": {"__status": 401, "body": {"detail": "login required"}}},
+        steps=[{"tick": 1}, {"read": "#login-note"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["auth"] == "out"
+    assert out["reads"]["#login-note"]["text"] == "Your session has ended. Please sign in again."
+
+
+@needs_node
+def test_logout_ends_the_session_on_the_server_and_reloads():
+    out = page("/", steps=[{"click": "#account-logout"}])
+    assert ["POST", "/api/auth/logout"] in out["fetched"]
+    assert out["reloads"] == 1
+
+
+@needs_node
+def test_the_account_button_shows_the_name():
+    out = page("/", steps=[{"read": "#account-open"}, {"read": "#account-who"}])
+    assert out["reads"]["#account-open"]["text"] == "boss"
+    assert out["reads"]["#account-who"]["text"] == "Signed in as boss (Administrator)"
+
+
+def change_password(current, new, repeat):
+    return [
+        {"set": "#account-current", "value": current},
+        {"set": "#account-new", "value": new},
+        {"set": "#account-repeat", "value": repeat},
+        {"submit": "#account-form"},
+        {"read": "#account-result"},
+    ]
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("current", "new", "repeat", "text"),
+    [
+        ("old password!!", "new password one", "new password two", "The two new passwords differ."),
+        ("old password!!", "short", "short", "The new password needs at least 12 characters."),
+        ("", "new password one", "new password one", "Please enter a name and a password."),
+    ],
+)
+def test_the_password_form_checks_before_it_sends(current, new, repeat, text):
+    out = page("/", steps=change_password(current, new, repeat))
+    assert ["POST", "/api/auth/password"] not in out["fetched"]
+    assert out["reads"]["#account-result"]["text"] == text
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("reply", "text"),
+    [
+        ({"ok": True}, "The password was changed. You are signed out on other devices."),
+        ({"__status": 403, "body": {"detail": "x"}}, "The current password is wrong."),
+        ({"__status": 500, "body": {}}, "Changing the password did not work."),
+    ],
+)
+def test_the_password_change_reports_the_answer(reply, text):
+    out = page(
+        "/",
+        answers={"POST /api/auth/password": reply},
+        steps=change_password("old password!!", "new password one", "new password one"),
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/auth/password"] in out["fetched"]
+    assert out["reads"]["#account-result"]["text"] == text
+
+
+@needs_node
+def test_the_accounts_page_lists_the_accounts_for_an_admin():
+    out = page("/accounts", answers=ACCOUNTS, steps=[{"read": "#accounts-list"}])
+    assert out["errors"] == [], out["errors"]
+    assert ["GET", "/api/accounts"] in out["fetched"]
+    assert out["reads"]["#accounts-list"]["children"] == 3
+
+
+@needs_node
+def test_a_user_is_sent_away_from_the_accounts_page_without_asking_for_it():
+    out = page("/accounts", answers={"/api/auth/me": {"account": USER_ACCOUNT}})
+    assert out["href"] == "/"
+    assert ["GET", "/api/accounts"] not in out["fetched"]
+
+
+@needs_node
+def test_creating_an_account_posts_it_and_reloads_the_list():
+    out = page(
+        "/accounts",
+        answers={
+            **ACCOUNTS,
+            "POST /api/accounts": {
+                "__status": 201,
+                "body": {"account": {**USER_ACCOUNT, "username": "carol"}},
+            },
+        },
+        steps=[
+            {"set": "#accounts-name", "value": "carol"},
+            {"set": "#accounts-password", "value": "carol has a long password"},
+            {"set": "#accounts-role", "value": "user"},
+            {"submit": "#accounts-form"},
+            {"read": "#accounts-result"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/accounts"] in out["fetched"]
+    assert out["fetched"].count(["GET", "/api/accounts"]) == 2
+    assert out["reads"]["#accounts-result"]["text"] == 'Account "carol" created.'
+    assert "carol has a long password" not in json.dumps(out["fetched"])
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("reply", "text"),
+    [
+        (
+            {"__status": 409, "body": {"kind": "exists", "detail": "x"}},
+            "That name is already taken.",
+        ),
+        (
+            {"__status": 422, "body": {"kind": "invalid", "detail": "the name needs 3"}},
+            "The name needs 3 to 64 letters, digits, dots, underscores or dashes.",
+        ),
+    ],
+)
+def test_account_creation_errors_are_explained(reply, text):
+    out = page(
+        "/accounts",
+        answers={**ACCOUNTS, "POST /api/accounts": reply},
+        steps=[
+            {"set": "#accounts-name", "value": "boss"},
+            {"set": "#accounts-password", "value": "a long test password"},
+            {"submit": "#accounts-form"},
+            {"read": "#accounts-result"},
+        ],
+    )
+    assert out["reads"]["#accounts-result"]["text"] == text
+
+
+@needs_node
+def test_the_followers_of_a_subscription_show_for_the_admin_and_only_a_count_for_a_user():
+    channel = {
+        "id": 1,
+        "channel_id": "UCSMOQeBJ2RAnuFungnQOxLg",
+        "channel_name": "Blender",
+        "enabled": True,
+        "backfill": 0,
+        "created_at": "2026-10-01T00:00:00.000Z",
+        "last_checked": None,
+        "last_error": None,
+        "target": "video",
+        "audio_only": False,
+        "following": True,
+        "follower_count": 2,
+    }
+    admin = page(
+        "/",
+        answers={
+            "/api/subscriptions": {"subscriptions": [{**channel, "followers": ["alice", "boss"]}]}
+        },
+        steps=[{"read": "#subs-list"}],
+    )
+    assert admin["errors"] == [], admin["errors"]
+    assert "Followed by: alice, boss" in admin["reads"]["#subs-list"]["text"]
+    user = page(
+        "/",
+        answers={
+            "/api/auth/me": {"account": USER_ACCOUNT},
+            "/api/subscriptions": {"subscriptions": [channel]},
+        },
+        steps=[{"read": "#subs-list"}],
+    )
+    assert user["errors"] == [], user["errors"]
+    assert user["reads"]["#subs-list"]["children"] == 1
+    assert "1 other person(s) follow this too" in user["reads"]["#subs-list"]["text"]
+    assert "alice" not in user["reads"]["#subs-list"]["text"]
+
+
+@needs_node
+def test_the_page_scrolls_to_its_anchor_once_the_sign_in_is_known():
+    """The browser scrolls to #subscriptions on load, when that part is still hidden (the
+    sign-in is not known yet): the script has to do it afterwards (found in the real browser)."""
+    out = page("/", "#subscriptions")
+    assert out["errors"] == [], out["errors"]
+    assert "subscriptions" in out["scrolled"]
+
+
+@needs_node
+def test_a_visitor_is_not_scrolled_anywhere():
+    out = page("/", "#subscriptions", answers=SIGNED_OUT)
+    assert out["scrolled"] == []
+
+
+@needs_node
+def test_an_odd_hash_scrolls_nowhere_and_breaks_nothing():
+    for hash_ in ("#", "#nope", "#a b", "#" + "x" * 50):
+        out = page("/", hash_)
+        assert out["errors"] == [], out["errors"]
+        assert out["scrolled"] == []

@@ -150,7 +150,7 @@ def test_the_german_conversation(repo, tmp_path, ovpn):
         ("Pfad der .ovpn-Datei", str(ovpn)),
         ("VPN-Benutzername", "vpn-user"),
         ("VPN-Passwort", SECRETS["vpn_password"]),
-        ("Passwort für die Webseite", SECRETS["web_password"]),
+        ("Passwort des Administrators", SECRETS["web_password"]),
         ("Passwort wiederholen", SECRETS["web_password"]),
         ("Adresse deines Jellyfin", ""),
     ]
@@ -170,7 +170,7 @@ def test_a_builtin_wireguard_provider(repo, tmp_path):
         ("private key", "wgwg-wgwg-wgwg"),
         ("your address in the VPN", "10.64.222.21/32"),
         ("Country of the VPN server", "Germany"),
-        ("Password for the web page", SECRETS["web_password"]),
+        ("Password of the administrator", SECRETS["web_password"]),
         ("Repeat the password", SECRETS["web_password"]),
     ]
     code, term, runner = play(repo, tmp_path, rules)
@@ -189,9 +189,12 @@ def test_a_builtin_wireguard_provider(repo, tmp_path):
 
 def test_a_wrong_answer_is_explained_and_asked_again(repo, tmp_path, ovpn):
     rules = new_install_rules(ovpn)
-    rules = [(n, a) for n, a in rules if n != "Password for the web page"]
+    rules = [(n, a) for n, a in rules if n != "Password of the administrator"]
     rules.append(
-        ("Password for the web page", ["short", "has'quote-longenough", SECRETS["web_password"]])
+        (
+            "Password of the administrator",
+            ["short", "has'quote-longenough", SECRETS["web_password"]],
+        )
     )
     code, term, _ = play(repo, tmp_path, rules)
     assert code == 0
@@ -341,7 +344,7 @@ def test_a_resume_before_the_logins_asks_for_the_web_password_again(repo, tmp_pa
     broken.fail("seed_config.py", 1)
     play(repo, tmp_path, new_install_rules(ovpn), runner=broken)
     rules = [
-        ("Password for the web page", SECRETS["web_password"]),
+        ("Password of the administrator", SECRETS["web_password"]),
         ("Repeat the password", SECRETS["web_password"]),
     ]
     code, term, runner = play(repo, tmp_path, rules)
@@ -427,8 +430,8 @@ def test_changing_settings_keeps_secrets_and_manual_edits_and_backs_up(installed
         ("1 = Change settings", "1"),
         ("How do you get your details", ""),
         ("Path of the .ovpn file", ""),
-        ("User name for the web page", "pat"),
-        ("Change the web page password", "n"),
+        ("User name of the administrator", "pat"),
+        ("Change the administrator", "n"),
     ]
     before = (installed / ".env").read_text()
     code, term, runner = play(installed, tmp_path, rules)
@@ -451,7 +454,7 @@ def test_nothing_is_backed_up_when_nothing_changed(installed, tmp_path):
     rules = [
         ("1 = Change settings", "1"),
         ("Path of the .ovpn file", ""),
-        ("Change the web page password", "n"),
+        ("Change the administrator", "n"),
     ]
     play(installed, tmp_path, rules)
     assert list(installed.glob(".env.bak-*")) == []
@@ -849,3 +852,163 @@ def test_a_rerun_interrupted_at_another_step_does_not_show_the_menu(repo, tmp_pa
     code, term, _ = play(repo, tmp_path, [])
     assert code == 0, term.text
     assert "1 = Repair" not in term.text
+
+
+# --- the app's accounts (#44) --------------------------------------------------------------------------
+
+
+def before_accounts(repo) -> None:
+    """The .env of an installation from before the accounts: no admin settings at all."""
+    keep = [
+        ln for ln in (repo / ".env").read_text().splitlines() if not ln.startswith("APP_ADMIN_")
+    ]
+    (repo / ".env").write_text("\n".join(keep) + "\n")
+
+
+def admin_runs(runner) -> list[list[str]]:
+    return runner.ran("set_admin.py")
+
+
+def test_a_new_installation_makes_the_first_admin_from_the_web_login(repo, tmp_path, ovpn):
+    code, term, runner = play(repo, tmp_path, new_install_rules(ovpn))
+    assert code == 0, term.text
+    assert runner.index("set_password.py") < runner.index("set_admin.py")
+    (command,) = admin_runs(runner)
+    assert command[command.index("--user") + 1] == "admin"
+    assert "--password-stdin" in command
+    assert SECRETS["web_password"] not in " ".join(command), "never on a command line"
+    assert [i for c, i in runner.inputs if "set_admin.py" in " ".join(c)] == [
+        SECRETS["web_password"] + "\n"
+    ]
+    env = parse_env((repo / ".env").read_text())
+    assert env["APP_ADMIN_PASSWORD_HASH"].startswith("scrypt:")
+    assert env["APP_ADMIN_USER"] == env["PROXY_USER"]
+    assert SECRETS["web_password"] not in whole_output(term, runner)
+
+
+def test_the_admin_texts_name_the_account_not_just_a_page_password(repo, tmp_path, ovpn):
+    _, term, _ = play(repo, tmp_path, new_install_rules(ovpn))
+    assert "administrator account" in term.text
+    assert 'You create more accounts there under "Accounts".' in term.text
+
+
+def test_changing_the_password_sets_the_admin_hash_again(installed, tmp_path):
+    rules = [
+        ("1 = Change settings", "1"),
+        ("Path of the .ovpn file", ""),
+        ("Change the administrator", "y"),
+        ("Password of the administrator", SECRETS["web_password"]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    code, term, runner = play(installed, tmp_path, rules)
+    assert code == 0, term.text
+    assert len(admin_runs(runner)) == 1
+    assert len(runner.ran("set_password.py")) == 1
+
+
+def test_keeping_the_password_does_not_touch_the_admin(installed, tmp_path):
+    rules = [
+        ("1 = Change settings", "1"),
+        ("Path of the .ovpn file", ""),
+        ("Change the administrator", "n"),
+    ]
+    _, _, runner = play(installed, tmp_path, rules)
+    assert admin_runs(runner) == []
+
+
+def test_update_of_an_older_installation_asks_the_password_once_and_keeps_the_name(
+    installed, tmp_path
+):
+    before_accounts(installed)
+    env = parse_env((installed / ".env").read_text())
+    rules = [
+        ("Password of the administrator", SECRETS["web_password"]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    code, term, runner = play(installed, tmp_path, rules, argv=["--update"])
+    assert code == 0, term.text
+    (command,) = admin_runs(runner)
+    assert command[command.index("--user") + 1] == env["PROXY_USER"]
+    assert runner.index("set_admin.py") < runner.index("docker compose up -d --build")
+    assert "becomes the first" in term.text
+    assert "a value is still missing for: APP_ADMIN_PASSWORD_HASH" not in term.text
+    after = parse_env((installed / ".env").read_text())
+    assert after["APP_ADMIN_PASSWORD_HASH"].startswith("scrypt:")
+    assert SECRETS["web_password"] not in whole_output(term, runner)
+
+
+def test_a_second_update_asks_nothing_and_makes_no_new_admin(installed, tmp_path):
+    before_accounts(installed)
+    rules = [
+        ("Password of the administrator", SECRETS["web_password"]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    play(installed, tmp_path, rules, argv=["--update"])
+    code, term, runner = play(installed, tmp_path, [], argv=["--update"])
+    assert code == 0, term.text
+    assert admin_runs(runner) == []
+    assert "becomes the first" not in term.text
+
+
+def test_an_update_of_an_installation_that_has_an_admin_asks_nothing(installed, tmp_path):
+    code, term, runner = play(installed, tmp_path, [], argv=["--update"])
+    assert code == 0, term.text
+    assert admin_runs(runner) == []
+
+
+def test_update_falls_back_to_admin_when_the_old_login_name_is_no_account_name(installed, tmp_path):
+    before_accounts(installed)
+    text = (installed / ".env").read_text()
+    (installed / ".env").write_text(text.replace("PROXY_USER=admin", "PROXY_USER=-x"))
+    rules = [
+        ("Password of the administrator", SECRETS["web_password"]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    code, term, runner = play(installed, tmp_path, rules, argv=["--update"])
+    assert code == 0, term.text
+    (command,) = admin_runs(runner)
+    assert command[command.index("--user") + 1] == "admin"
+
+
+def test_a_weak_password_is_asked_again_in_the_update(installed, tmp_path):
+    before_accounts(installed)
+    rules = [
+        ("Password of the administrator", ["short", SECRETS["web_password"]]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    code, term, runner = play(installed, tmp_path, rules, argv=["--update"])
+    assert code == 0, term.text
+    assert len(admin_runs(runner)) == 1
+
+
+def test_a_failing_admin_script_stops_the_update_before_the_rebuild(installed, tmp_path):
+    before_accounts(installed)
+    runner = FakeRunner(installed)
+    runner.fail("set_admin.py", 1)
+    rules = [
+        ("Password of the administrator", SECRETS["web_password"]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    code, _, _ = play(installed, tmp_path, rules, argv=["--update"], runner=runner)
+    assert code == 1
+    assert not runner.ran("docker compose up")
+
+
+def test_a_dry_run_update_asks_for_no_password(installed, tmp_path):
+    before_accounts(installed)
+    code, term, _ = play(installed, tmp_path, [], argv=["--update", "--dry-run"])
+    assert code == 0, term.text
+    assert "becomes the first" in term.text
+
+
+def test_the_checks_name_the_missing_admin_when_the_hash_is_still_open(installed, tmp_path):
+    """A resumed or repaired installation without an admin asks for the password."""
+    before_accounts(installed)
+    rules = [
+        ("1 = Change settings", "3"),
+        ("Password of the administrator", SECRETS["web_password"]),
+        ("Repeat the password", SECRETS["web_password"]),
+    ]
+    code, term, runner = play(installed, tmp_path, rules)
+    assert code == 0, term.text
+    assert len(admin_runs(runner)) == 1

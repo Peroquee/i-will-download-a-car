@@ -6,7 +6,10 @@ The app runs in this process (uvicorn on 127.0.0.1, a temp data folder, a stand-
 lookup and for the download so nothing leaves the machine). Headless Chromium runs in the Playwright
 container with the host's network and executes `browser/ui_checks.py`: the form makes a job, the
 navigation and the VPN bar go where they say, a page without its scripts ends on the reload page,
-and an update while a page is open gets a banner. Not part of the pipeline: the image is large; run
+and an update while a page is open gets a banner. Since #44 it also covers the sign-in: a visitor
+sees only the form, a wrong password is refused and braked, the session cookie is HttpOnly and
+SameSite=Strict, logout ends the session, an admin and a user see different tabs, and the admin
+makes the user on the accounts page. Not part of the pipeline: the image is large; run
 it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the browsers); the matching
 `playwright` package is installed with pip inside the container (`YTP_PLAYWRIGHT_VERSION`).
 """
@@ -14,6 +17,7 @@ it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the browser
 from __future__ import annotations
 
 import os
+import re
 import socket
 import threading
 import time
@@ -24,11 +28,13 @@ import pytest
 import uvicorn
 
 from tests.helpers import docker
+from tests.helpers.accounts_app import ADMIN, PASSWORD, fast_hash
 from ytp.config import Settings
 from ytp.main import create_app
 from ytp.youtube import VideoInfo
 
 pytestmark = [
+    pytest.mark.real_auth,  # the real sign-in, not the test admin of tests/conftest.py
     pytest.mark.docker,
     pytest.mark.network,
     pytest.mark.slow,
@@ -89,7 +95,13 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     for name in ("Filme", "Serien", "Hörbücher", "Musik", "Podcasts", "Youtube"):
         (root / name).mkdir()
     settings = Settings.from_env(
-        {**ENV, "DATA_ROOT": str(root), "CONFIG_DIR": str(root / "config")}
+        {
+            **ENV,
+            "DATA_ROOT": str(root),
+            "CONFIG_DIR": str(root / "config"),
+            "APP_ADMIN_USER": ADMIN,
+            "APP_ADMIN_PASSWORD_HASH": fast_hash(),
+        }
     )
     app = create_app(settings)
     port = free_port()
@@ -116,6 +128,7 @@ def test_the_page_works_in_a_real_browser(base_url):
     result = docker.run(
         [
             "run", "--rm", "--network", "host", "--ipc", "host",
+            "-e", f"YTP_ADMIN={ADMIN}", "-e", f"YTP_ADMIN_PASSWORD={PASSWORD}",
             "-v", f"{CHECKS}:/checks/ui_checks.py:ro",
             IMAGE, "sh", "-c", install_and_run, base_url,
         ],
@@ -123,4 +136,5 @@ def test_the_page_works_in_a_real_browser(base_url):
     )  # fmt: skip
     output = result.stdout + "\n" + result.stderr
     assert result.returncode == 0, output
-    assert output.count("ok  ") >= 11, output
+    assert re.search(r"all \d+ checks passed", output), output
+    assert output.count("ok  ") >= 18, output

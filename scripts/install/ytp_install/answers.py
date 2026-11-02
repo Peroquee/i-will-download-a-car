@@ -20,7 +20,8 @@ LIBRARY_DEFAULTS = {
     "MEDIA_DIR_PODCASTS": "Podcasts",
     "MEDIA_DIR_YOUTUBE": "Youtube",
 }
-USER_PATTERN = re.compile(r"[A-Za-z0-9._-]{3,64}")
+# the same rule as the app's account names (app/ytp/accounts.py): the web login is the first admin
+USER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}")
 PROVIDER_PATTERN = re.compile(r"[a-z0-9][a-z0-9 .-]{1,40}")
 MIN_WEB_PASSWORD = 12
 MIN_QBIT_PASSWORD = 10

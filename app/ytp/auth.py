@@ -48,6 +48,7 @@ POLICY: dict[tuple[str, str], str] = {
     # the page, its files and the questions a page without a login must be able to ask
     ("GET", "/"): PUBLIC,
     ("GET", "/dashboard"): PUBLIC,
+    ("GET", "/accounts"): PUBLIC,  # the page only; the data behind it is /api/accounts (admin)
     ("GET", "/health"): PUBLIC,
     ("GET", "/api/version"): PUBLIC,
     ("POST", "/reload-needed"): PUBLIC,

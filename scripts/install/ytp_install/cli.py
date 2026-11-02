@@ -38,6 +38,7 @@ from .steps import (
     Context,
     State,
     StepError,
+    admin_hash_set,
     parse_compose_ps,
     run_steps,
     step_config,
@@ -720,7 +721,9 @@ def main(argv: list[str], root: Path, deps: Deps | None = None) -> int:
                     repairing = picked == "repair"
             else:
                 state.forget(STEP_IDS, args.dry_run)
-            hash_open = env.get("PROXY_PASSWORD_HASH", "changeme") == "changeme"
+            hash_open = env.get(
+                "PROXY_PASSWORD_HASH", "changeme"
+            ) == "changeme" or not admin_hash_set(env)
             # A stored hash needs no password again; the repair menu forgets the logins step
             # only to run it again, which is no reason to ask.
             if hash_open or (

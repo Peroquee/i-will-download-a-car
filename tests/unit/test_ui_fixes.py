@@ -219,10 +219,13 @@ def nav_html() -> str:
     return nav.group(0)
 
 
-def test_there_is_a_real_navigation_with_four_places_in_order():
+def test_there_is_a_real_navigation_with_its_places_in_order():
     nav = nav_html()
     items = re.findall(r'id="(nav-[a-z]+|howto-open)"', nav)
-    assert items == ["nav-input", "nav-dashboard", "nav-subs", "howto-open"]
+    # the accounts tab (#44) is for admins only: the style sheet hides it from everybody else
+    assert items == ["nav-input", "nav-dashboard", "nav-subs", "nav-accounts", "howto-open"]
+    assert 'id="nav-accounts" class="nav-item" href="/accounts"' in nav
+    assert "data-admin-only" in nav.split('id="nav-accounts"')[1].split(">")[0]
     assert 'href="/"' in nav
     assert 'href="/dashboard"' in nav
     assert 'href="/#subscriptions"' in nav

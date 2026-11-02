@@ -119,6 +119,8 @@ else echo "{vm}"; [ "{vm}" != none ] || exit 1; fi""",
             "MEDIA_DIR_MUSIC": "Musik",
             "MEDIA_DIR_PODCASTS": "Podcasts",
             "MEDIA_DIR_YOUTUBE": "Youtube",
+            "APP_ADMIN_USER": "admin",
+            "APP_ADMIN_PASSWORD_HASH": "scrypt:32768:8:1:c2FsdHNhbHRzYWx0:a2V5a2V5a2V5a2V5",
         }
         values.update(overrides)
         self.env_file.write_text(
@@ -226,8 +228,8 @@ def test_a_check_without_a_dispatch_arm_fails_loudly(host):
     """A check added to ALL_CHECKS but not to main()'s case must not be skipped silently."""
     source = SCRIPT.read_text(encoding="utf-8")
     patched = source.replace(
-        'readonly ALL_CHECKS="virt docker compose tun media layout backups"',
-        'readonly ALL_CHECKS="virt docker compose tun media layout backups orphan"',
+        'readonly ALL_CHECKS="virt docker compose tun media layout backups login"',
+        'readonly ALL_CHECKS="virt docker compose tun media layout backups login orphan"',
     )
     assert patched != source, "ALL_CHECKS line changed; update this test"
     script = host.tmp / "check-host-orphan.sh"
@@ -729,3 +731,33 @@ def test_the_full_run_includes_the_backup_check(host):
     result = host.run()
     assert status(result, "backups") == "PASS"
     assert "backups" in result.stdout
+
+
+# --------------------------------------------------------------------------- login (#44)
+
+
+def test_login_passes_with_the_admin_hash_set(host):
+    result = host.run("--only", "login")
+    assert status(result, "login") == "PASS"
+    assert "admin" in result.stdout
+
+
+@pytest.mark.parametrize("hash_value", [None, "", "changeme"])
+def test_login_fails_without_an_admin_hash_and_says_what_to_run(host, hash_value):
+    host.write_env(APP_ADMIN_PASSWORD_HASH=hash_value)
+    result = host.run("--only", "login")
+    assert status(result, "login") == "FAIL"
+    assert "make admin-password" in result.stdout
+    assert "docker compose up -d" in result.stdout
+
+
+def test_login_fails_for_a_value_that_is_no_scrypt_hash(host):
+    host.write_env(APP_ADMIN_PASSWORD_HASH="my-password-typed-in-by-mistake")
+    result = host.run("--only", "login")
+    assert status(result, "login") == "FAIL"
+    assert "my-password-typed-in-by-mistake" not in result.stdout
+
+
+def test_login_fails_without_an_env_file(host):
+    host.env_file.unlink()
+    assert status(host.run("--only", "login"), "login") == "FAIL"

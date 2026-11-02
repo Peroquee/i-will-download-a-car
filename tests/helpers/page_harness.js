@@ -1,4 +1,4 @@
-// Runs the page's real scripts (logic.js, dashboard.js, app.js) against the real index.html in a
+// Runs the page's real scripts (logic.js, dashboard.js, auth.js, app.js) against the real index.html in a
 // small DOM written for this purpose, and reports what happened. Not a browser: no layout and no
 // CSS; but every script error that does not depend on one shows up, and that is what a page
 // whose scripts "do not run to the end" (issue #43) needs.
@@ -12,6 +12,7 @@ const steps = JSON.parse(stepsJson || "[]");
 const answers = JSON.parse(answersJson || "{}");
 
 // ------------------------------------------------------------------ the DOM
+const scrolled = [];
 const VOID = new Set(["meta", "link", "input", "br", "img", "hr", "source", "path", "ellipse", "circle", "text", "rect", "line"]);
 class TextNode { constructor(t) { this.nodeType = 3; this._text = t; this.parentNode = null; } get textContent() { return this._text; } }
 class El {
@@ -72,7 +73,7 @@ class El {
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   removeEventListener() {}
   dispatchEvent(e) { (this.listeners[e.type] || []).forEach((f) => f(e)); return true; }
-  focus() {} blur() {} select() {} scrollIntoView() {} click() { this.dispatchEvent({ type: "click", target: this, preventDefault() {} }); }
+  focus() {} blur() {} select() {} scrollIntoView() { scrolled.push(this.id); } click() { this.dispatchEvent({ type: "click", target: this, preventDefault() {} }); }
   showModal() { this.open = true; } close() { this.open = false; }
   closest(sel) { let n = this; while (n && n.nodeType === 1) { if (matches(n, parseCompound(sel.trim()))) return n; n = n.parentNode; } return null; }
   querySelectorAll(sel) { return queryAll(this, sel); }
@@ -152,7 +153,8 @@ function fireEvent(el, type, extra = {}) {
   catch (e) { errors.push({ file: "event " + type + " on " + (el.id || el.tag), message: String(e && e.message), stack: String(e && e.stack).split("\n").slice(0, 5).join("\n") }); }
   return event;
 }
-const location = { pathname, hash, href: "http://page.test" + pathname + hash, reload() {} };
+let reloads = 0;
+const location = { pathname, hash, href: "http://page.test" + pathname + hash, reload() { reloads += 1; } };
 const window = {
   location, document, Logic: require(path.join(staticDir, "logic.js")),
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } },
@@ -178,7 +180,7 @@ function run(file) {
   try { new Function("window", "document", "navigator", "fetch", code)(window, document, navigator, fetchStub); }
   catch (e) { errors.push({ file, message: String(e && e.message), stack: String(e && e.stack).split("\n").slice(0, 6).join("\n") }); }
 }
-for (const f of ["dashboard.js", "app.js"]) run(f);   // the order the page loads them in (logic.js is window.Logic)
+for (const f of ["dashboard.js", "auth.js", "app.js"]) run(f);   // the order the page loads them in (logic.js is window.Logic)
 function select(sel) { const el = document.querySelector(sel); if (!el) throw new Error("no element for " + sel); return el; }
 const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
 (async () => {
@@ -198,7 +200,8 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
   }
   const warning = document.getElementById("js-warning");
   console.log(JSON.stringify({
-    errors, warningHidden: warning ? warning.hidden : null, fetched, reads, prevented,
+    errors, warningHidden: warning ? warning.hidden : null, fetched, reads, prevented, reloads, scrolled,
+    auth: tree.attrs["data-auth"] || null, role: tree.attrs["data-role"] || null, href: location.href,
     version: (document.querySelector('meta[name="ytp-static-version"]') || { attrs: {} }).attrs.content || null,
     banner: document.getElementById("update-banner").hidden,
   }));

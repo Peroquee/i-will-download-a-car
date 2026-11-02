@@ -7,7 +7,8 @@ POST /api/auth/login        {"username", "password"}
     A session that came with the request is ended first and a NEW one is made: the cookie value is
     never carried over from before the login (session fixation).
 POST /api/auth/logout       the session ends, the cookie is cleared. 200 {"ok": true}
-GET  /api/auth/me           200 {"account": {...}} or 401 (no valid session)
+GET  /api/auth/me           200 {"account": {...}} or 401 (no valid session); the 401 carries
+                            "setup": true when no account exists at all (nobody could sign in)
 POST /api/auth/password     {"current", "new"}: 200 and the account's OTHER sessions end; 403 if
                             the current password is wrong (counts for the brake like a login)
 
@@ -140,7 +141,11 @@ async def logout(request: Request) -> JSONResponse:
 async def me(request: Request) -> JSONResponse:
     account: Account | None = request.state.account
     if account is None:
-        return problem(401, "login required")
+        body: dict[str, Any] = {"detail": "login required"}
+        db = request.app.state.db
+        if db is not None and not await asyncio.to_thread(accounts.list_all, db):
+            body["setup"] = True  # no account exists: the page says how to make the first admin
+        return JSONResponse(body, status_code=401, headers={"Cache-Control": "no-store"})
     return JSONResponse({"account": account.as_dict()}, headers={"Cache-Control": "no-store"})
 
 

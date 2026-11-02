@@ -105,6 +105,7 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/accounts/{account_id}/password",
         "/",
         "/dashboard",  # the same page, in its dashboard view (#38)
+        "/accounts",  # the same page, in its accounts view (#44)
         "/static",  # the form's files (#25)
     }
 

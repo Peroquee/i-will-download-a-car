@@ -170,8 +170,9 @@ class VersionedStatic(StaticFiles):
 
 
 def register_ui(app: FastAPI) -> None:
-    """Add `GET /` and `/dashboard` (the page), `/static/` (its files), `GET /api/version` and
-    `POST /reload-needed` (where a form goes that the scripts did not take over)."""
+    """Add `GET /`, `/dashboard` and `/accounts` (the page), `/static/` (its files),
+    `GET /api/version` and `POST /reload-needed` (where a form goes that the scripts did not take
+    over)."""
     version = static_version()
     page = render_page((STATIC_DIR / "index.html").read_text(encoding="utf-8"), version)
     app.state.static_version = version
@@ -190,6 +191,8 @@ def register_ui(app: FastAPI) -> None:
     app.add_api_route("/", index, methods=["GET"], include_in_schema=False)
     # The dashboard (#38) is the same page: the script shows the dashboard view for this address.
     app.add_api_route("/dashboard", index, methods=["GET"], include_in_schema=False)
+    # The accounts page (#44, admins) is a third view of the same page.
+    app.add_api_route("/accounts", index, methods=["GET"], include_in_schema=False)
     app.add_api_route("/api/version", current_version, methods=["GET"], include_in_schema=False)
     app.add_api_route("/reload-needed", reload_needed, methods=["POST"], include_in_schema=False)
     app.mount("/static", VersionedStatic(directory=STATIC_DIR), name="static")

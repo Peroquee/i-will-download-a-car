@@ -11,6 +11,7 @@
   var probed = { link: "", state: "" };   // the last address looked up: "pending", "ok" or "failed"
   var feedSerial = 0;
   var dash = null;   // the alert strip and the dashboard (dashboard.js, #38)
+  var auth = null;   // sign-in, account menu, accounts page (auth.js, #44)
 
   /* A form of this page is NEVER submitted natively (it would send the pasted link in the address
      and create no job): whatever else fails, this guard is the first thing that runs. */
@@ -47,6 +48,7 @@
     renderJobs();
     renderSubs();
     if (dash) dash.render();
+    if (auth) auth.render();
   }
 
   /* ---------------------------------------------------------------- state */
@@ -128,18 +130,31 @@
 
   /* ---------------------------------------------------------------- the server */
 
-  function post(path, body) {
-    return fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(body),
-    }).then(function (response) {
+  /* Every request to the app goes through here (#44): nothing is sent while nobody is signed in,
+     and an answer of 401 means the session ended, so the page shows the sign-in form again. */
+  function api(path, options) {
+    if (auth && !auth.isIn() && !/^\/api\/auth\//.test(path)) return Promise.reject(new Error("not signed in"));
+    return fetch(path, options).then(function (response) {
+      if (response.status === 401 && auth && !/^\/api\/auth\/login/.test(path)) auth.expired();
+      return response;
+    });
+  }
+
+  function request(method, path, body) {
+    var headers = { "Accept": "application/json" };
+    var options = { method: method, credentials: "same-origin", headers: headers };
+    if (body !== null && body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
+    }
+    return api(path, options).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (data) {
         return { status: response.status, data: data };
       });
     });
   }
+
+  function post(path, body) { return request("POST", path, body); }
 
   function statusText(status) { return t("status." + status); }
 
@@ -278,8 +293,8 @@
     var body = L.subscribePayload(link, name, null, ytTarget(), ytAudioOnly());
     post("/api/subscriptions", body).then(function (reply) {
       if (reply.status === 201 || reply.status === 200) {
-        var key = reply.data.duplicate ? "sub.duplicate" : "sub.created";
-        showResult(downloadText + " " + t(key, { name: reply.data.channel_name }), true);
+        var key = reply.data.duplicate ? (reply.data.other_followers > 0 ? "sub.joined" : "sub.duplicate") : "sub.created";
+        showResult(downloadText + " " + t(key, { name: reply.data.channel_name, n: reply.data.other_followers }), true);
         loadSubs();
         return;
       }
@@ -388,7 +403,8 @@
       steps = steps.then(function () {
         return post("/api/podcasts", payloads.subscribe).then(function (reply) {
           if (reply.status === 201 || reply.status === 200) {
-            lines.push(t(reply.data.duplicate ? "pc.already" : "pc.subscribed", { name: reply.data.title }));
+            var podcastKey = reply.data.duplicate ? (reply.data.other_followers > 0 ? "pc.joined" : "pc.already") : "pc.subscribed";
+            lines.push(t(podcastKey, { name: reply.data.title, n: reply.data.other_followers }));
           } else {
             failed(reply, "pc.sub_failed");
           }
@@ -455,7 +471,7 @@
   }
 
   function pollVpn() {
-    fetch("/api/vpn", { credentials: "same-origin", headers: { "Accept": "application/json" } })
+    api("/api/vpn", { credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (response) {
         if (!response.ok) throw new Error("status " + response.status);
         return response.json();
@@ -482,7 +498,7 @@
   function pollJobs() {
     if (jobsLoading) return;
     jobsLoading = true;
-    fetch(jobsUrl(), { credentials: "same-origin", headers: { "Accept": "application/json" } })
+    api(jobsUrl(), { credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (response) {
         if (!response.ok) throw new Error("status " + response.status);
         return response.json();
@@ -623,7 +639,7 @@
   function subName(sub) { return sub.kind === "podcast" ? sub.title : sub.channel_name; }
 
   function getJson(path) {
-    return fetch(path, { credentials: "same-origin", headers: { "Accept": "application/json" } })
+    return api(path, { credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (response) {
         if (!response.ok) throw new Error("status " + response.status);
         return response.json();
@@ -646,17 +662,7 @@
       .then(function () { subsLoading = false; renderSubs(); });
   }
 
-  function subsRequest(method, path) {
-    return fetch(path, {
-      method: method,
-      credentials: "same-origin",
-      headers: { "Accept": "application/json" },
-    }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (data) {
-        return { status: response.status, data: data };
-      });
-    });
-  }
+  function subsRequest(method, path) { return request(method, path, null); }
 
   function failureText(reply, fallbackKey) {
     var kind = reply.data && reply.data.kind;
@@ -713,6 +719,18 @@
       ? t("subs.checked", { when: timeText(sub.last_checked) })
       : t("subs.never"));
     li.appendChild(meta);
+    var others = (sub.follower_count || 0) - (sub.following ? 1 : 0);
+    if (sub.followers && sub.followers.length) {   // an admin sees who follows
+      var who = document.createElement("div");
+      who.className = "job-meta";
+      who.textContent = t("subs.followers", { names: sub.followers.join(", ") });
+      li.appendChild(who);
+    } else if (others > 0) {
+      var shared = document.createElement("div");
+      shared.className = "job-meta";
+      shared.textContent = t("subs.shared_note", { n: others });
+      li.appendChild(shared);
+    }
 
     if (sub.last_error) {
       var problem = document.createElement("p");
@@ -746,6 +764,15 @@
     remove.addEventListener("click", function () { removeSub(sub); });
     buttons.appendChild(poll);
     buttons.appendChild(remove);
+    if (auth && auth.isAdmin() && others > 0) {   // ends it for the others too
+      var everyone = document.createElement("button");
+      everyone.type = "button";
+      everyone.className = "ghost small" + (subsConfirm[rowKey + ":all"] ? " danger" : "");
+      everyone.disabled = !!busy;
+      everyone.textContent = t(subsConfirm[rowKey + ":all"] ? "subs.confirm_all" : "subs.remove_all");
+      everyone.addEventListener("click", function () { removeSub(sub, true); });
+      buttons.appendChild(everyone);
+    }
     li.appendChild(buttons);
     return li;
   }
@@ -779,20 +806,21 @@
   }
 
   /* Two clicks: the first asks "Really remove?", the second does it; the question lapses. */
-  function removeSub(sub) {
+  function removeSub(sub, everyone) {
     var key = subKey(sub);
-    if (!subsConfirm[key]) {
-      subsConfirm[key] = true;
+    var asked = everyone ? key + ":all" : key;
+    if (!subsConfirm[asked]) {
+      subsConfirm[asked] = true;
       renderSubs();
       window.setTimeout(function () {
-        if (subsConfirm[key]) { delete subsConfirm[key]; renderSubs(); }
+        if (subsConfirm[asked]) { delete subsConfirm[asked]; renderSubs(); }
       }, 5000);
       return;
     }
-    delete subsConfirm[key];
+    delete subsConfirm[asked];
     subsBusy[key] = "remove";
     renderSubs();
-    subsRequest("DELETE", subPath(sub)).then(function (reply) {
+    subsRequest("DELETE", subPath(sub) + (everyone ? "?everyone=1" : "")).then(function (reply) {
       delete subsBusy[key];
       if (reply.status === 204 || reply.status === 404) {
         delete subsMessages[key];
@@ -837,8 +865,8 @@
     post("/api/subscriptions", body).then(function (reply) {
       $("subs-add").disabled = false;
       if (reply.status === 201 || reply.status === 200) {
-        var key = reply.data.duplicate ? "subs.already" : "subs.added";
-        subsShowResult(t(key, { name: reply.data.channel_name }), true);
+        var key = reply.data.duplicate ? (reply.data.other_followers > 0 ? "subs.joined" : "subs.already") : "subs.added";
+        subsShowResult(t(key, { name: reply.data.channel_name, n: reply.data.other_followers }), true);
         if (!reply.data.duplicate) { $("subs-channel").value = ""; $("subs-backfill").value = "0"; }
         loadSubs();
         return;
@@ -912,9 +940,15 @@
         statusText: statusText,
         getJson: getJson,
         post: post,
+        isAdmin: function () { return !auth || auth.isAdmin(); },
         retryJob: function (id) { return post("/api/jobs/" + id + "/retry", {}).catch(function () { return null; }); },
       }) : null;   // an old cached dashboard.js must not take the form down with it
     } catch (e) { dash = null; }
+    try {
+      auth = window.Auth ? window.Auth.create({
+        t: t, $: $, post: post, request: request, getJson: getJson, timeText: timeText,
+      }) : null;
+    } catch (e) { auth = null; }
     applyLanguage();
     document.querySelectorAll("input[name=mode]").forEach(function (radio) {
       radio.addEventListener("change", function () { setMode(radio.value); scheduleProbe(); });
@@ -942,6 +976,29 @@
       applyLanguage();
       clearErrors();
     });
+    startHowto();
+    startVersionCheck();
+    if (auth) auth.wire();
+    $("js-warning").hidden = true;   // everything above ran: the scripts are alive
+    // Who is asking decides what starts: nothing talks to the app before the sign-in (#44).
+    if (!auth) { startApp(); return; }
+    auth.check().then(function (account) {
+      if (account) startApp();
+      auth.start(dash ? dash.view() : "input");
+      scrollToAnchor();
+    });
+  }
+
+  /* The browser scrolls to #subscriptions when the page loads, but until the sign-in is known that
+     part is hidden and there is nothing to scroll to: do it once it shows. */
+  function scrollToAnchor() {
+    var id = (window.location.hash || "").replace(/^#/, "");
+    if (!/^[A-Za-z][\w-]*$/.test(id) || (auth && !auth.isIn())) return;
+    var target = document.getElementById(id);
+    if (target && !target.hidden && typeof target.scrollIntoView === "function") target.scrollIntoView();
+  }
+
+  function startApp() {
     pollVpn();
     window.setInterval(function () {
       if (document.visibilityState !== "hidden") { pollVpn(); if (dash) dash.refreshAlerts(); }
@@ -952,9 +1009,6 @@
     if (dash) dash.start();
     startJobPolling();
     startSubs();
-    startHowto();
-    startVersionCheck();
-    $("js-warning").hidden = true;   // everything above ran: the scripts are alive
   }
 
   /* ---------------------------------------------------------------- new version (#43) */

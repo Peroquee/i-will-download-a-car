@@ -54,6 +54,30 @@ different from the one applied last time **resets the password** of that account
 active admin again and ends its sessions. If the hash is unchanged nothing happens, so a password
 changed in the app stays changed. Other users' passwords are reset by an admin in the app.
 
+## Updating an existing installation (one step)
+
+The installer's update (`./update.sh`) does it for you: it asks **once** for a password, keeps
+your old login name as the admin's name and writes the hash. If the owner updates by hand
+(`git pull`) or the automatic update (#42) installs the new version, nothing can ask a question,
+so the app starts without an admin and:
+
+* the page shows, instead of a dead login form: *"The administrator account has not been set up
+  yet ... run `make admin-password`, then `docker compose up -d`"* (German too);
+* the app logs an error with the same instruction, `scripts/host/check-host.sh` fails its `login`
+  check, and the automatic update raises its usual "updated, but the host checks report problems"
+  alert.
+
+The one step, on the server in the install folder (it asks for the password twice):
+
+```bash
+make admin-password          # writes APP_ADMIN_USER / APP_ADMIN_PASSWORD_HASH to .env (mode kept)
+docker compose up -d         # starts the app again with the new setting
+```
+
+Use `--user NAME` (`scripts/app/set_admin.py --user NAME`) to name the admin; the default is
+`admin`. Everything that existed before (subscriptions, jobs) belongs to this first admin. The
+qBittorrent port (8081) keeps its old login (`PROXY_USER` / `PROXY_PASSWORD_HASH`).
+
 ## Sessions
 
 - Login: `POST /api/auth/login` `{username, password}`. The answer sets the cookie
@@ -115,6 +139,24 @@ There must always be one active admin: demoting, disabling or deleting the last 
 `409 last_admin`. A name is 3 to 64 characters of letters, digits, `.`, `_`, `-`, not starting
 with a symbol, and is unique regardless of case.
 
+## In the browser
+
+* **Not signed in:** the page shows only the sign-in form (script `static/auth.js`; the body
+  carries `data-auth` = `unknown` / `out` / `in` and `data-role`, and the style sheet hides what a
+  visitor or a user may not use). Nothing asks the app for data before the sign-in: a visitor's
+  page makes no request except "who am I" (`/api/auth/me`) and the version check. A wrong password
+  says so, too many tries say how long to wait. After a good sign-in the page reloads and starts as
+  that account. If the session ends while a page is open (`401` on any request) the form comes back
+  with a note. Without any account the form is replaced by the set-up message above.
+* **Account button** (top right, shows the name): a dialog with *Change password* (current, new,
+  repeated; other devices are signed out) and *Sign out*.
+* **Users** see *Input*, *Dashboard*, *Subscriptions* and *How to*; the dashboard has no disk, VPN
+  history, update status or alerts for them. **Admins** also get *Accounts* (`/accounts`): create an
+  account, make admin / user, disable, set a password, delete (two clicks), with the last-admin
+  rule explained. A user who opens `/accounts` is sent back to the start page.
+* **Subscriptions** show how many others follow the same channel (admins see the names, and a
+  *Remove for everyone* button). Subscribing to a channel somebody follows says so.
+
 ## Tests
 
 | What | Where |
@@ -124,6 +166,10 @@ with a symbol, and is unique regardless of case.
 | Jobs, subscriptions, podcasts and dashboard per account (nobody sees or changes another's) | `tests/unit/test_ownership_api.py` |
 | scrypt, the limiter, sessions, followers, first admin, settings | `tests/unit/test_accounts_store.py` |
 | `set_admin.py` | `tests/unit/test_set_admin.py` |
+| The page's scripts (sign-in, set-up message, role-dependent requests, account menu, accounts page) in a fake DOM | `tests/unit/test_page_scripts.py` |
+| The installer's admin step and the update path | `tests/unit/test_installer_flow.py` |
+| `check-host.sh --only login` | `tests/unit/test_check_host.py` |
+| A real browser: visitor sees only the form, wrong password, brake, cookie flags, logout kills a copied cookie, admin vs user tabs, creating a user, password change, cross-site POST | `tests/system/test_c43_browser.py` (gated, run on the VM) |
 
 Tests that are not about the login run as a built-in test admin (`auth.TEST_ACCOUNT`, set only by
 `tests/conftest.py`; a test checks that nothing in `app/` sets it). Tests of the real login carry
