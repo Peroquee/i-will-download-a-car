@@ -102,7 +102,12 @@
       subscribe = { feed: feed, backfill: toNumber(values.backfill === "" ? "0" : values.backfill) };
       if (name) subscribe.name = name;
     }
-    return { episode: episode, subscribe: subscribe };
+    var backlog = null;
+    if (values.all) {
+      backlog = { feed: feed };
+      if (name) backlog.name = name;
+    }
+    return { episode: episode, subscribe: subscribe, backlog: backlog };
   }
 
   var REQUIRED = {
@@ -128,7 +133,7 @@
     }
     if (mode === "podcast") {
       if (!String(values.name || "").trim()) errors.name = "err.required";
-      if (!values.episode && !values.subscribe) errors.episode = "pc.nothing";
+      if (!values.episode && !values.subscribe && !values.all) errors.episode = "pc.nothing";
       var back = String(values.backfill == null ? "" : values.backfill).trim();
       if (values.subscribe && back !== "" && (!/^\d+$/.test(back) || +back > MAX_PODCAST_BACKFILL)) {
         errors.backfill = "err.int_out_of_range_20";

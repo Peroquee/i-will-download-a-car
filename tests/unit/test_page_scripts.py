@@ -787,3 +787,282 @@ def test_an_odd_hash_scrolls_nowhere_and_breaks_nothing():
         out = page("/", hash_)
         assert out["errors"] == [], out["errors"]
         assert out["scrolled"] == []
+
+
+# --- the whole back catalogue of a podcast (#45) -----------------------------------------------
+
+FEED_URL = "https://podcast.example/feed.xml"
+CATALOGUE = {
+    "episodes": 312,
+    "to_download": 312,
+    "skipped": 0,
+    "size": 18 * 1024**3,
+    "sized": 312,
+    "space_ok": True,
+}
+FEED_ANSWER = {
+    "feed_url": FEED_URL,
+    "title": "Test Cast",
+    "folder": "Test Cast",
+    "image": False,
+    "subscribed": False,
+    "subscription_id": None,
+    "episodes": [
+        {"key": "k" * 40, "title": "One", "published": "2026-10-01", "size": 1, "media_type": ""}
+    ],
+    "catalogue": CATALOGUE,
+}
+STARTED = {
+    "started": True,
+    "joined": False,
+    "backlog": {"id": 7, "folder": "Test Cast", "state": "running", "total": 312, "done": 0},
+}
+
+
+def podcast_feed_steps(*more):
+    """Paste a feed address and let the lookup answer."""
+    return [
+        {"set": "#link", "value": FEED_URL},
+        {"fire": "#link", "type": "input"},
+        {"tick": 1},
+        {"read": "#pc-all-note"},
+        *more,
+    ]
+
+
+def podcast_page(catalogue=None, steps=(), answers=None):
+    feed = {**FEED_ANSWER, "catalogue": {**CATALOGUE, **(catalogue or {})}}
+    return page(
+        "/",
+        steps=podcast_feed_steps(*steps),
+        answers={"POST /api/podcasts/probe": feed, **(answers or {})},
+    )
+
+
+@needs_node
+def test_the_podcast_form_says_how_many_episodes_and_how_much_space_all_would_take():
+    out = podcast_page()
+    assert out["errors"] == [], out["errors"]
+    assert (
+        out["reads"]["#pc-all-note"]["text"]
+        == "In the feed: 312 episodes to download, about 18.0 GB."
+    )
+
+
+@needs_node
+def test_it_also_says_how_many_are_skipped_and_what_it_does_not_know():
+    out = podcast_page({"to_download": 300, "skipped": 12, "size": None, "sized": 0})
+    assert out["reads"]["#pc-all-note"]["text"] == (
+        "In the feed: 300 episodes to download, size unknown; 12 already there or in the system "
+        "and skipped."
+    )
+
+
+@needs_node
+def test_when_everything_is_there_it_says_so():
+    out = podcast_page({"to_download": 0, "skipped": 312})
+    assert out["reads"]["#pc-all-note"]["text"] == (
+        "Everything in this feed is already there or in the system."
+    )
+
+
+@needs_node
+def test_the_german_note_is_german():
+    out = page(
+        "/",
+        language="de-DE",
+        steps=podcast_feed_steps(),
+        answers={"POST /api/podcasts/probe": FEED_ANSWER},
+    )
+    assert out["reads"]["#pc-all-note"]["text"].startswith("Im Feed: 312 Folgen zum Laden")
+
+
+def submit_all(*extra):
+    return [
+        {"check": "#pc-all", "value": True},
+        {"submit": "#form"},
+        {"read": "#pc-all-confirm"},
+        {"read": "#result"},
+        *extra,
+    ]
+
+
+@needs_node
+def test_all_episodes_asks_first_and_only_the_second_press_starts_it():
+    out = podcast_page(
+        steps=submit_all({"submit": "#form"}, {"read": "#result"}),
+        answers={"POST /api/podcasts/backlog": {"__status": 201, "body": STARTED}},
+    )
+    assert out["errors"] == [], out["errors"]
+    confirm = out["reads"]["#pc-all-confirm"]
+    assert confirm["hidden"] is False
+    assert "312 episodes, about 18.0 GB, newest first" in confirm["text"]
+    assert out["fetched"].count(["POST", "/api/podcasts/backlog"]) == 1, "only after the 2nd press"
+    assert "Back catalogue started: 312 episodes" in out["reads"]["#result"]["text"]
+
+
+@needs_node
+def test_ticking_the_box_again_takes_the_question_back():
+    out = podcast_page(
+        steps=[
+            {"check": "#pc-all", "value": True},
+            {"submit": "#form"},
+            {"fire": "#pc-all", "type": "change"},
+            {"read": "#pc-all-confirm"},
+            {"submit": "#form"},
+        ],
+    )
+    assert out["reads"]["#pc-all-confirm"]["hidden"] is True
+    assert ["POST", "/api/podcasts/backlog"] not in out["fetched"], "asked again, not started"
+
+
+@needs_node
+def test_with_too_little_room_it_says_so_and_never_starts():
+    out = podcast_page(
+        {"space_ok": False},
+        steps=submit_all({"submit": "#form"}),
+    )
+    text = out["reads"]["#pc-all-confirm"]["text"]
+    assert "not enough free space" in text
+    assert ["POST", "/api/podcasts/backlog"] not in out["fetched"]
+
+
+@needs_node
+def test_nothing_new_in_the_feed_goes_straight_to_the_server_which_says_nothing_to_do():
+    out = podcast_page(
+        {"to_download": 0, "skipped": 312},
+        steps=submit_all(),
+        answers={"POST /api/podcasts/backlog": {"started": False, "total": 0, "skipped": 312}},
+    )
+    assert out["reads"]["#pc-all-confirm"]["hidden"] is True
+    assert "Nothing to download" in out["reads"]["#result"]["text"]
+
+
+@needs_node
+def test_a_refusal_for_lack_of_space_is_explained():
+    refusal = {"__status": 409, "body": {"detail": "x", "kind": "not_enough_space"}}
+    out = page(
+        "/",
+        steps=podcast_feed_steps(*submit_all({"submit": "#form"}, {"read": "#result"})),
+        answers={
+            "POST /api/podcasts/probe": {**FEED_ANSWER, "catalogue": None},
+            "POST /api/podcasts/backlog": refusal,
+        },
+    )
+    text = out["reads"]["#result"]["text"]
+    assert "could not be started" in text
+    assert "not enough free space" in text
+
+
+@needs_node
+def test_joining_a_run_that_goes_is_said():
+    joined = {**STARTED, "started": False, "joined": True}
+    out = podcast_page(
+        steps=submit_all({"submit": "#form"}, {"read": "#result"}),
+        answers={"POST /api/podcasts/backlog": joined},
+    )
+    assert "already running; you are part of it" in out["reads"]["#result"]["text"]
+
+
+@needs_node
+def test_all_episodes_works_together_with_subscribing_and_without_one():
+    out = podcast_page(
+        steps=[
+            {"check": "#pc-subscribe", "value": True},
+            {"check": "#pc-all", "value": True},
+            {"submit": "#form"},
+            {"submit": "#form"},
+            {"read": "#result"},
+        ],
+        answers={
+            "POST /api/podcasts": {
+                "__status": 201,
+                "body": {"title": "Test Cast", "duplicate": False},
+            },
+            "POST /api/podcasts/backlog": {"__status": 201, "body": STARTED},
+        },
+    )
+    assert ["POST", "/api/podcasts"] in out["fetched"]
+    assert ["POST", "/api/podcasts/backlog"] in out["fetched"]
+
+
+@needs_node
+def test_all_episodes_alone_is_enough_to_send_the_form():
+    out = podcast_page(
+        steps=[
+            {"check": "#pc-all", "value": True},
+            {"submit": "#form"},
+            {"read": "#pc-episode-error"},
+        ]
+    )
+    assert out["reads"]["#pc-episode-error"]["text"] == ""
+
+
+@needs_node
+def test_without_any_choice_the_form_still_asks_for_one():
+    out = podcast_page(steps=[{"submit": "#form"}, {"read": "#pc-episode-error"}])
+    assert (
+        out["reads"]["#pc-episode-error"]["text"]
+        == "Please choose an episode or subscribe to the podcast."
+    )
+
+
+RUN = {
+    "id": 7, "folder": "Test Cast", "state": "running", "total": 312, "done": 40, "failed": 0,
+    "waiting": 270, "skipped": 0, "size": None, "paused_reason": None, "created_at": "",
+}  # fmt: skip
+
+
+def dashboard_with(runs, *steps):
+    answers = {
+        "/api/dashboard": {**ANSWERS["/api/dashboard"], "backlogs": runs},
+        "DELETE /api/podcasts/backlog/7": {"ok": True},
+    }
+    return page("/dashboard", answers=answers, steps=[*steps])
+
+
+@needs_node
+def test_the_dashboard_shows_the_progress_of_a_run():
+    out = dashboard_with([RUN], {"read": "#dash-backlog-list"}, {"read": "#dash-backlog-box"})
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#dash-backlog-box"]["hidden"] is False
+    text = out["reads"]["#dash-backlog-list"]["text"]
+    assert "Back catalogue: 40 of 312" in text
+    assert "270 not queued yet" in text
+    assert "running" in text
+
+
+@needs_node
+def test_without_runs_the_section_stays_away():
+    out = dashboard_with([], {"read": "#dash-backlog-box"})
+    assert out["reads"]["#dash-backlog-box"]["hidden"] is True
+
+
+@needs_node
+def test_a_run_with_failures_a_pause_and_a_finish_say_so():
+    paused = {**RUN, "state": "paused", "failed": 2, "skipped": 5}
+    out = dashboard_with([paused], {"read": "#dash-backlog-list"})
+    text = out["reads"]["#dash-backlog-list"]["text"]
+    assert "paused: not enough free space, it continues by itself" in text
+    assert "2 failed" in text
+    assert "5 already there" in text
+    done = {**RUN, "state": "done", "done": 312, "waiting": 0}
+    out = dashboard_with([done], {"read": "#dash-backlog-list"})
+    assert "finished" in out["reads"]["#dash-backlog-list"]["text"]
+
+
+@needs_node
+def test_a_run_can_be_stopped_from_the_dashboard():
+    out = dashboard_with(
+        [RUN], {"click": "#dash-backlog-list button"}, {"read": "#dash-backlog-list"}
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["DELETE", "/api/podcasts/backlog/7"] in out["fetched"]
+
+
+@needs_node
+def test_a_finished_run_has_no_stop_button():
+    done = {**RUN, "state": "done"}
+    out = dashboard_with([done], {"read": "#dash-backlog-list"})
+    assert ["DELETE", "/api/podcasts/backlog/7"] not in out["fetched"]
+    assert out["errors"] == []

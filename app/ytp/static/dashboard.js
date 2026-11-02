@@ -180,6 +180,48 @@
       return li;
     }
 
+    /* "All episodes" of a podcast (#45): how far each run is. */
+    function backlogRow(run) {
+      var li = el("li", "job" + (run.failed ? " job-failed" : run.state === "done" ? " job-done" : ""));
+      var top = el("div", "job-top");
+      top.appendChild(el("span", "job-name", run.folder));
+      top.appendChild(el("span", "job-status", t("dash.backlog_" + run.state)));
+      li.appendChild(top);
+      li.appendChild(el("div", "job-meta", t("dash.backlog_line", { done: run.done, total: run.total })));
+      var bar = el("progress");
+      bar.max = run.total || 1;
+      bar.value = run.done;
+      bar.setAttribute("aria-label", t("dash.backlog_line", { done: run.done, total: run.total }));
+      li.appendChild(bar);
+      var notes = [];
+      if (run.waiting && run.state !== "done") notes.push(t("dash.backlog_waiting", { n: run.waiting }));
+      if (run.skipped) notes.push(t("dash.backlog_skipped", { n: run.skipped }));
+      if (run.failed) notes.push(t("dash.backlog_failed", { n: run.failed }));
+      if (notes.length) li.appendChild(el("span", "job-percent", notes.join(" \u00b7 ")));
+      if (run.state === "running" || run.state === "paused") {
+        var key = "backlog:" + run.id;
+        var button = el("button", "ghost small", t(busy[key] ? "dash.backlog_stopping" : "dash.backlog_stop"));
+        button.type = "button";
+        button.disabled = !!busy[key];
+        button.addEventListener("click", function () {
+          busy[key] = true;
+          renderDashboard();
+          ctx.request("DELETE", "/api/podcasts/backlog/" + run.id, null)
+            .catch(function () { return null; })
+            .then(function () { delete busy[key]; refreshDashboard(); });
+        });
+        li.appendChild(button);
+      }
+      return li;
+    }
+
+    function renderBacklogs(runs) {
+      var list = $("dash-backlog-list");
+      list.textContent = "";
+      (runs || []).forEach(function (run) { list.appendChild(backlogRow(run)); });
+      $("dash-backlog-box").hidden = !(runs && runs.length);
+    }
+
     function renderVpn(vpn) {
       var info = L.vpnView(vpn.current);
       var now = $("dash-vpn-now");
@@ -227,6 +269,7 @@
       recent.textContent = "";
       dashData.recent.forEach(function (job) { recent.appendChild(recentRow(job)); });
       $("dash-recent-empty").hidden = dashData.recent.length > 0;
+      renderBacklogs(dashData.backlogs);
       renderVpn(dashData.vpn);
       focusVpn();
       renderDeploy(dashData.deploy);

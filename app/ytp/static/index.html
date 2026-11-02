@@ -184,6 +184,12 @@
           <input id="pc-backfill" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="pc-backfill-error">
           <p id="pc-backfill-error" class="error" role="alert"></p>
         </div>
+        <label class="checkbox" for="pc-all">
+          <input id="pc-all" type="checkbox">
+          <span data-i18n="pc.all"></span>
+        </label>
+        <p id="pc-all-note" class="note"></p>
+        <p id="pc-all-confirm" class="banner" role="alert" hidden></p>
       </section>
 
       <section id="magnet-fields" class="panel" hidden>
@@ -291,6 +297,11 @@
         <h2 id="dash-active-title" class="jobs-title" data-i18n="dash.active"></h2>
         <ul id="dash-active-list" class="job-list"></ul>
         <p id="dash-active-empty" class="note" data-i18n="dash.active_empty" hidden></p>
+      </section>
+
+      <section id="dash-backlog-box" class="jobs" aria-labelledby="dash-backlog-title" hidden>
+        <h2 id="dash-backlog-title" class="jobs-title" data-i18n="dash.backlog"></h2>
+        <ul id="dash-backlog-list" class="job-list"></ul>
       </section>
 
       <section class="jobs" aria-labelledby="dash-recent-title">
@@ -493,6 +504,34 @@
     "pc.already": "Der Podcast „{name}“ war schon abonniert.",
     "pc.sub_failed": "Das Abonnieren hat nicht geklappt.",
     "pc.nothing": "Bitte eine Folge wählen oder den Podcast abonnieren.",
+    "pc.all": "Alle Folgen (den ganzen Katalog)",
+    "pc.all_note": "Im Feed: {n} Folgen zum Laden{size}{skipped}.",
+    "pc.all_size": ", etwa {size}",
+    "pc.all_size_unknown": ", Größe unbekannt",
+    "pc.all_skipped": "; {n} schon vorhanden oder im System und werden übersprungen",
+    "pc.all_none": "Alles aus diesem Feed ist schon vorhanden oder im System.",
+    "pc.all_confirm": "Das lädt {n} Folgen{size}, die neuesten zuerst, immer ein paar auf einmal. Zum Starten noch einmal auf „Hinzufügen“ drücken.",
+    "pc.all_nospace": "Auf der Medien-Platte ist dafür nicht genug Platz frei ({n} Folgen{size}). Bitte erst Platz schaffen.",
+    "pc.all_started": "Katalog gestartet: {n} Folgen werden nach und nach geladen. Den Fortschritt zeigt das Dashboard.",
+    "pc.all_joined": "Für diesen Podcast läuft schon ein Katalog-Download; du bist dabei und bekommst die Folgen auch.",
+    "pc.all_nothing": "Nichts zu laden: alle Folgen sind schon vorhanden oder im System.",
+    "pc.all_failed": "Der Katalog-Download konnte nicht gestartet werden.",
+    "kind.not_enough_space": "Auf der Medien-Platte ist nicht genug Platz frei.",
+    "dash.backlog": "Ganzer Katalog",
+    "dash.backlog_line": "Katalog: {done} von {total}",
+    "dash.backlog_waiting": "{n} noch nicht eingereiht",
+    "dash.backlog_failed": "{n} fehlgeschlagen (unten „Nochmal versuchen“)",
+    "dash.backlog_skipped": "{n} schon vorhanden",
+    "dash.backlog_running": "läuft",
+    "dash.backlog_paused": "angehalten: zu wenig freier Platz, es geht von selbst weiter",
+    "dash.backlog_done": "fertig",
+    "dash.backlog_cancelled": "gestoppt",
+    "dash.backlog_stop": "Stoppen",
+    "dash.backlog_stopping": "Stoppt …",
+    "alert.backlog_paused.title": "Der Katalog-Download ist angehalten",
+    "alert.backlog_paused.what": "Der Katalog von „{podcast}“ ({done} von {total} Folgen) wurde angehalten: auf der Medien-Platte sind nur noch etwa {free_gb} GB frei.",
+    "alert.backlog_paused.did": "Es werden keine weiteren Folgen eingereiht. Schon laufende Downloads werden fertig.",
+    "alert.backlog_paused.todo": "Platz schaffen (alte Downloads oder Medien löschen) oder die Platte vergrößern. Sobald genug frei ist, geht der Katalog von selbst weiter.",
     "kind.feed_invalid": "Das ist keine gültige Feed-Adresse.",
     "kind.feed_blocked": "Diese Adresse führt in ein privates Netz und wird nicht abgerufen.",
     "kind.feed_not_found": "Unter dieser Adresse gibt es keinen Feed.",
@@ -881,6 +920,34 @@
     "pc.already": "The podcast \"{name}\" was already subscribed.",
     "pc.sub_failed": "Subscribing did not work.",
     "pc.nothing": "Please choose an episode or subscribe to the podcast.",
+    "pc.all": "All episodes (the whole back catalogue)",
+    "pc.all_note": "In the feed: {n} episodes to download{size}{skipped}.",
+    "pc.all_size": ", about {size}",
+    "pc.all_size_unknown": ", size unknown",
+    "pc.all_skipped": "; {n} already there or in the system and skipped",
+    "pc.all_none": "Everything in this feed is already there or in the system.",
+    "pc.all_confirm": "This downloads {n} episodes{size}, newest first, a few at a time. Press \"Add\" once more to start.",
+    "pc.all_nospace": "There is not enough free space on the media drive for that ({n} episodes{size}). Please free some space first.",
+    "pc.all_started": "Back catalogue started: {n} episodes are downloaded bit by bit. The dashboard shows the progress.",
+    "pc.all_joined": "A back catalogue download of this podcast is already running; you are part of it and get the episodes too.",
+    "pc.all_nothing": "Nothing to download: every episode is already there or in the system.",
+    "pc.all_failed": "The back catalogue could not be started.",
+    "kind.not_enough_space": "There is not enough free space on the media drive.",
+    "dash.backlog": "Whole back catalogue",
+    "dash.backlog_line": "Back catalogue: {done} of {total}",
+    "dash.backlog_waiting": "{n} not queued yet",
+    "dash.backlog_failed": "{n} failed (\"Try again\" below)",
+    "dash.backlog_skipped": "{n} already there",
+    "dash.backlog_running": "running",
+    "dash.backlog_paused": "paused: not enough free space, it continues by itself",
+    "dash.backlog_done": "finished",
+    "dash.backlog_cancelled": "stopped",
+    "dash.backlog_stop": "Stop",
+    "dash.backlog_stopping": "Stopping …",
+    "alert.backlog_paused.title": "The back catalogue download is paused",
+    "alert.backlog_paused.what": "The back catalogue of \"{podcast}\" ({done} of {total} episodes) was paused: only about {free_gb} GB are free on the media drive.",
+    "alert.backlog_paused.did": "No more episodes are queued. Downloads that are already running finish.",
+    "alert.backlog_paused.todo": "Free some space (delete old downloads or media) or enlarge the drive. As soon as there is enough room the back catalogue continues by itself.",
     "kind.feed_invalid": "This is not a valid feed address.",
     "kind.feed_blocked": "This address leads into a private network and is not fetched.",
     "kind.feed_not_found": "There is no feed at this address.",

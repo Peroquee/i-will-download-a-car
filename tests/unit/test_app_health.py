@@ -86,6 +86,8 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/subscriptions/{subscription_id}/poll",  # check now (#27)
         "/api/podcasts/probe",  # podcasts (#34)
         "/api/podcasts/episode",
+        "/api/podcasts/backlog",
+        "/api/podcasts/backlog/{backlog_id}",
         "/api/podcasts",
         "/api/podcasts/{subscription_id}",
         "/api/podcasts/{subscription_id}/poll",

@@ -29,6 +29,9 @@ from .jobs_api import TorrentProgress
 from .logging_setup import configure_logging
 from .monitor import MONITOR_JOB_ID, MONITOR_SECONDS, AlertMonitor
 from .organizer import FileOrganizer
+from .podcast_backlog import FEEDER_JOB_ID as BACKLOG_JOB_ID
+from .podcast_backlog import FEEDER_SECONDS as BACKLOG_SECONDS
+from .podcast_backlog import BacklogFeeder
 from .podcast_jobs import POLL_JOB_ID as PODCAST_POLL_JOB_ID
 from .podcast_jobs import PodcastPoller, PodcastWorker
 from .podcasts import PodcastFeedClient
@@ -112,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reconciler = None
     app.state.poller = None
     app.state.podcast_poller = None
+    app.state.backlog_feeder = None
     app.state.monitor = None
     if app.state.db is not None:
         app.state.scheduler = AppScheduler(app.state.db)
@@ -153,6 +157,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.podcast_feeds,
             app.state.podcast_worker,
             poll_minutes=settings.podcast_poll_minutes or 240,
+        )
+        # "All episodes" of a feed (#45): a few at a time into the queue, only while there is room.
+        app.state.backlog_feeder = BacklogFeeder(app.state.db, app.state.podcast_worker, settings)
+        app.state.scheduler.add_interval_job(
+            app.state.backlog_feeder.tick, job_id=BACKLOG_JOB_ID, seconds=BACKLOG_SECONDS
         )
         if settings.podcast_poll_minutes > 0:
             app.state.scheduler.add_interval_job(
@@ -237,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.podcast_feeds = None
     app.state.podcast_worker = None
     app.state.podcast_poller = None
+    app.state.backlog_feeder = None
     app.state.monitor = None
     app.state.watchdog_status = None
     app.state.youtube = None

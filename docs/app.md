@@ -399,7 +399,9 @@ Not part of this form: the how-to guide (#33).
 A third type, **Podcast**, is picked automatically for any web address that is not YouTube. On
 paste the page asks `POST /api/podcasts/probe` and fills the folder name and a list of episodes
 (newest first); *Add* sends `POST /api/podcasts/episode` for the chosen episode and/or
-`POST /api/podcasts` for the subscription, one request each, and reports both results. The
+`POST /api/podcasts` for the subscription and, with **All episodes**, `POST /api/podcasts/backlog`
+(after a question that says how many episodes and how much space, answered by pressing *Add* again),
+one request each, and reports the results. The
 subscription list shows channels and podcasts together (`GET /api/subscriptions` and
 `GET /api/podcasts`). Episode titles come from a stranger's feed: they are set with `textContent`
 only (a test fails on `innerHTML`). The API, the file layout and the fetcher's safety rules are in
