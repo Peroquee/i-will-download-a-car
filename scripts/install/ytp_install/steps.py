@@ -267,11 +267,30 @@ def qbit_has_login(root: Path) -> bool:
         return False
 
 
+def admin_hash_set(env: dict[str, str]) -> bool:
+    """Has the first admin been made (a scrypt hash in .env, not the template's placeholder)?"""
+    return env.get("APP_ADMIN_PASSWORD_HASH", PLACEHOLDER).startswith("scrypt:")
+
+
+def set_admin(ctx: Context, user: str, password: str) -> None:
+    """The app's first admin: `scripts/app/set_admin.py` writes the scrypt hash into .env."""
+    need(
+        ctx.runner.run(
+            [ctx.script("app", "set_admin.py"), "--user", user, "--env-file", ".env",
+             "--password-stdin"],
+            input_text=password + "\n",
+        ),
+        "step.logins.hint",
+    )  # fmt: skip
+
+
 def step_logins(ctx: Context) -> None:
     a = ctx.answers
     env = parse_env(ctx.env_path.read_text(encoding="utf-8")) if ctx.env_path.exists() else {}
     hash_set = env.get("PROXY_PASSWORD_HASH", PLACEHOLDER) != PLACEHOLDER
     if a.web_password:
+        # One login, two doors: the proxy's own for qBittorrent's port, and the app's first admin
+        # account (#44) for the web page. The same name and password, set by two scripts.
         need(
             ctx.runner.run(
                 [ctx.script("proxy", "set_password.py"), "--user", a.web_user,
@@ -280,7 +299,8 @@ def step_logins(ctx: Context) -> None:
             ),
             "step.logins.hint",
         )  # fmt: skip
-    elif not hash_set and not ctx.dry_run:
+        set_admin(ctx, a.web_user, a.web_password)
+    elif not (hash_set and admin_hash_set(env)) and not ctx.dry_run:
         raise StepError("step.logins.hint", "no web password given")
 
     changed = ctx.previous is not None and ctx.previous.qbit_password != a.qbit_password

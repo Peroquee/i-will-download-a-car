@@ -70,6 +70,7 @@ def test_the_public_routes_are_the_page_its_files_and_the_login():
     assert public == {
         ("GET", "/"),
         ("GET", "/dashboard"),
+        ("GET", "/accounts"),
         ("GET", "/health"),
         ("GET", "/api/version"),
         ("POST", "/reload-needed"),

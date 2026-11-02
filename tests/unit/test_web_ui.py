@@ -341,6 +341,9 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "yt.album",
         "nav.dashboard",  # the same word in both languages
         "vpn.details",
+        "login.user",  # "Name"
+        "accounts.name",
+        "role.admin",  # "Administrator"
     }, same
 
 
@@ -1035,6 +1038,7 @@ def test_speed_is_empty_when_nothing_moves():
 @pytest.mark.parametrize(
     ("path", "view"),
     [("/dashboard", "dashboard"), ("/dashboard/", "dashboard"), ("/", "input"),
+     ("/accounts", "accounts"), ("/accounts/", "accounts"), ("/accountsx", "input"),
      ("/dashboardx", "input"), ("", "input"), (None, "input")],
 )  # fmt: skip
 def test_the_path_decides_the_view(path, view):

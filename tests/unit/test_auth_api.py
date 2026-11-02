@@ -539,3 +539,26 @@ def test_no_session_token_reaches_a_log_line(app_client, caplog):
     browser.post("/api/auth/logout")
     assert token not in caplog.text
     assert accounts.token_hash(token) not in caplog.text
+
+
+# --- an installation without any account ---------------------------------------------------------
+
+
+def test_without_any_account_me_says_that_the_setup_is_missing(tmp_path, capsys):
+    with running(tmp_path, APP_ADMIN_PASSWORD_HASH="") as bare:
+        response = client_for(bare, None).get("/api/auth/me")
+        assert response.status_code == 401
+        assert response.json() == {"detail": "login required", "setup": True}
+        assert login(client_for(bare, None)).status_code == 401  # and nobody gets in
+    assert "make admin-password" in capsys.readouterr().out, "the app logs how to fix it"
+
+
+def test_with_an_account_me_does_not_say_so(app_client):
+    assert client_for(app_client, None).get("/api/auth/me").json() == {"detail": "login required"}
+
+
+def test_the_page_routes_are_public_so_the_login_can_be_shown(app_client):
+    for path in ("/", "/dashboard", "/accounts"):
+        response = client_for(app_client, None).get(path)
+        assert response.status_code == 200
+        assert 'id="login-form"' in response.text

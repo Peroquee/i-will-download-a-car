@@ -253,7 +253,7 @@ def test_changing_settings_to_no_removes_the_timer(repo, tmp_path, ovpn):
     rules = [
         ("1 = Change settings", "1"),
         ("Path of the .ovpn file", ""),
-        ("Change the web page password", "n"),
+        ("Change the administrator", "n"),
         ("Switch on automatic updates", "n"),
     ]
     term = FakeTerminal(rules)
@@ -273,7 +273,7 @@ def test_changing_other_settings_keeps_the_remote_as_the_default(repo, tmp_path,
     rules = [
         ("1 = Change settings", "1"),
         ("Path of the .ovpn file", ""),
-        ("Change the web page password", "n"),
+        ("Change the administrator", "n"),
         ("Switch on automatic updates", "y"),
         ("Address of the repository", ""),
         ("Access token", ""),

@@ -81,6 +81,7 @@
     }
 
     function refreshAlerts() {
+      if (ctx.isAdmin && !ctx.isAdmin()) return Promise.resolve();   // the alerts are the admin's (#44)
       return ctx.getJson("/api/alerts?limit=" + ALERTS_LIMIT).then(function (data) {
         alertsData = data;
         alertsFailed = false;
@@ -190,14 +191,15 @@
       $("dash-vpn-explain").textContent = info.view === "ok" ? t("dash.vpn_explain_ok") : has(explain) ? t(explain) : "";
       var list = $("dash-vpn-list");
       list.textContent = "";
-      vpn.history.forEach(function (event) {
+      var history = vpn.history || [];   // a user's answer carries none
+      history.forEach(function (event) {
         var key = "vpn." + event.condition;
         var line = (ctx.timeText(event.time) || event.time) + " · " + (has(key) ? t(key) : event.condition);
         if (event.paused) line += " · " + t("dash.paused");
         if (event.reason) line += " · " + event.reason;
         list.appendChild(el("li", "dash-event", line));
       });
-      $("dash-vpn-empty").hidden = vpn.history.length > 0;
+      $("dash-vpn-empty").hidden = history.length > 0;
     }
 
     function renderDeploy(deploy) {
@@ -307,10 +309,12 @@
     /* The tab of the page you are on (the subscriptions are a part of the input page). */
     function renderNav() {
       var onDashboard = view === "dashboard";
-      var subs = !onDashboard && root.location.hash === "#subscriptions";
-      setCurrent($("nav-input"), !onDashboard && !subs);
+      var onAccounts = view === "accounts";
+      var subs = view === "input" && root.location.hash === "#subscriptions";
+      setCurrent($("nav-input"), view === "input" && !subs);
       setCurrent($("nav-dashboard"), onDashboard);
       setCurrent($("nav-subs"), subs);
+      setCurrent($("nav-accounts"), onAccounts);
     }
 
     /* The VPN bar links to /dashboard#vpn: bring that part into view and frame it. */

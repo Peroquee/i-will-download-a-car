@@ -363,3 +363,13 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
    channel and title fields below stay open for typing. */
 .probe-status:empty { display: none; }
 .probe-status.probe-failed { color: var(--bad); font-weight: 600; }
+
+/* Who may see what (#44). The script sets body[data-auth] (unknown, out, in) and body[data-role];
+   the server decides all the same, this only keeps the page tidy. */
+body:not([data-auth="in"]) [data-auth-only] { display: none !important; }
+body:not([data-auth="out"]) [data-guest-only] { display: none !important; }
+body:not([data-role="admin"]) [data-admin-only] { display: none !important; }
+.account-chip { max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.login { max-width: 26em; margin: 1.5rem auto; }
+.account { max-width: 28em; }
+.account h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }

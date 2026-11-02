@@ -249,22 +249,29 @@ TEXTS: dict[str, dict[str, str]] = {
     "web_user.why": {
         "de": (
             "Die Webseite ist nur aus deinem Heimnetz erreichbar und verlangt trotzdem eine Anmeldung.\n"
+            "Das ist dein Administrator-Konto: weitere Konten (für Familie oder Freunde) legst du später\n"
+            "auf der Webseite an. Dieselben Zugangsdaten gelten für die Oberfläche von qBittorrent.\n"
             "Das Passwort wird nur als Prüfsumme (Hash) gespeichert, nie im Klartext."
         ),
         "en": (
             "The web page can only be reached from your home network and still asks for a login.\n"
+            "This is your administrator account: you create more accounts (for family or friends) later\n"
+            "on the web page. The same login is used for qBittorrent's own interface.\n"
             "The password is only stored as a hash, never in plain text."
         ),
     },
-    "web_user.ask": {"de": "Benutzername für die Webseite", "en": "User name for the web page"},
+    "web_user.ask": {
+        "de": "Benutzername des Administrators",
+        "en": "User name of the administrator",
+    },
     "web_password.ask": {
-        "de": "Passwort für die Webseite (mindestens {n} Zeichen, unsichtbar)",
-        "en": "Password for the web page (at least {n} characters, invisible)",
+        "de": "Passwort des Administrators (mindestens {n} Zeichen, unsichtbar)",
+        "en": "Password of the administrator (at least {n} characters, invisible)",
     },
     "web_password2.ask": {"de": "Passwort wiederholen", "en": "Repeat the password"},
     "web_password_change.ask": {
-        "de": "Soll das Passwort der Webseite geändert werden?",
-        "en": "Change the web page password?",
+        "de": "Soll das Passwort des Administrators geändert werden?",
+        "en": "Change the administrator's password?",
     },
     "qbit_auto.why": {
         "de": (
@@ -512,8 +519,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "ATTENTION: a value is still missing for: {names} (file .env).",
     },
     "checks.proxy_password": {
-        "de": "Zum Testen der Anmeldung: Passwort der Webseite noch einmal eingeben (unsichtbar, Enter = Test überspringen)",
-        "en": "To test the login: type the web page password once more (invisible, Enter = skip the test)",
+        "de": "Zum Testen der Anmeldung an qBittorrents Port: Passwort noch einmal eingeben (unsichtbar, Enter = Test überspringen)",
+        "en": "To test the login on qBittorrent's port: type the password once more (invisible, Enter = skip the test)",
     },
     "checks.jellyfin_unreachable": {
         "de": "Hinweis: Jellyfin unter {url} antwortet nicht. Prüfe die Adresse und ob Jellyfin läuft.",
@@ -540,6 +547,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "de": "Die neue Version konnte nicht geholt werden (git pull). Hast du Dateien selbst geändert? `git status` zeigt es.",
         "en": "The new version could not be fetched (git pull). Did you change files yourself? `git status` shows it.",
     },
+    "update.admin": {
+        "de": (
+            'Neu: die Webseite hat jetzt eigene Konten. Dein bisheriger Zugang "{user}" wird das erste\n'
+            "Administrator-Konto. Dafür wird einmal ein Passwort gebraucht (das alte ist nur als Prüfsumme\n"
+            "gespeichert). Es darf dasselbe wie bisher sein."
+        ),
+        "en": (
+            'New: the web page now has accounts of its own. Your existing login "{user}" becomes the first\n'
+            "administrator account. A password is needed once for that (the old one is only stored as a\n"
+            "hash). It may be the same as before."
+        ),
+    },
+    "update.admin_password.ask": {
+        "de": "Passwort des Administrators (mindestens {n} Zeichen, unsichtbar)",
+        "en": "Password of the administrator (at least {n} characters, invisible)",
+    },
     "update.done": {"de": "Aktualisierung abgeschlossen.", "en": "Update finished."},
     "state.title": {"de": "Zustand", "en": "State"},
     "done.title": {"de": "Fertig!", "en": "Done!"},
@@ -548,8 +571,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Test run finished: nothing was changed. Without --dry-run you start the real installation.",
     },
     "done.open": {
-        "de": 'Öffne im Browser:  {url}\nund melde dich an mit dem Benutzer "{user}" und dem Passwort, das du eben gewählt hast.',
-        "en": 'Open in your browser:  {url}\nand log in with the user "{user}" and the password you just chose.',
+        "de": 'Öffne im Browser:  {url}\nund melde dich an mit dem Benutzer "{user}" und dem Passwort, das du eben gewählt hast.\nWeitere Konten legst du dort unter „Konten“ an.',
+        "en": 'Open in your browser:  {url}\nand log in with the user "{user}" and the password you just chose.\nYou create more accounts there under "Accounts".',
     },
     "done.qbit": {
         "de": "Die Oberfläche von qBittorrent (selten nötig): {url}",

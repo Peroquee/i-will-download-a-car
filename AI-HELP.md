@@ -87,7 +87,7 @@ Other commands: `./install.sh --dry-run` (shows what it would do, changes nothin
 | Country of the VPN server (built-in providers) | where to connect | `VPN_SERVER_COUNTRIES` |
 | Folder for the media | where everything is stored; downloads and library must be on one disk | `DATA_ROOT` |
 | Folder names (Filme, Serien, Hörbücher, Musik, Podcasts, Youtube) | the folders Jellyfin reads | `MEDIA_DIR_MOVIES`, `MEDIA_DIR_SERIES`, `MEDIA_DIR_AUDIOBOOKS`, `MEDIA_DIR_MUSIC`, `MEDIA_DIR_PODCASTS`, `MEDIA_DIR_YOUTUBE` |
-| User name and password for the web page (hidden, twice) | the login; the password is stored only as a hash | `PROXY_USER`, `PROXY_PASSWORD_HASH` |
+| User name and password of the administrator (hidden, twice) | the first account of the web page (more accounts are made there under "Accounts"); the same login protects qBittorrent's own port; passwords are stored only as hashes | `APP_ADMIN_USER`, `APP_ADMIN_PASSWORD_HASH`, `PROXY_USER`, `PROXY_PASSWORD_HASH` |
 | qBittorrent password: generate automatically? | the torrent client's own login; the user never needs it | `QBIT_USER`, `QBIT_PASSWORD` |
 | This computer's address and the home network (detected) | the web page answers only there | `PROXY_BIND`, `LAN_SUBNET` |
 | Jellyfin address and API key (optional) | so Jellyfin rescans after a download | `JELLYFIN_URL`, `JELLYFIN_API_KEY` |
@@ -144,7 +144,7 @@ in **Jellyfin** creates one library per folder (type *Music* also for podcasts).
 - **The installer was stopped or failed**: run `./install.sh` again; finished steps are skipped.
 - **Disk full**: `df -h` shows it. Media needs a lot of space; the downloads folder holds unfinished
   files.
-- **Updating**: `./update.sh` (backup, new version, rebuild, check). Backups: `sudo make backup`
+- **Updating**: `./update.sh` (backup, new version, rebuild, check). An installation from before the accounts is asked **once** for an administrator password (the old login name is kept); if you update by hand (`git pull` and `docker compose up -d`) or automatically, the page shows "the administrator account has not been set up yet" until you run `make admin-password` and then `docker compose up -d` (docs/accounts.md). Backups: `sudo make backup`
   (folder `.youtube-premium-backups` inside the media folder, e.g. `/data/.youtube-premium-backups`; it contains secrets, keep it private).
 
 ## Where the documentation is

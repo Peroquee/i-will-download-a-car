@@ -2,10 +2,15 @@
 
     python ui_checks.py http://127.0.0.1:PORT
 
-A real headless Chromium against the real app: the form creates a job, the navigation and the VPN
-bar lead where they say, and the failure modes of issue #43 (scripts that did not load, an
-update while the page is open) end in a clear message instead of a silent native submit.
-Prints one line per check and exits 1 at the first failure.
+A real headless Chromium against the real app: the sign-in (#44: a visitor sees only the form, a
+wrong password is refused, the cookie is HttpOnly and SameSite=Strict, logout ends the session,
+an admin and a user see different tabs), the form creates a job, the navigation and the VPN bar
+lead where they say, and the failure modes of issue #43 (scripts that did not load, an update
+while the page is open) end in a clear message instead of a silent native submit.
+Each check prints its name; the run goes on after a failure and exits 1 at the end.
+
+The admin (YTP_ADMIN / YTP_ADMIN_PASSWORD) exists when the app starts; the user "alice" is made
+by the accounts page in a check below.
 """
 
 from __future__ import annotations
@@ -19,6 +24,10 @@ from playwright.sync_api import expect, sync_playwright
 
 BASE = sys.argv[1].rstrip("/")
 LINK = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+ADMIN = os.environ.get("YTP_ADMIN", "boss")
+ADMIN_PASSWORD = os.environ.get("YTP_ADMIN_PASSWORD", "a long test password")  # a test value
+USER = "alice"
+USER_PASSWORD = "alice has a long password"  # a test value
 
 
 def step(text: str) -> None:
@@ -79,6 +88,26 @@ OVERFLOW_PROBE = """
 CHECKS = []
 
 
+def fresh_page(ctx, **options):
+    """A page in a new browser context (own cookies), not signed in. Not watched: a visitor's
+    request for /api/auth/me answers 401, which the browser logs as a console error."""
+    return ctx.browser.new_context(locale="en-US", **options).new_page()
+
+
+def sign_in(page, name, password):
+    page.goto(BASE + "/")
+    page.fill("#login-user", name)
+    page.fill("#login-password", password)
+    page.click("#login-submit")
+    expect(page.locator("#form")).to_be_visible(timeout=20000)
+
+
+def signed_in(ctx, name=None, password=None, **options):
+    page = fresh_page(ctx, **options)
+    sign_in(page, name or ADMIN, password or ADMIN_PASSWORD)
+    return page
+
+
 def check(function):
     """Register a check. Each one prints its name BEFORE it runs, and on failure the exception's
     type and message (never an empty line); the run goes on with the next check."""
@@ -87,10 +116,85 @@ def check(function):
 
 
 @check
+def a_visitor_sees_only_the_sign_in_form_and_nothing_is_asked_of_the_app(ctx):
+    page = fresh_page(ctx)
+    asked = []
+    page.on("request", lambda r: asked.append(r.url) if "/api/" in r.url else None)
+    page.goto(BASE + "/")
+    expect(page.locator("#login-form")).to_be_visible()
+    for hidden in ("#form", "#topnav", "#jobs-list", "#subs-list", "#vpn", "#account-open"):
+        expect(page.locator(hidden)).to_be_hidden()
+    page.wait_for_timeout(1500)
+    others = [u for u in asked if not u.endswith("/api/auth/me") and not u.endswith("/api/version")]
+    assert not others, f"a visitor's page asked the app for: {others}"
+    for path in ("/dashboard", "/accounts"):
+        page.goto(BASE + path)
+        expect(page.locator("#login-form")).to_be_visible()
+        expect(page.locator("#dashboard")).to_be_hidden()
+        expect(page.locator("#accounts")).to_be_hidden()
+
+
+@check
+def a_wrong_password_is_refused_with_a_message_and_no_cookie(ctx):
+    page = fresh_page(ctx)
+    page.goto(BASE + "/")
+    page.fill("#login-user", ADMIN)
+    page.fill("#login-password", "not the password!!")
+    page.click("#login-submit")
+    expect(page.locator("#login-error")).to_have_text("Wrong name or password.")
+    expect(page.locator("#login-form")).to_be_visible()
+    assert not [c for c in page.context.cookies() if c["name"] == "ytp_session"]
+
+
+@check
+def too_many_wrong_passwords_are_braked(ctx):
+    page = fresh_page(ctx)
+    page.goto(BASE + "/")
+    for _ in range(5):
+        page.fill("#login-user", "mallory")
+        page.fill("#login-password", "guessing a password")
+        page.click("#login-submit")
+        expect(page.locator("#login-error")).to_have_text("Wrong name or password.")
+        page.fill("#login-password", "")
+    page.fill("#login-user", "mallory")
+    page.fill("#login-password", "guessing a password")
+    page.click("#login-submit")
+    expect(page.locator("#login-error")).to_contain_text("Too many attempts. Please wait")
+
+
+@check
+def the_admin_signs_in_and_the_cookie_is_httponly_and_samesite_strict(ctx):
+    page = fresh_page(ctx)
+    sign_in(page, ADMIN, ADMIN_PASSWORD)
+    expect(page.locator("#login-form")).to_be_hidden()
+    expect(page.locator("#account-open")).to_have_text(ADMIN)
+    (cookie,) = [c for c in page.context.cookies() if c["name"] == "ytp_session"]
+    assert cookie["httpOnly"] is True, cookie
+    assert cookie["sameSite"] == "Strict", cookie
+    assert "ytp_session" not in page.evaluate("document.cookie"), "a script can read the cookie"
+    assert len(cookie["value"]) >= 40
+
+
+@check
+def logout_ends_the_session_on_the_server_so_a_copied_cookie_is_dead(ctx):
+    page = signed_in(ctx)
+    old = next(c["value"] for c in page.context.cookies() if c["name"] == "ytp_session")
+    thief = fresh_page(ctx)
+    thief.context.add_cookies([{"name": "ytp_session", "value": old, "url": BASE}])
+    assert thief.request.get(BASE + "/api/auth/me").status == 200
+    page.click("#account-open")
+    page.click("#account-logout")
+    expect(page.locator("#login-form")).to_be_visible()
+    assert thief.request.get(BASE + "/api/auth/me").status == 401, "logout must end the session"
+    assert not [c for c in page.context.cookies() if c["name"] == "ytp_session" and c["value"]]
+
+
+@check
 def scripts_start_and_urls_are_versioned(ctx):
     page = ctx.page
     page.goto(BASE + "/")
     expect(page.locator("#js-warning")).to_be_hidden()
+    expect(page.locator("#form")).to_be_visible()
     sources = page.eval_on_selector_all("script[src]", "els => els.map(e => e.src)")
     assert sources, "no script on the page"
     assert all(re.search(r"\?v=[0-9a-f]{12}$", s) for s in sources), f"unversioned: {sources}"
@@ -98,8 +202,8 @@ def scripts_start_and_urls_are_versioned(ctx):
 
 @check
 def navigation_reads_in_order(ctx):
-    expect(ctx.page.locator("#topnav > *")).to_have_text(
-        ["Input", "Dashboard", "Subscriptions", "How to"]
+    expect(ctx.page.locator("#topnav > *:visible")).to_have_text(
+        ["Input", "Dashboard", "Subscriptions", "Accounts", "How to"]
     )
     expect(ctx.page.locator("#nav-input")).to_have_attribute("aria-current", "page")
 
@@ -157,9 +261,13 @@ def subscriptions_scrolls_and_the_guide_opens_and_closes(ctx):
 
 @check
 def on_a_phone_the_navigation_is_touchable_and_the_page_does_not_scroll_sideways(ctx):
-    phone = ctx.browser.new_context(
-        locale="en-US", viewport={"width": 360, "height": 740}, has_touch=True
-    ).new_page()
+    options = {"viewport": {"width": 360, "height": 740}, "has_touch": True}
+    visitor = fresh_page(ctx, **options)
+    visitor.goto(BASE + "/")
+    expect(visitor.locator("#login-form")).to_be_visible()
+    probe = visitor.evaluate(OVERFLOW_PROBE)
+    assert probe["scrollWidth"] <= probe["inner"] + 1, f"the sign-in scrolls sideways: {probe}"
+    phone = signed_in(ctx, **options)
     watch(phone, "phone", ctx.problems)
     phone.goto(BASE + "/")
     for item in phone.locator("#topnav > *").all():
@@ -168,7 +276,7 @@ def on_a_phone_the_navigation_is_touchable_and_the_page_does_not_scroll_sideways
         assert box["height"] >= 44, f"too small to touch: {box}"
     phone.locator("#nav-dashboard").tap()
     expect(phone).to_have_url(re.compile(r"/dashboard$"))
-    for path in ("/", "/dashboard"):
+    for path in ("/", "/dashboard", "/accounts"):
         phone.goto(BASE + path)
         phone.wait_for_load_state()
         probe = phone.evaluate(OVERFLOW_PROBE)
@@ -179,23 +287,25 @@ def on_a_phone_the_navigation_is_touchable_and_the_page_does_not_scroll_sideways
 
 @check
 def without_its_scripts_the_form_warns_and_ends_on_the_reload_page(ctx):
-    broken = ctx.browser.new_context(locale="en-US").new_page()
+    broken = fresh_page(ctx)
     broken.route("**/static/app.js*", lambda route: route.abort())
     broken.goto(BASE + "/")
     expect(broken.locator("#js-warning")).to_be_visible()
-    broken.fill("#link", LINK)
-    broken.press("#link", "Enter")
+    # Without its scripts the page does not know who is signed in, so the form stays hidden; a
+    # submit that gets through anyway (here: by script) must still end on the reload page.
+    expect(broken.locator("#form")).to_be_hidden()
+    broken.evaluate("document.getElementById('form').requestSubmit()")
     broken.wait_for_url("**/reload-needed", timeout=15000)
     assert "link=" not in broken.url, f"the link is in the address: {broken.url}"
     body = broken.content().lower()
     assert "reload" in body, f"the reload page does not say reload: {body[:300]}"
-    jobs = broken.request.get(BASE + "/api/jobs").json()["jobs"]
+    jobs = ctx.page.request.get(BASE + "/api/jobs").json()["jobs"]
     assert len(jobs) == 1, f"the native submit made a job: {jobs}"
 
 
 @check
 def a_new_server_version_makes_the_open_page_offer_a_reload(ctx):
-    stale = ctx.browser.new_context(locale="en-US").new_page()
+    stale = signed_in(ctx)
     watch(stale, "stale", ctx.problems)
     stale.route(
         "**/api/version",
@@ -209,7 +319,7 @@ def a_new_server_version_makes_the_open_page_offer_a_reload(ctx):
 
 @check
 def a_failed_youtube_lookup_says_why_and_channel_and_title_can_be_typed(ctx):
-    page = ctx.browser.new_context(locale="en-US").new_page()
+    page = signed_in(ctx)
     # (not watched: the browser logs the 502 we stage here as a console error, on purpose)
     page.route(
         "**/api/youtube/probe",
@@ -232,6 +342,81 @@ def a_failed_youtube_lookup_says_why_and_channel_and_title_can_be_typed(ctx):
 
 
 @check
+def the_admin_makes_an_account_on_the_accounts_page(ctx):
+    page = ctx.page
+    page.click("#nav-accounts")
+    expect(page).to_have_url(re.compile(r"/accounts$"))
+    expect(page.locator("#accounts")).to_be_visible()
+    expect(page.locator("#nav-accounts")).to_have_attribute("aria-current", "page")
+    expect(page.locator("#accounts-list li")).to_have_count(1, timeout=15000)
+    page.fill("#accounts-name", USER)
+    page.fill("#accounts-password", USER_PASSWORD)
+    page.select_option("#accounts-role", "user")
+    page.click("#accounts-add")
+    expect(page.locator("#accounts-result")).to_have_text(f'Account "{USER}" created.')
+    expect(page.locator("#accounts-list li")).to_have_count(2, timeout=15000)
+    expect(page.locator("#accounts-list")).to_contain_text(USER)
+
+
+@check
+def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
+    page = signed_in(ctx, USER, USER_PASSWORD)
+    expect(page.locator("#topnav > *:visible")).to_have_text(
+        ["Input", "Dashboard", "Subscriptions", "How to"]
+    )
+    expect(page.locator("#nav-accounts")).to_be_hidden()
+    expect(page.locator("#account-open")).to_have_text(USER)
+    expect(page.locator("#alert-strip")).to_be_hidden()
+    expect(page.locator("#jobs-empty")).to_be_visible(timeout=15000)
+    expect(page.locator("#jobs-list li")).to_have_count(0)
+    page.goto(BASE + "/dashboard")
+    expect(page.locator("#dashboard")).to_be_visible()
+    for hidden in ("#alerts", "#dash-disk", "#dash-vpn-list"):
+        expect(page.locator(hidden)).to_be_hidden()
+    expect(page.locator("#dash-error")).to_have_text("")
+    page.goto(BASE + "/accounts")
+    expect(page).to_have_url(BASE + "/")
+    assert page.request.get(BASE + "/api/accounts").status == 403
+    assert page.request.get(BASE + "/api/alerts").status == 403
+    expect(page.locator("#account-open")).to_have_text(USER)
+
+
+@check
+def a_user_changes_the_own_password_and_the_other_devices_are_signed_out(ctx):
+    here = signed_in(ctx, USER, USER_PASSWORD)
+    elsewhere = signed_in(ctx, USER, USER_PASSWORD)
+    new_password = USER_PASSWORD + " 2"
+    here.click("#account-open")
+    here.fill("#account-current", USER_PASSWORD)
+    here.fill("#account-new", new_password)
+    here.fill("#account-repeat", new_password)
+    here.click("#account-change")
+    expect(here.locator("#account-result")).to_contain_text("The password was changed")
+    assert here.request.get(BASE + "/api/auth/me").status == 200
+    assert elsewhere.request.get(BASE + "/api/auth/me").status == 401
+    old = fresh_page(ctx)
+    old.goto(BASE + "/")
+    old.fill("#login-user", USER)
+    old.fill("#login-password", USER_PASSWORD)
+    old.click("#login-submit")
+    expect(old.locator("#login-error")).to_have_text("Wrong name or password.")
+    sign_in(fresh_page(ctx), USER, new_password)
+
+
+@check
+def a_page_on_another_site_cannot_act_with_the_admins_cookie(ctx):
+    for origin in ("null", "http://evil.example"):
+        response = ctx.page.request.post(
+            BASE + "/api/accounts",
+            data={"username": "mallory", "password": "a long test password"},
+            headers={"Origin": origin},
+        )
+        assert response.status == 403, (origin, response.status)
+    listed = ctx.page.request.get(BASE + "/api/accounts").json()["accounts"]
+    assert sorted(a["username"] for a in listed) == sorted([ADMIN, USER])
+
+
+@check
 def no_script_errors_failed_requests_or_bad_static_answers(ctx):
     assert not ctx.problems, "; ".join(ctx.problems)
 
@@ -250,6 +435,11 @@ def main() -> None:
         ).new_page()
         problems: list[str] = []
         watch(page, "main", problems)
+        # the admin of the main page signs in through the API (the form is checked above)
+        login = page.request.post(
+            BASE + "/api/auth/login", data={"username": ADMIN, "password": ADMIN_PASSWORD}
+        )
+        assert login.status == 200, f"the admin could not sign in: {login.status}"
         ctx = Context(browser, page, problems)
         for number, function in enumerate(CHECKS, start=1):
             name = function.__name__.replace("_", " ")

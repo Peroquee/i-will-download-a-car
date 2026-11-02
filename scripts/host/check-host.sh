@@ -6,7 +6,7 @@
 # Debian VM after bootstrap.sh, and after any host change. CI runs a subset as a smoke test.
 #
 # Usage:
-#   scripts/host/check-host.sh [--only virt,docker,compose,tun,media,layout,backups] [--env-file PATH]
+#   scripts/host/check-host.sh [--only virt,docker,compose,tun,media,layout,backups,login] [--env-file PATH]
 #
 # Output: one line per check, "PASS|FAIL|SKIP <check> <detail>", then a summary.
 # Exit:   0 all selected checks passed (SKIP counts as pass), 1 any FAIL, 2 bad usage.
@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-readonly ALL_CHECKS="virt docker compose tun media layout backups"
+readonly ALL_CHECKS="virt docker compose tun media layout backups login"
 readonly MIN_COMPOSE="2.17"   # depends_on.restart needs 2.17+
 readonly TUN_DEVNUM="a:c8"    # /dev/net/tun is char device 10:200 (hex a:c8)
 
@@ -385,6 +385,27 @@ check_backups() {
   fi
 }
 
+# The app has its own accounts (#44): without the first admin's password hash in .env nobody can
+# sign in, and the page can only say so.
+check_login() {
+  if [ ! -f "$ENV_FILE" ]; then
+    fail login "env file $ENV_FILE not found (copy .env.example to .env)"
+    return
+  fi
+  local hash user
+  hash="$(env_value APP_ADMIN_PASSWORD_HASH || true)"
+  user="$(env_value APP_ADMIN_USER || true)"
+  if [ -z "$hash" ] || [ "$hash" = "changeme" ]; then
+    fail login "no admin account for the app: nobody can sign in. Run: make admin-password, then docker compose up -d (docs/accounts.md)"
+    return
+  fi
+  case "$hash" in
+    scrypt:*) ;;
+    *) fail login "APP_ADMIN_PASSWORD_HASH is not a hash made by make admin-password"; return ;;
+  esac
+  pass login "the first admin \"${user:-admin}\" is set in $ENV_FILE"
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -418,6 +439,7 @@ main() {
       media) check_media ;;
       layout) check_layout ;;
       backups) check_backups ;;
+      login) check_login ;;
       *) echo "no dispatch for check: $check" >&2; exit 2 ;;
     esac
   done

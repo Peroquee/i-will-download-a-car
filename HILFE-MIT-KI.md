@@ -93,7 +93,7 @@ neuer Start von `./install.sh` macht dort weiter, wo es aufgehört hat.
 | Land des VPN-Servers (eingebaute Anbieter) | wohin verbunden wird | `VPN_SERVER_COUNTRIES` |
 | Ordner für die Medien | hier liegt alles; Downloads und Bibliothek müssen auf einer Platte sein | `DATA_ROOT` |
 | Ordnernamen (Filme, Serien, Hörbücher, Musik, Podcasts, Youtube) | die Ordner, die Jellyfin liest | `MEDIA_DIR_MOVIES`, `MEDIA_DIR_SERIES`, `MEDIA_DIR_AUDIOBOOKS`, `MEDIA_DIR_MUSIC`, `MEDIA_DIR_PODCASTS`, `MEDIA_DIR_YOUTUBE` |
-| Benutzername und Passwort für die Webseite (unsichtbar, zweimal) | die Anmeldung; das Passwort wird nur als Prüfsumme gespeichert | `PROXY_USER`, `PROXY_PASSWORD_HASH` |
+| Benutzername und Passwort des Administrators (unsichtbar, zweimal) | das erste Konto der Webseite (weitere Konten legst du dort unter „Konten“ an); dieselbe Anmeldung schützt den Port von qBittorrent; Passwörter werden nur als Prüfsumme gespeichert | `APP_ADMIN_USER`, `APP_ADMIN_PASSWORD_HASH`, `PROXY_USER`, `PROXY_PASSWORD_HASH` |
 | qBittorrent-Passwort automatisch erzeugen? | die eigene Anmeldung des Torrent-Programms; die Person braucht sie nie | `QBIT_USER`, `QBIT_PASSWORD` |
 | Adresse dieses Computers und Heimnetz (erkannt) | die Webseite antwortet nur dort | `PROXY_BIND`, `LAN_SUBNET` |
 | Jellyfin-Adresse und API-Schlüssel (freiwillig) | damit Jellyfin nach einem Download neu einliest | `JELLYFIN_URL`, `JELLYFIN_API_KEY` |
@@ -158,7 +158,7 @@ meldet sich an und legt in **Jellyfin** pro Ordner eine Bibliothek an (Typ *Musi
   starten; erledigte Schritte werden übersprungen.
 - **Platte voll**: `df -h` zeigt es. Medien brauchen viel Platz; der Ordner `downloads` enthält
   unfertige Dateien.
-- **Aktualisieren**: `./update.sh` (Sicherung, neue Version, neu bauen, prüfen). Sicherungen:
+- **Aktualisieren**: `./update.sh` (Sicherung, neue Version, neu bauen, prüfen). Eine Installation aus der Zeit vor den Konten wird **einmal** nach einem Administrator-Passwort gefragt (der alte Anmeldename bleibt). Bei einer Aktualisierung von Hand (`git pull` und `docker compose up -d`) oder automatisch zeigt die Webseite „Das Konto des Administrators ist noch nicht eingerichtet“, bis du `make admin-password` und danach `docker compose up -d` ausführst (docs/accounts.md). Sicherungen:
   `sudo make backup` (Ordner `.youtube-premium-backups` im Medienordner, z. B. `/data/.youtube-premium-backups`; enthält Geheimnisse, privat halten).
 
 ## Wo die Dokumentation liegt

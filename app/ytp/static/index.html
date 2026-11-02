@@ -9,8 +9,8 @@
   <link id="favicon" rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
-<div id="vpn" class="vpn-bar vpn-unknown" role="status">
+<body data-auth="unknown">
+<div id="vpn" class="vpn-bar vpn-unknown" role="status" data-auth-only>
   <a id="vpn-link" class="vpn-link" href="/dashboard#vpn">
     <span class="vpn-dot" aria-hidden="true"></span>
     <span class="vpn-main"><strong id="vpn-text" data-i18n="vpn.unknown"></strong><span id="vpn-detail" class="vpn-detail"></span></span>
@@ -21,7 +21,7 @@
   <span id="update-banner-text" data-i18n="reload.new_version"></span>
   <button type="button" id="update-banner-reload" class="ghost small" data-i18n="reload.button"></button>
 </div>
-<nav id="alert-strip" class="alert-strip" aria-label="Alerts" data-i18n-label="alert.strip_label" hidden>
+<nav id="alert-strip" class="alert-strip" aria-label="Alerts" data-i18n-label="alert.strip_label" data-admin-only hidden>
   <ul id="alert-strip-list" class="alert-strip-list"></ul>
   <div class="alert-strip-tools">
     <a id="alert-strip-more" class="alert-more" href="/dashboard#alerts"></a>
@@ -53,18 +53,42 @@
         <p class="subtitle" data-view="dashboard" data-i18n="dash.subtitle" hidden></p>
       </div>
       <div class="tools">
+        <button type="button" id="account-open" class="ghost small account-chip" aria-haspopup="dialog" data-i18n-label="account.menu" data-auth-only></button>
         <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
       </div>
     </header>
 
-    <nav id="topnav" class="topnav" aria-label="Main" data-i18n-label="nav.label">
+    <section id="login" class="panel login" aria-labelledby="login-title" data-guest-only>
+      <h2 id="login-title" class="jobs-title" data-i18n="login.title"></h2>
+      <p id="login-note" class="banner" role="alert"></p>
+      <p id="login-setup" class="banner" role="alert" hidden></p>
+      <form id="login-form" method="post" action="/reload-needed" autocomplete="on" novalidate>
+        <div class="row">
+          <label class="field" for="login-user" data-i18n="login.user"></label>
+          <input id="login-user" name="username" type="text" autocomplete="username" autocapitalize="off"
+                 autocorrect="off" spellcheck="false" maxlength="64">
+        </div>
+        <div class="row">
+          <label class="field" for="login-password" data-i18n="login.password"></label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="200">
+        </div>
+        <p id="login-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="submit" class="primary" id="login-submit" data-i18n="login.submit"></button>
+        </div>
+        <p class="note" data-i18n="login.help"></p>
+      </form>
+    </section>
+
+    <nav id="topnav" class="topnav" aria-label="Main" data-i18n-label="nav.label" data-auth-only>
       <a id="nav-input" class="nav-item" href="/" data-i18n="nav.input"></a>
       <a id="nav-dashboard" class="nav-item" href="/dashboard" data-i18n="nav.dashboard"></a>
       <a id="nav-subs" class="nav-item" href="/#subscriptions" data-i18n="nav.subs"></a>
+      <a id="nav-accounts" class="nav-item" href="/accounts" data-i18n="nav.accounts" data-admin-only></a>
       <button type="button" id="howto-open" class="nav-item nav-howto" aria-haspopup="dialog" data-i18n="howto.button"></button>
     </nav>
 
-    <form id="form" data-view="input" method="post" action="/reload-needed" autocomplete="off" novalidate>
+    <form id="form" data-view="input" data-auth-only method="post" action="/reload-needed" autocomplete="off" novalidate>
       <div class="row">
         <label class="field" for="link" data-i18n="link.label"></label>
         <input id="link" name="link" type="text" inputmode="url" spellcheck="false"
@@ -237,7 +261,7 @@
       <p id="result" class="result" role="status" aria-live="polite"></p>
     </form>
 
-    <section class="jobs" data-view="input" aria-labelledby="jobs-title">
+    <section class="jobs" data-view="input" data-auth-only aria-labelledby="jobs-title">
       <div class="jobs-head">
         <h2 id="jobs-title" class="jobs-title" data-i18n="jobs.title"></h2>
         <button type="button" id="jobs-filter" class="ghost small" aria-pressed="false" hidden></button>
@@ -248,7 +272,7 @@
       <p id="jobs-empty" class="note" data-i18n="jobs.empty" hidden></p>
     </section>
 
-    <section id="subscriptions" class="subs" data-view="input" aria-labelledby="subs-title">
+    <section id="subscriptions" class="subs" data-view="input" data-auth-only aria-labelledby="subs-title">
       <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
       <form id="subs-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
         <div class="row">
@@ -284,7 +308,7 @@
       <p id="subs-empty" class="note" data-i18n="subs.empty" hidden></p>
     </section>
 
-    <section id="dashboard" class="dashboard" data-view="dashboard" hidden>
+    <section id="dashboard" class="dashboard" data-view="dashboard" data-auth-only hidden>
       <p id="dash-error" class="error" role="status"></p>
 
       <section class="jobs" aria-labelledby="dash-active-title">
@@ -303,13 +327,13 @@
         <h2 id="dash-vpn-title" class="jobs-title" data-i18n="dash.vpn"></h2>
         <p id="dash-vpn-now" class="dash-vpn-now"></p>
         <p id="dash-vpn-explain" class="note"></p>
-        <p id="dash-disk" class="note"></p>
-        <p id="dash-deploy" class="note" hidden></p>
-        <ul id="dash-vpn-list" class="dash-events"></ul>
-        <p id="dash-vpn-empty" class="note" data-i18n="dash.vpn_empty" hidden></p>
+        <p id="dash-disk" class="note" data-admin-only></p>
+        <p id="dash-deploy" class="note" data-admin-only hidden></p>
+        <ul id="dash-vpn-list" class="dash-events" data-admin-only></ul>
+        <p id="dash-vpn-empty" class="note" data-i18n="dash.vpn_empty" data-admin-only hidden></p>
       </section>
 
-      <section id="alerts" class="jobs" aria-labelledby="dash-alerts-title">
+      <section id="alerts" class="jobs" data-admin-only aria-labelledby="dash-alerts-title">
         <div class="jobs-head">
           <h2 id="dash-alerts-title" class="jobs-title" data-i18n="dash.alerts"></h2>
           <button type="button" id="dash-alerts-ack" class="ghost small" data-i18n="alert.ack_all" hidden></button>
@@ -320,12 +344,65 @@
       </section>
     </section>
 
-    <details class="help" data-view="input">
+    <section id="accounts" class="subs" data-view="accounts" data-auth-only data-admin-only aria-labelledby="accounts-title" hidden>
+      <h2 id="accounts-title" class="jobs-title" data-i18n="accounts.title"></h2>
+      <form id="accounts-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
+        <div class="row">
+          <label class="field" for="accounts-name" data-i18n="accounts.name"></label>
+          <input id="accounts-name" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" autocomplete="off">
+        </div>
+        <div class="row">
+          <label class="field" for="accounts-password" data-i18n="accounts.password"></label>
+          <input id="accounts-password" type="password" autocomplete="new-password" maxlength="200">
+        </div>
+        <div class="row">
+          <label class="field" for="accounts-role" data-i18n="accounts.role"></label>
+          <select id="accounts-role">
+            <option value="user" data-i18n="role.user"></option>
+            <option value="admin" data-i18n="role.admin"></option>
+          </select>
+        </div>
+        <div class="actions">
+          <button type="submit" class="primary" id="accounts-add" data-i18n="accounts.add"></button>
+        </div>
+        <p id="accounts-result" class="result" role="status" aria-live="polite"></p>
+      </form>
+      <p id="accounts-load-error" class="error" role="status"></p>
+      <ul id="accounts-list" class="job-list"></ul>
+    </section>
+
+    <details class="help" data-view="input" data-auth-only>
       <summary data-i18n="help.title"></summary>
       <p data-i18n="help.body"></p>
     </details>
   </main>
 </div>
+
+<dialog id="account" class="howto account" aria-labelledby="account-title">
+  <h2 id="account-title" data-i18n="account.title"></h2>
+  <p id="account-who" class="note"></p>
+  <h3 data-i18n="account.password_title"></h3>
+  <form id="account-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
+    <div class="row">
+      <label class="field" for="account-current" data-i18n="account.current"></label>
+      <input id="account-current" type="password" autocomplete="current-password" maxlength="200">
+    </div>
+    <div class="row">
+      <label class="field" for="account-new" data-i18n="account.new"></label>
+      <input id="account-new" type="password" autocomplete="new-password" maxlength="200">
+    </div>
+    <div class="row">
+      <label class="field" for="account-repeat" data-i18n="account.repeat"></label>
+      <input id="account-repeat" type="password" autocomplete="new-password" maxlength="200">
+    </div>
+    <p id="account-result" class="result" role="status" aria-live="polite"></p>
+    <div class="actions">
+      <button type="submit" class="primary" id="account-change" data-i18n="account.change"></button>
+      <button type="button" class="ghost" id="account-logout" data-i18n="account.logout"></button>
+      <button type="button" class="ghost" id="account-close" data-i18n="account.close"></button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="howto" class="howto" aria-labelledby="howto-title">
   <div class="howto-head">
@@ -694,6 +771,69 @@
     "nav.input": "Eingabe",
     "nav.dashboard": "Dashboard",
     "nav.subs": "Abonnements",
+    "nav.accounts": "Konten",
+    "login.title": "Anmelden",
+    "login.user": "Name",
+    "login.password": "Passwort",
+    "login.submit": "Anmelden",
+    "login.help": "Kein Konto? Die Person, die diese Seite betreut, legt eines für dich an.",
+    "login.required": "Bitte Name und Passwort eingeben.",
+    "login.wrong": "Name oder Passwort falsch.",
+    "login.wait": "Zu viele Versuche. Bitte {n} Sekunden warten.",
+    "login.failed": "Das Anmelden hat nicht geklappt.",
+    "login.network": "Der Server ist nicht erreichbar.",
+    "login.expired": "Die Anmeldung ist abgelaufen. Bitte neu anmelden.",
+    "login.setup": "Das Konto des Administrators ist noch nicht eingerichtet, deshalb kann sich niemand anmelden. Auf dem Server im Installationsordner „make admin-password“ ausführen, danach „docker compose up -d“. Mehr: docs/accounts.md.",
+    "account.menu": "Konto",
+    "account.title": "Konto",
+    "account.signed_in": "Angemeldet als {name} ({role})",
+    "account.password_title": "Passwort ändern",
+    "account.current": "Aktuelles Passwort",
+    "account.new": "Neues Passwort (mindestens 12 Zeichen)",
+    "account.repeat": "Neues Passwort wiederholen",
+    "account.change": "Passwort ändern",
+    "account.changed": "Das Passwort wurde geändert. Auf anderen Geräten bist du abgemeldet.",
+    "account.mismatch": "Die beiden neuen Passwörter sind verschieden.",
+    "account.too_short": "Das neue Passwort braucht mindestens {n} Zeichen.",
+    "account.wrong_current": "Das aktuelle Passwort ist falsch.",
+    "account.change_failed": "Das Ändern hat nicht geklappt.",
+    "account.logout": "Abmelden",
+    "account.close": "Schließen",
+    "role.admin": "Administrator",
+    "role.user": "Benutzer",
+    "accounts.title": "Konten",
+    "accounts.name": "Name",
+    "accounts.password": "Passwort (mindestens 12 Zeichen)",
+    "accounts.role": "Rolle",
+    "accounts.add": "Konto anlegen",
+    "accounts.created": "Konto „{name}“ angelegt.",
+    "accounts.exists": "Der Name ist schon vergeben.",
+    "accounts.invalid_name": "Der Name braucht 3 bis 64 Buchstaben, Ziffern, Punkt, Unterstrich oder Bindestrich.",
+    "accounts.weak": "Das Passwort braucht mindestens 12 Zeichen.",
+    "accounts.you": "du",
+    "accounts.disabled": "gesperrt",
+    "accounts.last_login": "zuletzt angemeldet {when}",
+    "accounts.never": "noch nie angemeldet",
+    "accounts.make_admin": "Zum Administrator machen",
+    "accounts.make_user": "Zum Benutzer machen",
+    "accounts.disable": "Sperren",
+    "accounts.enable": "Entsperren",
+    "accounts.reset": "Passwort setzen",
+    "accounts.reset_save": "Passwort speichern",
+    "accounts.reset_done": "Das Passwort ist gesetzt; das Konto ist überall abgemeldet.",
+    "accounts.delete": "Löschen",
+    "accounts.confirm": "Wirklich löschen?",
+    "accounts.deleted_note": "Gelöscht. Seine Abonnements enden, wenn niemand sonst ihnen folgt; seine Downloads bleiben.",
+    "accounts.last_admin": "Es muss immer einen aktiven Administrator geben.",
+    "accounts.failed": "Das hat nicht geklappt.",
+    "accounts.load_error": "Die Konten konnten nicht geladen werden.",
+    "subs.followers": "Folgen: {names}",
+    "subs.shared_note": "{n} weitere Person(en) folgen dem auch; „Entfernen“ beendet es nur für dich.",
+    "subs.joined": "Du folgst „{name}“ jetzt auch ({n} weitere Person(en) folgen schon).",
+    "subs.remove_all": "Für alle entfernen",
+    "subs.confirm_all": "Wirklich für alle entfernen?",
+    "sub.joined": "Du folgst „{name}“ jetzt auch ({n} weitere Person(en) folgen schon).",
+    "pc.joined": "Du folgst „{name}“ jetzt auch ({n} weitere Person(en) folgen schon).",
     "vpn.details": "Details ›",
     "reload.new_version": "Die App wurde aktualisiert. Bitte die Seite neu laden.",
     "reload.button": "Neu laden",
@@ -1026,6 +1166,69 @@
     "nav.input": "Input",
     "nav.dashboard": "Dashboard",
     "nav.subs": "Subscriptions",
+    "nav.accounts": "Accounts",
+    "login.title": "Sign in",
+    "login.user": "Name",
+    "login.password": "Password",
+    "login.submit": "Sign in",
+    "login.help": "No account? The person who looks after this site creates one for you.",
+    "login.required": "Please enter a name and a password.",
+    "login.wrong": "Wrong name or password.",
+    "login.wait": "Too many attempts. Please wait {n} seconds.",
+    "login.failed": "Signing in did not work.",
+    "login.network": "The server could not be reached.",
+    "login.expired": "Your session has ended. Please sign in again.",
+    "login.setup": "The administrator account has not been set up yet, so nobody can sign in. On the server, in the install folder, run \"make admin-password\", then \"docker compose up -d\". More: docs/accounts.md.",
+    "account.menu": "Account",
+    "account.title": "Account",
+    "account.signed_in": "Signed in as {name} ({role})",
+    "account.password_title": "Change password",
+    "account.current": "Current password",
+    "account.new": "New password (at least 12 characters)",
+    "account.repeat": "Repeat the new password",
+    "account.change": "Change password",
+    "account.changed": "The password was changed. You are signed out on other devices.",
+    "account.mismatch": "The two new passwords differ.",
+    "account.too_short": "The new password needs at least {n} characters.",
+    "account.wrong_current": "The current password is wrong.",
+    "account.change_failed": "Changing the password did not work.",
+    "account.logout": "Sign out",
+    "account.close": "Close",
+    "role.admin": "Administrator",
+    "role.user": "User",
+    "accounts.title": "Accounts",
+    "accounts.name": "Name",
+    "accounts.password": "Password (at least 12 characters)",
+    "accounts.role": "Role",
+    "accounts.add": "Create account",
+    "accounts.created": "Account \"{name}\" created.",
+    "accounts.exists": "That name is already taken.",
+    "accounts.invalid_name": "The name needs 3 to 64 letters, digits, dots, underscores or dashes.",
+    "accounts.weak": "The password needs at least 12 characters.",
+    "accounts.you": "you",
+    "accounts.disabled": "disabled",
+    "accounts.last_login": "last signed in {when}",
+    "accounts.never": "never signed in",
+    "accounts.make_admin": "Make administrator",
+    "accounts.make_user": "Make user",
+    "accounts.disable": "Disable",
+    "accounts.enable": "Enable",
+    "accounts.reset": "Set password",
+    "accounts.reset_save": "Save password",
+    "accounts.reset_done": "The password is set; the account is signed out everywhere.",
+    "accounts.delete": "Delete",
+    "accounts.confirm": "Really delete?",
+    "accounts.deleted_note": "Deleted. Its subscriptions end unless others follow them; its downloads stay.",
+    "accounts.last_admin": "There must always be one active administrator.",
+    "accounts.failed": "That did not work.",
+    "accounts.load_error": "The accounts could not be loaded.",
+    "subs.followers": "Followed by: {names}",
+    "subs.shared_note": "{n} other person(s) follow this too; \"Remove\" only stops it for you.",
+    "subs.joined": "You now follow \"{name}\" too ({n} other person(s) already do).",
+    "subs.remove_all": "Remove for everyone",
+    "subs.confirm_all": "Really remove for everyone?",
+    "sub.joined": "You now follow \"{name}\" too ({n} other person(s) already do).",
+    "pc.joined": "You now follow \"{name}\" too ({n} other person(s) already do).",
     "vpn.details": "Details ›",
     "reload.new_version": "The app was updated. Please reload the page.",
     "reload.button": "Reload",
@@ -1082,6 +1285,7 @@
 </script>
 <script src="/static/logic.js"></script>
 <script src="/static/dashboard.js"></script>
+<script src="/static/auth.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
