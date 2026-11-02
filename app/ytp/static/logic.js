@@ -85,6 +85,7 @@
   }
 
   var MAX_PODCAST_BACKFILL = 20;
+  var MAX_CHANNEL_BACKFILL = 15;
 
   /* The requests a podcast form sends: {episode, subscribe}, each null when not wanted.
      values: {name, episode (a key or ""), subscribe (bool), backfill (text)} */
@@ -118,6 +119,11 @@
     if (mode === "youtube") {
       if (!String(values.channel || "").trim()) errors.channel = "err.required";
       if (!String(values.title || "").trim()) errors.title = "err.required";
+      /* Subscribing with the download: how many older videos to take as well (YouTube shows 15). */
+      var older = String(values.backfill == null ? "" : values.backfill).trim();
+      if (values.subscribe && older !== "" && (!/^\d+$/.test(older) || +older > MAX_CHANNEL_BACKFILL)) {
+        errors.backfill = "err.int_out_of_range";
+      }
       return errors;
     }
     if (mode === "podcast") {
@@ -167,6 +173,29 @@
     if (seconds < 3600) return { unit: "minutes", n: Math.floor(seconds / 60) };
     if (seconds < 86400) return { unit: "hours", n: Math.floor(seconds / 3600) };
     return { unit: "days", n: Math.floor(seconds / 86400) };
+  }
+
+  /* The one-line summary of the downloads on the input page, from an /api/jobs answer:
+     {running, waiting, failed, progress}. The counts come from the server's totals when it sends
+     them (the list holds only the newest jobs); progress is the mean of the downloads that report
+     one, rounded, or null when none does. */
+  function jobsSummary(data) {
+    var jobs = data && Array.isArray(data.jobs) ? data.jobs : [];
+    var counts = data && data.counts && typeof data.counts === "object" ? data.counts : null;
+    function count(status) {
+      if (counts && typeof counts[status] === "number") return counts[status];
+      return jobs.filter(function (job) { return job && job.status === status; }).length;
+    }
+    var shares = jobs.filter(function (job) {
+      return job && job.status === "downloading" && typeof job.progress === "number" && isFinite(job.progress);
+    }).map(function (job) { return Math.max(0, Math.min(100, job.progress)); });
+    var sum = shares.reduce(function (a, b) { return a + b; }, 0);
+    return {
+      running: count("downloading") + count("organizing"),
+      waiting: count("queued"),
+      failed: count("failed"),
+      progress: shares.length ? Math.round(sum / shares.length) : null,
+    };
   }
 
   /* Which i18n key names a job's kind (the library it ends up in). */
@@ -225,11 +254,13 @@
   }
 
   /* Which view of the one page is wanted: "dashboard" for /dashboard, "accounts" for /accounts
-     (#44), else the form. */
-  function pageView(pathname) {
+     (#44), "subscriptions" for /#subscriptions (the list of subscriptions, a view of its own),
+     else the form. */
+  function pageView(pathname, hash) {
     var path = String(pathname || "");
     if (/^\/dashboard\/?$/.test(path)) return "dashboard";
-    return /^\/accounts\/?$/.test(path) ? "accounts" : "input";
+    if (/^\/accounts\/?$/.test(path)) return "accounts";
+    return String(hash || "") === "#subscriptions" ? "subscriptions" : "input";
   }
 
   function alertAnchor(id) { return "alert-" + id; }
@@ -275,12 +306,14 @@
     stripAlerts: stripAlerts,
     age: age,
     kindKey: kindKey,
+    jobsSummary: jobsSummary,
     vpnView: vpnView,
     detectMode: detectMode,
     looksLikeVideoUrl: looksLikeVideoUrl,
     looksLikeFeedUrl: looksLikeFeedUrl,
     podcastPayloads: podcastPayloads,
     MAX_PODCAST_BACKFILL: MAX_PODCAST_BACKFILL,
+    MAX_CHANNEL_BACKFILL: MAX_CHANNEL_BACKFILL,
     format: format,
     magnetMetadata: magnetMetadata,
     magnetPayload: magnetPayload,

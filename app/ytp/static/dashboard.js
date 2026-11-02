@@ -11,7 +11,7 @@
   function create(ctx) {
     var t = ctx.t;
     var $ = ctx.$;
-    var view = L.pageView(root.location.pathname);
+    var view = L.pageView(root.location.pathname, root.location.hash);
     var alertsData = null;       // last answer of /api/alerts; null = never answered
     var alertsFailed = false;
     var dashData = null;         // last answer of /api/dashboard
@@ -306,15 +306,12 @@
       else node.removeAttribute("aria-current");
     }
 
-    /* The tab of the page you are on (the subscriptions are a part of the input page). */
+    /* The tab of the page you are on. */
     function renderNav() {
-      var onDashboard = view === "dashboard";
-      var onAccounts = view === "accounts";
-      var subs = view === "input" && root.location.hash === "#subscriptions";
-      setCurrent($("nav-input"), view === "input" && !subs);
-      setCurrent($("nav-dashboard"), onDashboard);
-      setCurrent($("nav-subs"), subs);
-      setCurrent($("nav-accounts"), onAccounts);
+      setCurrent($("nav-input"), view === "input");
+      setCurrent($("nav-dashboard"), view === "dashboard");
+      setCurrent($("nav-subs"), view === "subscriptions");
+      setCurrent($("nav-accounts"), view === "accounts");
     }
 
     /* The VPN bar links to /dashboard#vpn: bring that part into view and frame it. */
@@ -346,6 +343,13 @@
       $("dash-alerts-ack").addEventListener("click", acknowledgeAll);
       root.addEventListener("hashchange", function () {
         focused = null;
+        /* Input and subscriptions are one address with two hashes: switch without a reload. */
+        var next = L.pageView(root.location.pathname, root.location.hash);
+        if (next !== view) {
+          view = next;
+          applyView();
+          if (root.scrollTo) root.scrollTo(0, 0);
+        }
         renderNav();
         $("dash-vpn").classList.remove("alert-target");
         focusVpn();
