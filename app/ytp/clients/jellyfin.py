@@ -7,18 +7,25 @@ Jellyfin that is down or refuses the key is logged and retried a few times, and 
 key configured it does nothing at all.
 
 * `JellyfinClient` (standard library, synchronous, like the qBittorrent client): `ping`,
-  `list_libraries`, `refresh_library` (everything), `refresh_item` (one library). The key goes
-  in the `Authorization` header only, never in a URL, a log line or an error message.
+  `list_libraries`, `refresh_library` (scan everything). The key goes in the `Authorization`
+  header only, never in a URL, a log line or an error message.
 * `LibraryRefresher` adds the debounce. A batch of downloads finishing together (a season
-  pack, ten files) calls `request_refresh` ten times; Jellyfin gets ONE refresh per affected
-  library, sent after things have been quiet for `quiet_seconds` (but never later than
+  pack, ten files) calls `request_refresh` ten times; Jellyfin gets ONE `POST /Library/Refresh`,
+  sent after things have been quiet for `quiet_seconds` (but never later than
   `max_wait_seconds` after the first request, so a steady trickle cannot postpone it for ever).
   The scheduler calls `flush_due()` every few seconds.
 
-Which library: the app and Jellyfin see the same folders under different prefixes
-(`/data/Filme` here, `/media/jellyfin/Filme` there). No path is ever translated: a library is
-found by the NAME OF ITS FOLDER (the last component of one of its locations, compared as NFC
-text, because of "Hörbücher"). A folder no library matches gets a full refresh instead.
+**Why always the full scan.** The cheaper per-library call, `POST /Items/{libraryId}/Refresh`,
+only re-reads the items Jellyfin already knows: on a real Jellyfin 10.11.11 a library stayed at 0
+items 75 s after it, with 21 new files on disk, while `POST /Library/Refresh` found all 21 within
+two minutes. Only the library scan discovers NEW files, so that is what is sent. It is
+incremental (Jellyfin skips what has not changed), so for a home library it costs little. The
+alternative, `POST /Library/Media/Updated` with the new file paths, would need the paths under
+Jellyfin's prefix (`/media/jellyfin/...` there, `/data/...` here) and a change in every caller;
+it is the way to go if a very large library ever makes the full scan too slow.
+
+The folders named in `request_refresh` are only logged: the app and Jellyfin see the same
+folders under different prefixes and no path is ever translated.
 """
 
 from __future__ import annotations
@@ -26,7 +33,6 @@ from __future__ import annotations
 import http.client
 import json
 import logging
-import re
 import threading
 import time
 import unicodedata
@@ -36,8 +42,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
-
-_ITEM_ID = re.compile(r"[0-9a-fA-F]{32}|[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
 class JellyfinError(Exception):
@@ -163,34 +167,15 @@ class JellyfinClient:
             raise JellyfinUnavailable("Jellyfin returned an unexpected library list") from exc
 
     def refresh_library(self) -> None:
-        """Scan ALL libraries for new and changed files."""
+        """Scan ALL libraries for new and changed files. This is the call that finds NEW files."""
         status, _ = self._request("POST", "/Library/Refresh")
         if status not in (200, 204):
             raise JellyfinRequestError(f"Library/Refresh answered {status}", status)
 
-    def refresh_item(self, item_id: str) -> None:
-        """Scan one library (or any item) and everything below it."""
-        if not _ITEM_ID.fullmatch(item_id):
-            raise ValueError(f"not a Jellyfin item id: {item_id!r}")
-        status, _ = self._request(
-            "POST",
-            f"/Items/{item_id}/Refresh",
-            query={
-                "Recursive": "true",
-                "ImageRefreshMode": "Default",
-                "MetadataRefreshMode": "Default",
-                "ReplaceAllImages": "false",
-                "ReplaceAllMetadata": "false",
-            },
-        )
-        if status not in (200, 204):
-            raise JellyfinRequestError(f"Items/{item_id}/Refresh answered {status}", status)
-
 
 @dataclass
 class _Pending:
-    folders: set[str] = field(default_factory=set)
-    full: bool = False
+    folders: set[str] = field(default_factory=set)  # only for the log
     first_at: float = 0.0
     last_at: float = 0.0
     failures: int = 0
@@ -242,8 +227,6 @@ class LibraryRefresher:
             pending.last_at = now
             if folder:
                 pending.folders.add(unicodedata.normalize("NFC", folder))
-            else:
-                pending.full = True
             self._pending = pending
 
     def flush_due(self) -> bool:
@@ -279,31 +262,9 @@ class LibraryRefresher:
         return True
 
     def _send(self, client: JellyfinClient, pending: _Pending) -> None:
-        if pending.full or not pending.folders:
-            client.refresh_library()
-            logger.info("jellyfin: full library refresh requested")
-            return
-        libraries = client.list_libraries()
-        sent: set[str] = set()
-        unmatched: list[str] = []
-        for folder in sorted(pending.folders):
-            matches = [lib for lib in libraries if lib.has_folder(folder)]
-            if not matches:
-                unmatched.append(folder)
-            for library in matches:
-                if library.item_id not in sent:
-                    client.refresh_item(library.item_id)
-                    sent.add(library.item_id)
-        if unmatched:
-            # No library has such a folder: do not guess, scan everything.
-            client.refresh_library()
+        client.refresh_library()
         logger.info(
-            "jellyfin: library refresh requested",
-            extra={
-                "libraries": len(sent),
-                "folders": sorted(pending.folders),
-                "full": bool(unmatched),
-            },
+            "jellyfin: library refresh requested", extra={"folders": sorted(pending.folders)}
         )
 
     def _retry_later(self, pending: _Pending, exc: JellyfinError) -> None:
@@ -325,7 +286,6 @@ class LibraryRefresher:
                 self._pending = pending
             else:  # new requests came in meanwhile: merge, keep the failure count
                 current.folders |= pending.folders
-                current.full = current.full or pending.full
                 current.first_at = min(current.first_at, pending.first_at)
                 current.failures = pending.failures
                 current.retry_at = pending.retry_at

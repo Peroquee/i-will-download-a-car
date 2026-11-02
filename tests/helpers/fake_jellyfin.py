@@ -38,6 +38,10 @@ class FakeJellyfin:
     libraries: list[dict] = field(default_factory=default_libraries)
     status_override: int | None = None  # answer every authenticated call with this status
     seen: list[Seen] = field(default_factory=list)
+    # Like Jellyfin 10.11: only POST /Library/Refresh indexes files that are new on disk; the
+    # per-library POST /Items/{id}/Refresh just re-reads what is already indexed.
+    disk: list[str] = field(default_factory=list)
+    indexed: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.server: http.server.ThreadingHTTPServer | None = None
@@ -77,6 +81,7 @@ class FakeJellyfin:
                 if parts.path == "/Library/VirtualFolders" and method == "GET":
                     return self.reply(200, json.dumps(fake.libraries))
                 if parts.path == "/Library/Refresh" and method == "POST":
+                    fake.indexed = list(fake.disk)
                     return self.reply(204)
                 if parts.path.startswith("/Items/") and parts.path.endswith("/Refresh"):
                     item = parts.path.split("/")[2]
