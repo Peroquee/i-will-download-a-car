@@ -696,3 +696,156 @@ def test_a_failing_api_step_stops_the_update_with_its_hint(repo, tmp_path, ovpn)
     runner.fail("setup_categories.py", 1, "boom")
     code, _, _ = play(repo, tmp_path, [], argv=["--update"], runner=runner)
     assert code == 1
+
+
+# --- the last step failed: offer to repair (steps 5 to 8) instead of just stopping ---------------
+
+
+class FlakyRunner(FakeRunner):
+    """Like FakeRunner, but a command can fail the first N times and succeed afterwards."""
+
+    def __init__(self, root, failures: dict[str, int]):
+        super().__init__(root)
+        self.failures = dict(failures)
+
+    def _execute(self, argv, input_text, stream, timeout, cwd):
+        joined = " ".join(argv)
+        for needle, left in self.failures.items():
+            if needle in joined and left > 0:
+                self.failures[needle] = left - 1
+                self.commands.append(list(argv))
+                return Result(1, "", "boom")
+        return super()._execute(argv, input_text, stream, timeout, cwd)
+
+
+CHECKS = "check-host.sh --env-file"
+MENU = "Repair (run steps 5 to 8 again)"
+
+
+def test_a_failed_check_offers_the_menu_and_repair_runs_steps_5_to_8_again(repo, tmp_path, ovpn):
+    runner = FlakyRunner(repo, {CHECKS: 1})
+    rules = [*new_install_rules(ovpn), (MENU, "1")]
+    code, term, _ = play(repo, tmp_path, rules, runner=runner)
+    assert code == 0, term.text
+    assert "1 = Repair" in term.text
+    assert len(runner.ran("docker compose up -d --build")) == 2, "start (6) ran again"
+    assert len(runner.ran("setup_categories.py")) == 2, "qBittorrent (7) ran again"
+    assert len(runner.ran(CHECKS)) == 2, "the checks (8) ran again and passed"
+    assert len(runner.ran("bootstrap.sh")) == 1, "steps 1 to 4 did not"
+    assert len(runner.ran("render_ovpn.py")) == 1
+    assert len(runner.ran("set_password.py")) == 2, (
+        "the same web password is stored again (idempotent)"
+    )
+    assert "invisible" not in term.text.split("1 = Repair")[1], "and nothing is asked again"
+    assert "Done!" in term.text
+    state = State.load(repo / "config" / "installer-state.json")
+    assert set(state.completed) == set(STEP_IDS)
+
+
+def test_only_check_again_runs_just_the_last_step(repo, tmp_path, ovpn):
+    runner = FlakyRunner(repo, {CHECKS: 1})
+    rules = [*new_install_rules(ovpn), (MENU, "2")]
+    code, term, _ = play(repo, tmp_path, rules, runner=runner)
+    assert code == 0, term.text
+    assert len(runner.ran(CHECKS)) == 2
+    assert len(runner.ran("docker compose up -d --build")) == 1
+    assert len(runner.ran("setup_categories.py")) == 1
+
+
+def test_quit_from_the_menu_ends_with_the_failure_and_a_resumable_state(repo, tmp_path, ovpn):
+    runner = FlakyRunner(repo, {CHECKS: 5})
+    rules = [*new_install_rules(ovpn), (MENU, "3")]
+    code, term, _ = play(repo, tmp_path, rules, runner=runner)
+    assert code == 1
+    assert len(runner.ran(CHECKS)) == 1
+    assert "failed" in term.text
+    state = State.load(repo / "config" / "installer-state.json")
+    assert "checks" not in state.completed
+    assert "qbit" in state.completed
+
+
+def test_pressing_enter_in_the_menu_means_repair(repo, tmp_path, ovpn):
+    runner = FlakyRunner(repo, {CHECKS: 1})
+    code, term, _ = play(repo, tmp_path, new_install_rules(ovpn), runner=runner)
+    assert code == 0, term.text
+    assert len(runner.ran("setup_categories.py")) == 2
+
+
+def test_a_repair_that_fails_again_offers_the_menu_again(repo, tmp_path, ovpn):
+    runner = FlakyRunner(repo, {CHECKS: 2})
+    rules = [*new_install_rules(ovpn), (MENU, ["1", "3"])]
+    code, term, _ = play(repo, tmp_path, rules, runner=runner)
+    assert code == 1
+    assert term.text.count("1 = Repair") == 2
+    assert len(runner.ran(CHECKS)) == 2
+
+
+def test_no_menu_for_a_step_other_than_the_checks(repo, tmp_path, ovpn):
+    runner = FlakyRunner(repo, {"docker compose up": 1})
+    code, term, _ = play(repo, tmp_path, new_install_rules(ovpn), runner=runner)
+    assert code == 1
+    assert "1 = Repair" not in term.text
+
+
+def test_no_menu_without_a_person_an_answers_file_run_just_fails(repo, tmp_path, ovpn):
+    answers = tmp_path / "answers"
+    answers.write_text(
+        "web_password=web-web-web-2x\nvpn_user=vpn-user\nvpn_password=vpn-vpn-vpn-1\n"
+        f"ovpn_source={ovpn}\n"
+    )
+    answers.chmod(0o600)
+    runner = FlakyRunner(repo, {CHECKS: 1})
+    term = FakeTerminal()
+    code = cli.main(["--lang", "en", "--answers", str(answers)], repo, deps(term, runner, tmp_path))
+    assert code == 1
+    assert "1 = Repair" not in term.text
+    assert len(runner.ran(CHECKS)) == 1
+
+
+def test_a_rerun_after_a_failed_check_offers_the_menu_before_resuming(repo, tmp_path, ovpn):
+    play(
+        repo,
+        tmp_path,
+        [*new_install_rules(ovpn), (MENU, "3")],
+        runner=FlakyRunner(repo, {CHECKS: 9}),
+    )
+    runner = FakeRunner(repo)
+    code, term, _ = play(repo, tmp_path, [(MENU, "1")], runner=runner)
+    assert code == 0, term.text
+    assert "stopped at the step" in term.text
+    assert "1 = Repair" in term.text
+    assert len(runner.ran("setup_categories.py")) == 1, "the repair of step 7 ran this time"
+    assert len(runner.ran("docker compose up -d --build")) == 1
+    assert not runner.ran("bootstrap.sh")
+    assert not runner.ran("set_password.py")
+
+
+def test_a_rerun_can_just_check_or_quit(repo, tmp_path, ovpn):
+    play(
+        repo,
+        tmp_path,
+        [*new_install_rules(ovpn), (MENU, "3")],
+        runner=FlakyRunner(repo, {CHECKS: 9}),
+    )
+    runner = FakeRunner(repo)
+    code, _, _ = play(repo, tmp_path, [(MENU, "2")], runner=runner)
+    assert code == 0
+    assert len(runner.ran(CHECKS)) == 1
+    assert not runner.ran("setup_categories.py")
+    # and quitting changes nothing
+    play(repo, tmp_path, [*new_install_rules(ovpn)], runner=FlakyRunner(repo, {CHECKS: 9}))
+    state_before = State.load(repo / "config" / "installer-state.json").completed
+    runner = FakeRunner(repo)
+    code, _, _ = play(repo, tmp_path, [(MENU, "3")], runner=runner)
+    assert code == 0
+    assert runner.commands == []
+    assert State.load(repo / "config" / "installer-state.json").completed == state_before
+
+
+def test_a_rerun_interrupted_at_another_step_does_not_show_the_menu(repo, tmp_path, ovpn):
+    play(
+        repo, tmp_path, new_install_rules(ovpn), runner=FlakyRunner(repo, {"docker compose up": 1})
+    )
+    code, term, _ = play(repo, tmp_path, [])
+    assert code == 0, term.text
+    assert "1 = Repair" not in term.text

@@ -49,6 +49,18 @@ Each step uses the project's own script and is safe to run again.
 | 7 | Set up qBittorrent (categories) and the Web UI settings the proxy needs (host header validation off, CSRF protection on, see [proxy.md](proxy.md)) | `scripts/qbittorrent/setup_categories.py` (an update runs it again, so an older installation gets the settings) |
 | 8 | Check everything | `check-host.sh`, `verify_proxy.py` (asks the web password once more, Enter skips), Jellyfin's address, and optionally `killswitch-test.sh` |
 
+### When the last step (checking everything) fails
+
+At the end the installer checks the whole installation. If that step fails and a person is there
+(no answers file), it does not just stop but offers a menu: **1 = Repair** (the default; steps 5 to
+8 run again: logins, start, qBittorrent, checks; each is safe to repeat and changes only what is
+not right, and the web password is not asked again), **2 = only check again**, **3 = quit**.
+Starting `./install.sh` again after such a failure shows the same menu before it carries on, because
+resuming alone would only repeat the checks and never the repair of an earlier step (for example
+the qBittorrent setting that lets the proxy reach it). An installation by hand can run the
+qBittorrent part alone: `scripts/qbittorrent/setup_categories.py --from-env` reads the user and
+password from `.env`.
+
 ## Running it again
 
 * **Stopped or failed:** the failing step is named with a plain hint and the log location; the next
