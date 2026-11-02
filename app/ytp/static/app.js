@@ -641,6 +641,34 @@
     return t(fallbackKey) + (known ? " " + t("kind." + kind) : detail ? " " + detail : "");
   }
 
+  // "skipped: 3" with the newest few listed: live streams, premieres and Shorts the poller left
+  // out on purpose (not jobs, not failures).
+  function skippedDetails(skipped) {
+    var details = document.createElement("details");
+    details.className = "skipped";
+    var summary = document.createElement("summary");
+    summary.textContent = t("subs.skipped", { n: skipped.count });
+    details.appendChild(summary);
+    var list = document.createElement("ul");
+    skipped.recent.forEach(function (item) {
+      var entry = document.createElement("li");
+      var reason = t("subs.skip." + item.reason);
+      entry.textContent = (item.title || item.video_id) + " \u00b7 " + reason;
+      list.appendChild(entry);
+    });
+    if (skipped.count > skipped.recent.length) {
+      var more = document.createElement("li");
+      more.textContent = t("subs.skipped_more", { n: skipped.count - skipped.recent.length });
+      list.appendChild(more);
+    }
+    details.appendChild(list);
+    var why = document.createElement("p");
+    why.className = "job-meta";
+    why.textContent = t("subs.skipped_why");
+    details.appendChild(why);
+    return details;
+  }
+
   function subRow(sub) {
     var li = document.createElement("li");
     li.className = "job" + (sub.last_error ? " job-failed" : "");
@@ -668,6 +696,7 @@
       problem.textContent = sub.last_error;
       li.appendChild(problem);
     }
+    if (sub.skipped && sub.skipped.count > 0) li.appendChild(skippedDetails(sub.skipped));
     var rowKey = subKey(sub);
     if (subsMessages[rowKey]) {
       var note = document.createElement("p");

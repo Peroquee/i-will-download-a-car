@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.fake_probe import FakeTraitsProbe
 from tests.unit.test_feeds import entry, feed
 from ytp import jobs, subscriptions
 from ytp.config import Settings
@@ -59,6 +60,7 @@ def running(tmp_path: Path, minutes: str) -> Iterator[TestClient]:
     test_client.__enter__()
     try:
         test_client.app.state.poller.feeds = FakeFeeds()
+        test_client.app.state.poller.probe = FakeTraitsProbe()  # never the real YouTube
         yield test_client
     finally:
         test_client.__exit__(None, None, None)
@@ -188,3 +190,34 @@ def test_cross_site_check_now_is_refused_and_does_nothing(client):
 def test_without_a_database_it_is_a_503(tmp_path):
     app = create_app(Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path)}))
     assert TestClient(app).post("/api/subscriptions/1/poll").status_code == 503
+
+
+def test_the_subscription_list_shows_what_was_skipped(client):
+    from ytp import skipped_videos
+
+    sub = subscribe(client)
+    db = client.app.state.db
+    skipped_videos.record(
+        db, sub.id, "aaaaaaaaaaa", "short", "A Short", "2026-10-31T00:00:00+00:00"
+    )
+    skipped_videos.record(db, sub.id, "bbbbbbbbbbb", "live", "Live now", None)
+    row = client.get("/api/subscriptions").json()["subscriptions"][0]
+    assert row["skipped"]["count"] == 2
+    assert row["skipped"]["by_reason"] == {"live": 1, "premiere": 0, "short": 1}
+    assert [r["video_id"] for r in row["skipped"]["recent"]] == ["bbbbbbbbbbb", "aaaaaaaaaaa"]
+
+
+def test_check_now_skips_a_live_stream_and_says_nothing_failed(client):
+    from ytp.video_filter import VideoTraits
+
+    sub = subscribe(client)
+    client.app.state.poller.feeds.answer = feed(
+        fresh_entry("aaaaaaaaaaa"), fresh_entry("bbbbbbbbbbb")
+    )
+    client.app.state.poller.probe.answers["aaaaaaaaaaa"] = VideoTraits(live_status="is_live")
+    reply = client.post(f"/api/subscriptions/{sub.id}/poll")
+    assert reply.status_code == 200
+    assert reply.json()["queued"] == 1
+    assert reply.json()["last_error"] is None
+    row = client.get("/api/subscriptions").json()["subscriptions"][0]
+    assert row["skipped"]["by_reason"]["live"] == 1

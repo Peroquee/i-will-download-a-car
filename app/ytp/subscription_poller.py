@@ -19,6 +19,13 @@ are DUE and hands new videos to the YouTube download queue (#18). Rules:
 * **One failing channel does not stop the rest**; its reason goes to `last_error` and shows in
   the subscription list. If the feed cannot be reached at all (VPN down) the run stops after the
   first such failure instead of trying every channel against a dead connection.
+* **Lives, premieres and Shorts are not queued** (#39, `ytp.video_filter`). Only for a video that
+  is NEW to the queue: a free look at the feed's link first, then one yt-dlp metadata probe
+  (same proxy, a pause between probes, at most `MAX_PROBES_PER_POLL` per poll; the rest wait for
+  the next poll). The verdict is stored (`skipped_videos`) so a video is judged once and shown in
+  the subscription's details. A probe that fails for a passing reason (network, bot check,
+  timeout) postpones the video to the next poll; any other failure queues it, so the download
+  shows the real reason. A video with a job already (also a failed one) is never probed.
 * The download worker is woken once at the end, and the Jellyfin refresh is debounced by
   `LibraryRefresher`, so a batch of new videos causes one library refresh, not one per video.
 """
@@ -34,11 +41,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from . import jobs, subscriptions
+from . import jobs, skipped_videos, subscriptions
 from .db import Database
 from .feeds import FeedClient, FeedEntry, FeedError, parse_feed, parse_time
 from .metadata import sanitize_name
 from .subscriptions import Subscription
+from .video_filter import skip_reason
+from .youtube import ProbeError, VideoRef, YoutubeProbe
 from .youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker, job_external_id
 
 logger = logging.getLogger(__name__)
@@ -48,6 +57,10 @@ POLL_JOB_SECONDS = 60
 RETRY_MINUTES = 10
 MAX_CHANNELS_PER_RUN = 20
 PAUSE_SECONDS = (3.0, 8.0)  # between two channels of one run
+PROBE_PAUSE_SECONDS = (1.0, 3.0)  # between two metadata probes (#39)
+MAX_PROBES_PER_POLL = 8
+# Probe failures that say nothing about the video: judge it again at the next poll.
+TRANSIENT_PROBE_KINDS = frozenset({"network", "bot_check", "timeout", "busy"})
 
 
 class PollBusy(Exception):
@@ -102,6 +115,8 @@ class SubscriptionPoller:
         sleep: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
         pause: tuple[float, float] = PAUSE_SECONDS,
+        probe: YoutubeProbe | None = None,
+        probe_pause: tuple[float, float] = PROBE_PAUSE_SECONDS,
     ):
         self.db = db
         self.feeds = feeds
@@ -111,6 +126,8 @@ class SubscriptionPoller:
         self._sleep = sleep
         self._rng = rng or random.Random()
         self._pause = pause
+        self.probe = probe  # None: no filtering (every new video is queued)
+        self._probe_pause = probe_pause
         self.stop = threading.Event()  # set at shutdown: a run in progress ends early
         self._manual = threading.Lock()
 
@@ -151,7 +168,11 @@ class SubscriptionPoller:
             subscriptions.record_poll(self.db, sub.id, error.message, self._now())
             raise
         queued = 0
+        judge = _Judge(self, sub)
         for entry in new_entries(sub, entries):
+            external_id = job_external_id(entry.video_id, sub.target)
+            if jobs.find_job(self.db, JOB_TYPE, external_id) is None and not judge.allows(entry):
+                continue
             metadata = YoutubeJobMetadata(
                 video_id=entry.video_id,
                 channel=sub.channel_name,
@@ -163,7 +184,7 @@ class SubscriptionPoller:
             _, outcome = jobs.submit_job(
                 self.db,
                 JOB_TYPE,
-                job_external_id(entry.video_id, sub.target),
+                external_id,
                 metadata.to_json(),
                 retry_failed=False,
             )
@@ -171,7 +192,13 @@ class SubscriptionPoller:
         subscriptions.record_poll(self.db, sub.id, None, self._now())
         logger.info(
             "channel polled",
-            extra={"subscription_id": sub.id, "entries": len(entries), "queued": queued},
+            extra={
+                "subscription_id": sub.id,
+                "entries": len(entries),
+                "queued": queued,
+                "skipped": judge.skipped,
+                "postponed": judge.postponed,
+            },
         )
         return queued
 
@@ -216,3 +243,64 @@ class SubscriptionPoller:
         if result.queued and self.worker is not None:
             self.worker.wake()
         return result
+
+
+class _Judge:
+    """Decides, for the new videos of ONE poll, whether each is queued (`allows`)."""
+
+    def __init__(self, poller: SubscriptionPoller, sub: Subscription):
+        self._poller = poller
+        self._sub = sub
+        self._known = skipped_videos.skipped_ids(poller.db, sub.id)
+        self._probes = 0
+        self._probing_down = False
+        self.skipped = 0
+        self.postponed = 0
+
+    def allows(self, entry: FeedEntry) -> bool:
+        if entry.video_id in self._known:
+            return False  # judged at an earlier poll
+        if entry.short_link:
+            return self._skip(entry, "short")
+        if self._poller.probe is None:
+            return True
+        if self._probing_down or self._probes >= MAX_PROBES_PER_POLL:
+            self.postponed += 1
+            return False
+        if self._probes:
+            self._poller._sleep(self._poller._rng.uniform(*self._poller._probe_pause))
+        self._probes += 1
+        try:
+            traits = self._poller.probe.traits_blocking(VideoRef(entry.video_id))
+        except ProbeError as error:
+            if error.kind == "live":  # yt-dlp refuses a stream that runs or has not started yet
+                return self._skip(entry, "premiere" if error.upcoming else "live")
+            if error.kind in TRANSIENT_PROBE_KINDS:
+                self._probing_down = error.kind in {"network", "bot_check"}
+                self.postponed += 1
+                logger.warning(
+                    "video not judged yet, will try again",
+                    extra={"subscription_id": self._sub.id, "kind": error.kind},
+                )
+                return False
+            # Private, deleted, members-only, ...: the download names the reason in the job list.
+            return True
+        reason = skip_reason(traits)
+        return True if reason is None else self._skip(entry, reason)
+
+    def _skip(self, entry: FeedEntry, reason: str) -> bool:
+        skipped_videos.record(
+            self._poller.db,
+            self._sub.id,
+            entry.video_id,
+            reason,
+            sanitize_name(entry.title, entry.video_id),
+            entry.published.isoformat(),
+        )
+        self._known.add(entry.video_id)
+        self.skipped += 1
+        logger.info(
+            "video skipped",
+            extra={"subscription_id": self._sub.id, "video_id": entry.video_id, "reason": reason},
+        )
+        return False

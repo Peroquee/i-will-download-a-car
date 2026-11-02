@@ -130,6 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             FeedClient(settings.ytdlp_proxy),
             app.state.youtube_worker,
             poll_minutes=settings.subscription_poll_minutes or 60,
+            probe=app.state.youtube,  # lives, premieres and Shorts are left out (#39)
         )
         if settings.subscription_poll_minutes > 0:
             # New videos of subscribed channels go into the YouTube queue (#20). The feeds are

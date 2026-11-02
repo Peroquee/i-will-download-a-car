@@ -50,6 +50,7 @@ class FeedEntry:
     video_id: str
     title: str
     published: datetime  # timezone-aware, UTC
+    short_link: bool = False  # the feed's own link is a /shorts/ address (#39)
 
 
 def parse_time(text: str) -> datetime | None:
@@ -85,6 +86,21 @@ def read_xml(data: bytes, max_bytes: int) -> ET.Element:
         raise FeedError("bad_feed", "the feed is not valid XML") from None
 
 
+def _is_short_link(node: ET.Element) -> bool:
+    """Does the entry's alternate link point to youtube.com/shorts/...? (The feed links Shorts
+    that way, so this is a free first signal, see `ytp.video_filter`.)"""
+    for link in node.findall(f"{ATOM}link"):
+        if link.get("rel", "alternate") != "alternate":
+            continue
+        parts = urlsplit((link.get("href") or "").strip())
+        host = (parts.hostname or "").lower()
+        if host in {"youtube.com", "www.youtube.com", "m.youtube.com"} and parts.path.startswith(
+            "/shorts/"
+        ):
+            return True
+    return False
+
+
 def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
     """The videos of a feed, newest first. Raises FeedError("bad_feed") for anything unreadable.
 
@@ -106,7 +122,7 @@ def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
         if not VIDEO_ID.fullmatch(video_id) or published is None:
             continue
         title = " ".join((node.findtext(f"{ATOM}title") or "").split())
-        entries.append(FeedEntry(video_id, title, published))
+        entries.append(FeedEntry(video_id, title, published, _is_short_link(node)))
     entries.sort(key=lambda e: e.published, reverse=True)
     return entries
 

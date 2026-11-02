@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from .video_filter import VideoTraits
+
 logger = logging.getLogger(__name__)
 
 MAX_URL_LENGTH = 300
@@ -50,10 +52,13 @@ class InvalidVideoUrl(ValueError):
 class ProbeError(Exception):
     """The probe could not get the video's metadata. `kind` is stable, `message` is for people."""
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, upcoming: bool = False):
         super().__init__(message)
         self.kind = kind
         self.message = message
+        # kind "live" only: the video has not started yet (a premiere or a scheduled stream),
+        # as opposed to a stream that is running or has ended (#39).
+        self.upcoming = upcoming
 
 
 @dataclass(frozen=True)
@@ -170,7 +175,10 @@ def classify(message: str) -> ProbeError:
     cleaned = _ANSI.sub("", message or "").strip()
     for kind, pattern, text in _CLASSIFY:
         if re.search(pattern, cleaned, re.IGNORECASE):
-            return ProbeError(kind, text)
+            upcoming = kind == "live" and bool(
+                re.search(r"live event will begin|premieres? in", cleaned, re.IGNORECASE)
+            )
+            return ProbeError(kind, text, upcoming=upcoming)
     first_line = cleaned.splitlines()[0] if cleaned else "unknown error"
     return ProbeError("unknown", f"YouTube returned an error: {first_line[:200]}")
 
@@ -291,6 +299,20 @@ class YoutubeProbe:
             raise ProbeError("unknown", f"the probe failed: {type(exc).__name__}") from exc
         return self._to_info(ref, info)
 
+    def traits_blocking(self, ref: VideoRef) -> VideoTraits:
+        """What the poller needs to know about a NEW video of a subscription (#39): live status
+        and the Short signals. Same options, proxy and slots as the probe; raises ProbeError
+        (`kind` `live` also stands for "not started yet": yt-dlp refuses upcoming videos)."""
+        with self._slots:
+            try:
+                info = self._extract(ref.url, ydl_options(self.proxy, self._socket_timeout))
+            except ProbeError:
+                raise
+            except Exception as exc:  # an odd failure in yt-dlp must not stop the poll
+                logger.exception("yt-dlp probe crashed", extra={"video_id": ref.video_id})
+                raise ProbeError("unknown", f"the probe failed: {type(exc).__name__}") from exc
+        return VideoTraits.from_info(info)
+
     async def probe(self, ref: VideoRef) -> VideoInfo:
         """The probe with an overall deadline and a limit on parallel runs."""
         if not self._slots.acquire(blocking=False):
@@ -315,7 +337,11 @@ class YoutubeProbe:
         if info.get("_type") in {"playlist", "multi_video"} or info.get("entries"):
             raise ProbeError("unsupported", "This is a playlist, not one video.")
         if info.get("is_live") or info.get("live_status") in {"is_live", "is_upcoming"}:
-            raise ProbeError("live", "This is a live stream or premiere that has not ended yet.")
+            raise ProbeError(
+                "live",
+                "This is a live stream or premiere that has not ended yet.",
+                upcoming=info.get("live_status") == "is_upcoming",
+            )
         title = _clean(info.get("title"))
         if not title:
             raise ProbeError("unavailable", "YouTube returned no title for this video.")

@@ -81,6 +81,7 @@ def test_the_migration_creates_app_state_without_touching_the_first_tables(datab
         "0005_podcasts.sql",
         "0006_subscription_target.sql",
         "0007_magnet_progress.sql",
+        "0008_skipped_videos.sql",
     ]
 
 

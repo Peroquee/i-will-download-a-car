@@ -166,6 +166,10 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .job button { justify-self: start; }
 .subs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .subs form { margin-top: 12px; }
+.skipped { font-size: 13px; color: var(--muted); }
+.skipped summary { cursor: pointer; }
+.skipped ul { margin: 6px 0 6px 18px; padding: 0; }
+.skipped li { overflow-wrap: anywhere; }
 .job-note { margin: 0; font-size: 13px; color: var(--good); }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 button.danger { border-color: var(--bad); color: var(--bad); }

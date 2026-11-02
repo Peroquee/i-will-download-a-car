@@ -21,7 +21,12 @@ POST /api/subscriptions
 
 GET /api/subscriptions
     {"subscriptions": [{id, channel_id, channel_name, channel_url, enabled, backfill, created_at,
-                        last_checked, last_error}, ...]}
+                        last_checked, last_error, target, audio_only,
+                        skipped: {count, by_reason: {live, premiere, short},
+                                  recent: [{video_id, reason, title, published, skipped_at}]}},
+                       ...]}
+    `skipped` (#39): videos the poller left out on purpose (live streams, premieres, Shorts); the
+    five newest are listed. Not jobs, not failures.
 
 DELETE /api/subscriptions/{id}
     204; 404 if unknown. Videos that were already downloaded stay where they are.
@@ -44,7 +49,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import subscriptions
+from . import skipped_videos, subscriptions
 from .apiutil import PROBE_STATUS, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
 from .feeds import FeedError
@@ -121,7 +126,17 @@ async def list_subscriptions(request: Request) -> JSONResponse:
     if db is None:
         return problem(503, "The database is not available; see /health.")
     rows = await asyncio.to_thread(subscriptions.list_all, db)
-    return JSONResponse({"subscriptions": [row.as_dict() for row in rows]})
+    return JSONResponse(
+        {
+            "subscriptions": [
+                {
+                    **row.as_dict(),
+                    "skipped": await asyncio.to_thread(skipped_videos.summary, db, row.id),
+                }
+                for row in rows
+            ]
+        }
+    )
 
 
 async def unsubscribe(subscription_id: int, request: Request) -> Response:
