@@ -12,6 +12,8 @@
   var feedSerial = 0;
   var dash = null;   // the alert strip and the dashboard (dashboard.js, #38)
   var auth = null;   // sign-in, account menu, accounts page (auth.js, #44)
+  var catalogue = null;       // what "all episodes" would do for the feed in the form (#45)
+  var allConfirmed = false;   // the question "download N episodes?" has been shown
 
   /* A form of this page is NEVER submitted natively (it would send the pasted link in the address
      and create no job): whatever else fails, this guard is the first thing that runs. */
@@ -45,6 +47,8 @@
     applyTarget();
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
     refreshVpnText();
+    showCatalogueNote();
+    hideAllConfirm();
     renderJobsMini();
     renderSubs();
     if (dash) dash.render();
@@ -197,14 +201,40 @@
     select.value = "";
   }
 
+  /* "All episodes" (#45): what it would take, as text. */
+  function catalogueVars() {
+    var size = catalogue && catalogue.size
+      ? t("pc.all_size", { size: L.formatBytes(catalogue.size, lang) })
+      : t("pc.all_size_unknown");
+    return { n: catalogue ? catalogue.to_download : 0, size: size, skipped: catalogue && catalogue.skipped ? t("pc.all_skipped", { n: catalogue.skipped }) : "" };
+  }
+
+  function showCatalogueNote() {
+    var note = $("pc-all-note");
+    if (!catalogue) { note.textContent = ""; return; }
+    note.textContent = catalogue.to_download
+      ? t("pc.all_note", catalogueVars())
+      : t("pc.all_none");
+  }
+
+  function hideAllConfirm() {
+    allConfirmed = false;
+    $("pc-all-confirm").hidden = true;
+    $("pc-all-confirm").textContent = "";
+  }
+
   function runFeedProbe(link) {
     var serial = ++feedSerial;
+    catalogue = null;
+    hideAllConfirm();
     $("pc-status").textContent = t("pc.looking");
     post("/api/podcasts/probe", { feed: link.trim() }).then(function (reply) {
       if (serial !== feedSerial) return; // a newer paste replaced this one
       if (reply.status === 200) {
         $("f-podcast").value = reply.data.folder || reply.data.title || "";
         fillEpisodes(reply.data.episodes || []);
+        catalogue = reply.data.catalogue || null;
+        showCatalogueNote();
         $("pc-subscribe").checked = !reply.data.subscribed && !(reply.data.episodes || []).length;
         $("pc-status").textContent = reply.data.episodes.length
           ? t("pc.found", { title: reply.data.title, n: reply.data.episodes.length })
@@ -212,6 +242,7 @@
         return;
       }
       fillEpisodes([]);
+      showCatalogueNote();
       if (reply.status === 422) {
         $("pc-status").textContent = "";
         showFieldErrors(L.serverErrors(reply.data.detail));
@@ -380,12 +411,28 @@
       episode: $("pc-episode").value,
       subscribe: $("pc-subscribe").checked,
       backfill: $("pc-backfill").value,
+      all: $("pc-all").checked,
     };
     var problems = L.clientErrors("podcast", null, link, data, new Date().getFullYear());
     if (Object.keys(problems).length) {
       showFieldErrors(problems);
       showResult(t("result.fix"), false);
       return;
+    }
+    // "All episodes" asks first: how many, how much, and only the second press starts it.
+    if (data.all && catalogue && !allConfirmed) {
+      var confirm = $("pc-all-confirm");
+      if (!catalogue.space_ok) {
+        confirm.textContent = t("pc.all_nospace", catalogueVars());
+        confirm.hidden = false;
+        return;
+      }
+      if (catalogue.to_download) {
+        confirm.textContent = t("pc.all_confirm", catalogueVars());
+        confirm.hidden = false;
+        allConfirmed = true;
+        return;
+      }
     }
     var payloads = L.podcastPayloads(link, data);
     var lines = [];
@@ -424,8 +471,22 @@
         });
       });
     }
+    if (payloads.backlog) {
+      steps = steps.then(function () {
+        return post("/api/podcasts/backlog", payloads.backlog).then(function (reply) {
+          if (reply.status === 201 || reply.status === 200) {
+            if (reply.data.joined) lines.push(t("pc.all_joined"));
+            else if (!reply.data.started) lines.push(t("pc.all_nothing"));
+            else lines.push(t("pc.all_started", { n: reply.data.backlog.total }));
+          } else {
+            failed(reply, "pc.all_failed");
+          }
+        });
+      });
+    }
     steps.then(function () {
       $("submit").disabled = false;
+      hideAllConfirm();
       if (fieldErrors) { showFieldErrors(fieldErrors); lines.push(t("result.fix")); }
       showResult(lines.join(" "), good);
       if (good) resetFields();
@@ -448,6 +509,10 @@
     applyTarget();
     $("pc-subscribe").checked = false;
     $("pc-backfill").value = "0";
+    $("pc-all").checked = false;
+    catalogue = null;
+    showCatalogueNote();
+    hideAllConfirm();
     fillEpisodes([]);
     $("pc-status").textContent = "";
     $("f-episode").disabled = false;
@@ -827,6 +892,7 @@
         statusText: statusText,
         getJson: getJson,
         post: post,
+        request: request,
         isAdmin: function () { return !auth || auth.isAdmin(); },
         retryJob: function (id) { return post("/api/jobs/" + id + "/retry", {}).catch(function () { return null; }); },
       }) : null;   // an old cached dashboard.js must not take the form down with it
@@ -847,6 +913,7 @@
       $("f-episode").disabled = $("pack").checked;
       if ($("pack").checked) $("f-episode").value = "";
     });
+    $("pc-all").addEventListener("change", hideAllConfirm);
     $("link").addEventListener("input", onLinkChanged);
     $("link").addEventListener("change", onLinkChanged);   // autofill and some phone keyboards only send this
     $("link").addEventListener("blur", onLinkChanged);

@@ -44,6 +44,7 @@ only reads and writes the app's own tables; it controls nothing.
 | `job_failed` | error | a job failed (any kind, including "no sources for 7 days" from #40). Only jobs that fail after the app started watching; old failures are not announced |
 | `feed_error` | warning | a channel or podcast got a new or different `last_error`; not repeated while the same error stays |
 | `disk_low` | warning / error | the media drive has less than 10 % / 5 % free; once per crossing |
+| `backlog_paused` | warning | "All episodes" of a podcast (#45) stopped queuing because the next episode would leave too little room; once per pause, written by `podcast_backlog.py` (not by the monitor) |
 
 The watchdog has no database and is not changed: **the app polls its status** (`/status`, as for
 the VPN bar) and records the *changes*. A restart of the app does not repeat an alert (the last
@@ -64,6 +65,15 @@ unknown kind (a newer server, an older page) shows the English `title` and `deta
 - The log keeps at most 500 alerts, none older than 90 days. The VPN history keeps 500 changes.
 - Text from outside (a feed's error, a video title) is only ever set as text in the page, never
   as markup.
+
+## Back catalogue of a podcast (#45)
+
+"All episodes" in the podcast form starts a run that the dashboard follows: a *Whole back
+catalogue* section appears (hidden when there is none) with "Back catalogue: 40 of 312", a bar, the
+number not yet queued, failed and skipped, the state (running / paused for lack of free space /
+finished / stopped) and a *Stop* button. `GET /api/dashboard` carries it as `backlogs` (own runs;
+an admin sees all). The pause also raises the alert `backlog_paused`. Details:
+[podcasts.md](podcasts.md#the-whole-back-catalogue-issue-45).
 
 ## The API
 

@@ -792,6 +792,24 @@ def test_feed_addresses_trigger_the_feed_lookup_not_the_video_lookup():
 
 
 @needs_node
+@pytest.mark.parametrize(("values", "backlog"), [
+    ({"name": " My Cast ", "episode": "", "subscribe": False, "backfill": "0", "all": True},
+     {"feed": "https://p.example/f", "name": "My Cast"}),
+    ({"name": "", "episode": "", "subscribe": False, "backfill": "0", "all": True},
+     {"feed": "https://p.example/f"}),
+    ({"name": "X", "episode": "", "subscribe": False, "backfill": "0", "all": False}, None),
+])  # fmt: skip
+def test_all_episodes_makes_its_own_request_with_exactly_the_fields_the_server_takes(
+    client, values, backlog
+):
+    got = run_node(f"L.podcastPayloads(' https://p.example/f ', {json.dumps(values)})")
+    assert got == {"episode": None, "subscribe": None, "backlog": backlog}
+    if backlog is not None:
+        response = client.post("/api/podcasts/backlog", json=backlog)
+        assert response.status_code != 422, response.text  # no extra or missing field
+
+
+@needs_node
 @pytest.mark.parametrize(
     ("values", "episode", "subscribe"),
     [
@@ -807,7 +825,7 @@ def test_feed_addresses_trigger_the_feed_lookup_not_the_video_lookup():
 )  # fmt: skip
 def test_podcast_payloads_match_what_the_server_expects(client, values, episode, subscribe):
     got = run_node(f"L.podcastPayloads(' https://p.example/f ', {json.dumps(values)})")
-    assert got == {"episode": episode, "subscribe": subscribe}
+    assert got == {"episode": episode, "subscribe": subscribe, "backlog": None}
     # and the server accepts exactly these shapes (field names, no extras): 422 only for content
     for body, path in (
         (got["episode"], "/api/podcasts/episode"),
@@ -998,7 +1016,7 @@ ALERT_KINDS = (
     "vpn_down", "vpn_blind", "egress_mismatch", "watchdog_silent", "vpn_recovered",
     "job_failed", "feed_error", "disk_low",
     "update_done", "update_blocked", "update_rolled_back", "update_rolled_back_db",
-    "update_halted", "update_checks",
+    "update_halted", "update_checks", "backlog_paused",
 )  # fmt: skip
 
 
@@ -1020,7 +1038,8 @@ def test_the_ids_the_dashboard_script_uses_exist_in_the_page():
 
 def test_every_key_the_dashboard_uses_exists_in_both_languages():
     t = translations()
-    used = {k for k in re.findall(r'\bt\("([\w.]+)"', DASH_JS) if not k.endswith(".")}
+    used = {k for k in re.findall(r'\bt\("([\w.]+)"', DASH_JS) if not k.endswith((".", "_"))}
+    used |= {f"dash.backlog_{s}" for s in ("running", "paused", "done", "cancelled")}  # #45
     used |= {f"alert.sev.{s}" for s in ("info", "warning", "error")}
     used |= {f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch")}
     for kind in ALERT_KINDS:
@@ -1044,6 +1063,8 @@ def test_alert_texts_only_use_values_the_monitor_provides():
         "update_rolled_back_db": {"sha", "from_sha", "reason"},
         "update_halted": {"sha", "reason"},
         "update_checks": {"sha"},
+        # the back catalogue stopped for lack of room (#45, podcast_backlog.py)
+        "backlog_paused": {"podcast", "free_gb", "done", "total"},
     }
     t = translations()
     for lang in ("de", "en"):

@@ -26,7 +26,14 @@ class El {
   get className() { return this.attrs.class || ""; } set className(v) { this.attrs.class = v; }
   get hidden() { return this._hidden; } set hidden(v) { this._hidden = !!v; }
   get disabled() { return this._disabled; } set disabled(v) { this._disabled = !!v; }
-  get checked() { return this._checked; } set checked(v) { this._checked = !!v; }
+  get checked() { return this._checked; }
+  set checked(v) {
+    this._checked = !!v;
+    if (v && this.tag === "input" && this.type === "radio" && this.name) {   // one of a group
+      let top = this; while (top.parentNode) top = top.parentNode;
+      queryAll(top, "input").forEach((o) => { if (o !== this && o.type === "radio" && o.name === this.name) o._checked = false; });
+    }
+  }
   get type() { return this.attrs.type || (this.tag === "input" ? "text" : ""); } set type(v) { this.attrs.type = v; }
   get name() { return this.attrs.name || ""; }
   get title() { return this.attrs.title || ""; } set title(v) { this.attrs.title = v; }

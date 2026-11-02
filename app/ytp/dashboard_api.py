@@ -6,12 +6,16 @@
      "vpn": {"current": {state, since, paused, egress, country}, "history": [{time, condition,
              paused, reason}, ...]},
      "disk": {free_percent, free_gb, total_gb} | null,
-     "deploy": {deployed, deployed_at, result, message, paused, halted, checked_at} | null}
+     "deploy": {deployed, deployed_at, result, message, paused, halted, checked_at} | null,
+     "backlogs": [{id, folder, state, total, done, failed, waiting, skipped, size,
+                   paused_reason, created_at}, ...]}
 
 * `active`: everything queued, downloading or organizing, of every kind (torrent, YouTube,
   podcast). `progress` is a percent, `done_bytes`/`total_bytes` sizes, `speed` bytes per second and
   `eta` seconds; each is null while unknown (a queued job, metadata still loading, the worker has
   not reported yet). Torrent numbers come from the same cached qBittorrent call as the job list.
+* `backlogs` (#45): the "download all episodes" runs the account may see (an admin sees all):
+  unfinished ones and those that ended within a day. The page shows "Back catalogue: 40 of 312".
 * `deploy` (#42) is the small status file the automatic update writes into the app's config
   folder (`autodeploy-status.json`: the installed version, the last result, paused or halted; no
   address and no secret), or null when automatic updates are not set up.
@@ -31,7 +35,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import alertlog, jobs
+from . import alertlog, jobs, podcast_backlog
 from .apiutil import problem, visible_to
 from .clients.qbittorrent import Torrent
 from .jobs import Job
@@ -146,8 +150,10 @@ async def dashboard(request: Request):
         history = await asyncio.to_thread(alertlog.vpn_history, db, HISTORY)
         disk = await asyncio.to_thread(disk_summary, state.settings.data_root)
         deploy = await asyncio.to_thread(deploy_status, state.settings.config_dir)
+    backlogs = await asyncio.to_thread(podcast_backlog.visible, db, owner)
     return JSONResponse(
         {
+            "backlogs": [run.as_dict() for run in backlogs],
             "active": [active_row(j, torrents, progress, details) for j in active],
             "recent": [recent_row(j) for j in recent],
             "vpn": {"current": current, "history": history},

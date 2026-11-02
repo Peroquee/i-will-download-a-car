@@ -84,6 +84,7 @@ def test_the_migration_creates_app_state_without_touching_the_first_tables(datab
         "0008_skipped_videos.sql",
         "0009_alerts.sql",
         "0010_accounts.sql",
+        "0011_podcast_backlog.sql",
     ]
 
 
@@ -313,7 +314,13 @@ def test_the_scheduler_runs_with_the_app_and_stops_with_it(tmp_path):
         scheduler = client.app.state.scheduler
         assert scheduler.running
         assert sorted(scheduler.job_ids()) == sorted(
-            [HEARTBEAT_JOB_ID, "subscription-poll", "podcast-poll", "alert-monitor"]
+            [
+                HEARTBEAT_JOB_ID,
+                "subscription-poll",
+                "podcast-poll",
+                "podcast-backlog",
+                "alert-monitor",
+            ]
         )
         assert client.get("/health").json()["checks"]["scheduler"] == "ok"
         assert get_state(client.app.state.db, KEY_LAST_HEARTBEAT) is not None

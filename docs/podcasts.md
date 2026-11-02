@@ -16,6 +16,11 @@ in the library folder `MEDIA_DIR_PODCASTS` (default `Podcasts`), for Jellyfin.
 4. Subscribed podcasts are in the **Subscriptions** list next to the YouTube channels, each with
    *Check now* and *Remove*. Removing keeps every file already downloaded.
 
+5. **All episodes** (#45): tick it to download the whole back catalogue of the feed, with or without
+   subscribing. The page first says what that is ("312 episodes to download, about 18 GB; 12
+   already there ... skipped") and asks you to press *Add* a second time. See
+   [The whole back catalogue](#the-whole-back-catalogue-issue-45).
+
 Downloads appear in the job list like all others (label `Podcast - Episode`), with progress, the
 reason when one fails, and *Try again*.
 
@@ -48,6 +53,41 @@ Podcasts/<podcast>/folder.jpg            the cover, once per podcast (or folder.
   together with the feed address. The same episode is therefore downloaded once, whether it was
   picked by hand or found by the poller, and a failed one is *not* queued again by every poll
   (use *Try again*), exactly as for YouTube.
+
+## The whole back catalogue (issue #45)
+
+A feed lists every episode ever published, often hundreds. **All episodes** in the podcast form
+(or `POST /api/podcasts/backlog`, see `podcasts_api.py`) turns that into a *run* (`app/ytp/podcast_backlog.py`,
+migration `0011_podcast_backlog.sql`) instead of hundreds of jobs at once:
+
+* **What is taken.** Every episode of the feed (up to 3000, the feed may be 16 MiB) except those
+  that already have a job that is queued, running or done, or a file named like the app names it
+  (`<date> - <title>`, any extension, ` (2)` copies too) in the podcast's folder. A job that failed
+  earlier is taken again. The page shows the count and, from the sizes the feed announces, roughly
+  how much space (episodes without a size add nothing; "size unknown" if none has one).
+* **Order: newest first.** If the run is stopped (full drive, *Stop*), what is on disk is the most
+  recent, which is what most people want; Jellyfin sorts by date anyway. (Oldest first would suit
+  serials; say so and it is a one-line change in `plan`.)
+* **Not flooding.** A scheduler job (`podcast-backlog`, every 10 s) puts the next episodes into the
+  queue, but never more than **2** backlog episodes waiting or downloading, all runs together. The
+  single podcast worker takes jobs in order, so an episode someone picks by hand waits behind at
+  most two. YouTube downloads and torrents have their own workers and are not held up at all.
+* **Free space.** Before the run is accepted, the known sizes must fit: the drive must keep at least
+  5 GiB, or 5 % of its size (the disk monitor's "error" level), whichever is more, free after
+  them (`409 not_enough_space`; the page says so before it starts). The same rule is checked before
+  **every** episode. If it fails the run is **paused**, an alert `backlog_paused` ("The back
+  catalogue download is paused: only about N GB are free") is recorded once per pause (the dashboard
+  strip shows it like any alert), and the run continues by itself when there is room again.
+  This is separate from the monitor's ordinary `disk_low` alert for the whole drive.
+* **Progress.** The dashboard has a *Whole back catalogue* section: "Back catalogue: 40 of 312",
+  a bar, how many are not queued yet, failed (use *Try again* in the list below) or skipped, and a
+  *Stop* button. A finished or stopped run stays visible for a day and is forgotten after 14 days.
+* **Accounts (#44).** The episodes belong to the account that asked (they appear in that user's job
+  list); the subscription's other followers do not get them. Asking for a feed whose run is going
+  joins that run (the newcomer gets the episodes queued from then on): nothing is downloaded twice,
+  because an episode is one job whoever asks. Someone else's run cannot be seen or stopped (an
+  admin sees and may stop all).
+* **Not included:** YouTube channels (their feed shows only the newest 15).
 
 ## Jellyfin
 
@@ -104,9 +144,9 @@ fetching of podcast feeds, episodes and covers therefore goes through one module
 * **Every redirect is checked from scratch** (at most 5): a feed or a tracking redirect cannot
   bounce the app to a private address.
 * **Limits:** connect and read timeouts, an overall deadline per download (2 hours), a size limit
-  (feed 5 MiB, cover 5 MiB, episode 2 GiB; checked against `Content-Length` *and* counted while
+  (feed 16 MiB, cover 5 MiB, episode 2 GiB; checked against `Content-Length` *and* counted while
   reading), no compressed transfer (a compressed answer is refused), at most 3 feed lookups at
-  once, at most 300 episodes read per feed, at most 100 subscriptions.
+  once, at most 3000 episodes read per feed, at most 100 subscriptions.
 * **Content checks:** a feed must have a text/XML/RSS content type; an episode an audio, video or
   generic binary one; a cover a JPEG or PNG (checked by its first bytes too). An HTML or JSON page
   behind an "mp3" address is refused instead of being filed.

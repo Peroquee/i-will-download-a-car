@@ -41,8 +41,9 @@ from .safefetch import FetchError, SafeFetcher, check_url, is_jpeg, is_png
 logger = logging.getLogger(__name__)
 
 ITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
-MAX_FEED_BYTES = 5 * 1024 * 1024
-MAX_EPISODES = 300
+# A back catalogue of hundreds of episodes with long show notes is several MiB of XML (#45).
+MAX_FEED_BYTES = 16 * 1024 * 1024
+MAX_EPISODES = 3000
 MAX_COVER_BYTES = 5 * 1024 * 1024
 MAX_EPISODE_BYTES = 2 * 1024**3
 MAX_NAME_BYTES = 255
