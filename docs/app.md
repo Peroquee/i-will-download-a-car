@@ -377,12 +377,12 @@ scripts and styles.
 - The **VPN bar** (issue #28) sticks to the top of the page, so it is always in view; see below.
 
 **Same-origin protection (the note on !20):** the JSON endpoints are state-changing, and the
-browser holds the proxy login, so a page on another website could otherwise make it add downloads.
+browser holds the session cookie, so a page on another website could otherwise make it add downloads.
 Every POST/PUT/PATCH/DELETE is refused with 403 unless the browser says the request comes from this
 site: `Sec-Fetch-Site` must be `same-origin` or `none`, and an `Origin` header must name the same
 host and port as `Host` (Caddy passes `Host` through). `Origin: null` is refused. Requests with
 neither header are not from a page in a browser (curl, scripts) and are allowed, since they have to
-pass the proxy's login like everything else. The JSON endpoints also need
+have a session cookie (a login, [accounts.md](accounts.md)) like everything else. The JSON endpoints also need
 `Content-Type: application/json`, which a cross-site HTML form cannot send. No CORS headers are sent.
 Security headers on every answer: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`.

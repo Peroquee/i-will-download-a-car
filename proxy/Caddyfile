@@ -1,11 +1,11 @@
 # Reverse proxy for the youtube-premium stack (#29). Caddy 2, plain HTTP on the LAN.
 #
-# Two listeners, both guarded the same way, in this order:
-#   1. the client must be inside LAN_SUBNET, judged by the TCP connection's own source
-#      address (remote_ip). X-Forwarded-For is never read: trusted_proxies is not set,
-#      and client_ip (which would honour it) is deliberately not used.
-#   2. HTTP basic auth against PROXY_USER / PROXY_PASSWORD_HASH (a bcrypt hash, made by
-#      scripts/proxy/set_password.py).
+# Two listeners. Both check first that the client is inside LAN_SUBNET, judged by the TCP
+# connection's own source address (remote_ip). X-Forwarded-For is never read: trusted_proxies
+# is not set, and client_ip (which would honour it) is deliberately not used. Then
+#   - :8080 (the app) passes the request on: the app has its own accounts (#44);
+#   - :8081 (qBittorrent) asks for HTTP basic auth against PROXY_USER / PROXY_PASSWORD_HASH
+#     (a bcrypt hash, made by scripts/proxy/set_password.py).
 # Only then is the request passed on. Anything that fails answers before it reaches
 # the upstream, and an empty LAN_SUBNET, user or hash makes Caddy refuse to start
 # (a parse error), so a half-configured proxy never serves anything.
@@ -21,26 +21,33 @@
 	auto_https off
 }
 
-(guard) {
+(lan_only) {
 	@outside not remote_ip {$LAN_SUBNET}
 	respond @outside "Forbidden" 403
-
-	basic_auth {
-		{$PROXY_USER} {$PROXY_PASSWORD_HASH}
-	}
 
 	header -Server
 }
 
-# The app (#8). Reached over the compose bridge network.
+# The qBittorrent port keeps the proxy's own login (the app has none of its business there).
+(guard) {
+	import lan_only
+
+	basic_auth {
+		{$PROXY_USER} {$PROXY_PASSWORD_HASH}
+	}
+}
+
+# The app (#8). Reached over the compose bridge network. Only the LAN check is Caddy's job here
+# (#44): the app has its own accounts, login, sessions and permissions, and answers 401 itself.
 :8080 {
 	log {
 		output stdout
 		format json
 	}
 	route {
-		import guard
-		# The browser's basic-auth header is the PROXY's login: the upstream must never see it.
+		import lan_only
+		# Nothing of the proxy's own login is ever forwarded (qBittorrent port) and, symmetrically,
+		# the app's login cookie stays between the browser and the app.
 		reverse_proxy app:8000 {
 			header_up -Authorization
 		}

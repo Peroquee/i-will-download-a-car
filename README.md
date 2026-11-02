@@ -93,6 +93,7 @@ HILFE-MIT-KI.md        dasselbe auf Deutsch
 docs/podcasts.md       podcasts: RSS feeds, episodes, the library, the SSRF-safe fetcher
 docs/dashboard.md      the dashboard, the alert strip, where alerts come from
 docs/autodeploy.md     automatic updates: pull-based timer, checks, rollback, pause
+docs/accounts.md       accounts, roles, who sees what, login security
 ```
 
 ## Quick start
@@ -105,13 +106,16 @@ make test                        # everything this machine supports
 ## Reverse proxy and login (issue #29)
 
 ```bash
-make proxy-password      # once: asks for the password, writes PROXY_USER / PROXY_PASSWORD_HASH to .env
+make admin-password      # once: the app's first admin, writes APP_ADMIN_USER / APP_ADMIN_PASSWORD_HASH to .env
+make proxy-password      # once: the qBittorrent port's login, writes PROXY_USER / PROXY_PASSWORD_HASH
 docker compose up -d     # the proxy listens on PROXY_BIND:80 (app) and :8081 (qBittorrent)
-make proxy-check         # from a LAN machine: 401 without login, 200 with it, backend ports closed
+make proxy-check         # from a LAN machine: login on the qBittorrent port, the app's own 401, backend ports closed
 ```
 
-The app and qBittorrent's Web UI are reachable only through Caddy, only from `LAN_SUBNET`, only
-with the login. Design and troubleshooting: [docs/proxy.md](docs/proxy.md).
+The app and qBittorrent's Web UI are reachable only through Caddy and only from `LAN_SUBNET`.
+The app asks for an account (name and password; admins and users, see
+[docs/accounts.md](docs/accounts.md)); qBittorrent's port keeps the proxy's login for the admin.
+Design and troubleshooting: [docs/proxy.md](docs/proxy.md).
 
 ## Killswitch test (on the media VM, stack running)
 

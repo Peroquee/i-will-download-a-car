@@ -25,6 +25,7 @@ markers = [
   "slow: takes more than ~10 s",
   # Cross-cutting concerns.
   "security: guards a ground rule (VPN-only traffic, LAN-only, no secrets in git)",
+  "real_auth: the real login applies; without it every test request counts as a test admin (#44)",
 ]
 
 [tool.ruff]

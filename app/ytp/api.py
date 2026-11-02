@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import alerts_api, dashboard_api, jobs, jobs_api, podcasts_api, subscriptions_api
+from . import accounts, alerts_api, dashboard_api, jobs, jobs_api, podcasts_api, subscriptions_api
 from .apiutil import PROBE_STATUS, hand_to_qbittorrent, problem
 from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
@@ -76,6 +76,8 @@ async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     job, outcome = await asyncio.to_thread(
         jobs.submit_magnet_job, db, infohash, metadata_to_json(body.metadata), body.magnet
     )
+    # Whoever asked sees the job (also when somebody asked for the same torrent before).
+    await asyncio.to_thread(accounts.add_job_owner, db, job.id, request.state.account.id)
     # Log the infohash, never the link: it can carry tracker URLs with a private passkey.
     logger.info("magnet job", extra={"job_id": job.id, "infohash": infohash, "outcome": outcome})
     summary = {"id": job.id, "infohash": infohash, "type": category, "status": job.status}
@@ -206,6 +208,7 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
         job_external_id(ref.video_id, body.target),
         metadata.to_json(),
     )
+    await asyncio.to_thread(accounts.add_job_owner, db, job.id, request.state.account.id)
     logger.info(
         "youtube job", extra={"job_id": job.id, "video_id": ref.video_id, "outcome": outcome}
     )

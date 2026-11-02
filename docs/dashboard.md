@@ -67,7 +67,7 @@ unknown kind (a newer server, an older page) shows the English `title` and `deta
 
 ## The API
 
-All of it is behind the proxy login; the POSTs pass the same-origin check like every other
+All of it needs a login (an account of the app, see [accounts.md](accounts.md); the alert routes are for admins only); the POSTs pass the same-origin check like every other
 state-changing request. Details are in the module docstrings (`alerts_api.py`, `dashboard_api.py`).
 
 ```

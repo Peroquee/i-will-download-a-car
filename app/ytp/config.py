@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import accounts, passwords
 from .egress import parse_networks
 
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
@@ -80,6 +81,11 @@ class Settings:
     podcast_poll_minutes: int = 240
     # Give up on a magnet link with no progress for this many days; 0 = never (#40).
     magnet_stall_days: int = 7
+    # The first admin account (#44): created from these at start if it does not exist, and its
+    # password is reset to this hash whenever the hash in .env changes (the way to recover a lost
+    # admin password). The hash is made by scripts/app/set_admin.py; empty = no bootstrap.
+    admin_user: str = "admin"
+    admin_password_hash: str = field(default="", repr=False)
     # Networks the app never fetches from (podcasts): HOME_PUBLIC_IP plus FETCH_BLOCKED_NETWORKS,
     # i.e. the home network's own global IPv6 prefixes. Semi-secret like HOME_PUBLIC_IP: never in
     # repr/str or a log line, only the count (see `summary`).
@@ -117,6 +123,8 @@ class Settings:
             "qbit_user": self.qbit_user,
             "qbit_configured": self.qbit_configured,
             "fetch_blocked_networks": len(self.fetch_blocked_networks),
+            "admin_user": self.admin_user,
+            "admin_bootstrap": bool(self.admin_password_hash),
         }
 
     @classmethod
@@ -244,6 +252,17 @@ class Settings:
         else:
             problems.append("MAGNET_STALL_DAYS must be 0 (never) or a number of days up to 365")
 
+        admin_user = text("APP_ADMIN_USER", "admin")
+        if accounts.check_username(admin_user):
+            problems.append("APP_ADMIN_USER must be 3 to 64 characters: letters, digits, . _ -")
+        admin_hash = text("APP_ADMIN_PASSWORD_HASH", "")
+        if admin_hash == "changeme":
+            admin_hash = ""  # the template's placeholder: nothing set yet
+        elif admin_hash and not passwords.is_hash(admin_hash):
+            problems.append(
+                "APP_ADMIN_PASSWORD_HASH is not a hash made by scripts/app/set_admin.py"
+            )
+
         blocked: list = []
         for name in ("HOME_PUBLIC_IP", "FETCH_BLOCKED_NETWORKS"):
             try:
@@ -274,6 +293,8 @@ class Settings:
             podcast_proxy=podcast_proxy,
             podcast_poll_minutes=podcast_poll,
             magnet_stall_days=stall_days,
+            admin_user=admin_user,
+            admin_password_hash=admin_hash,
             fetch_blocked_networks=tuple(blocked),
         )
 

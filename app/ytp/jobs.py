@@ -192,39 +192,56 @@ def record_progress(db: Database, job_id: int, done_bytes: int, at: str) -> None
         )
 
 
-def active_jobs(db: Database) -> list[Job]:
+def _visible(owner_id: int | None) -> tuple[str, tuple[int, ...]]:
+    """SQL that limits `jobs` to the ones an account owns (None = no limit: an admin)."""
+    if owner_id is None:
+        return "", ()
+    return " JOIN job_owners o ON o.job_id = jobs.id AND o.account_id = ?", (owner_id,)
+
+
+def active_jobs(db: Database, owner_id: int | None = None) -> list[Job]:
     """Everything running or waiting, of every type, oldest first (the dashboard)."""
+    join, params = _visible(owner_id)
     rows = db.query(
-        "SELECT * FROM jobs WHERE status IN ('queued', 'downloading', 'organizing') ORDER BY id"
+        f"SELECT jobs.* FROM jobs{join} "
+        "WHERE jobs.status IN ('queued', 'downloading', 'organizing') ORDER BY jobs.id",
+        params,
     )
     return [Job.from_row(row) for row in rows]
 
 
-def recent_finished(db: Database, limit: int = 20) -> list[Job]:
+def recent_finished(db: Database, limit: int = 20, owner_id: int | None = None) -> list[Job]:
     """The newest done and failed jobs, by when they last changed."""
+    join, params = _visible(owner_id)
     rows = db.query(
-        "SELECT * FROM jobs WHERE status IN ('done', 'failed') "
-        "ORDER BY updated_at DESC, id DESC LIMIT ?",
-        (limit,),
+        f"SELECT jobs.* FROM jobs{join} WHERE jobs.status IN ('done', 'failed') "
+        "ORDER BY jobs.updated_at DESC, jobs.id DESC LIMIT ?",
+        (*params, limit),
     )
     return [Job.from_row(row) for row in rows]
 
 
-def list_jobs(db: Database, *, limit: int = 50, status: str | None = None) -> list[Job]:
-    """Jobs, newest first (the job list view)."""
-    if status is None:
-        rows = db.query("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))
-    else:
-        rows = db.query(
-            "SELECT * FROM jobs WHERE status = ? ORDER BY id DESC LIMIT ?", (status, limit)
-        )
+def list_jobs(
+    db: Database, *, limit: int = 50, status: str | None = None, owner_id: int | None = None
+) -> list[Job]:
+    """Jobs, newest first (the job list view). `owner_id`: only the jobs this account owns."""
+    join, params = _visible(owner_id)
+    where, extra = ("", ()) if status is None else (" WHERE jobs.status = ?", (status,))
+    rows = db.query(
+        f"SELECT jobs.* FROM jobs{join}{where} ORDER BY jobs.id DESC LIMIT ?",
+        (*params, *extra, limit),
+    )
     return [Job.from_row(row) for row in rows]
 
 
-def status_counts(db: Database) -> dict[str, int]:
+def status_counts(db: Database, owner_id: int | None = None) -> dict[str, int]:
     """How many jobs are in each status (zero for the empty ones)."""
+    join, params = _visible(owner_id)
     counts = dict.fromkeys(("queued", "downloading", "organizing", "done", "failed"), 0)
-    for row in db.query("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"):
+    for row in db.query(
+        f"SELECT jobs.status AS status, COUNT(*) AS n FROM jobs{join} GROUP BY jobs.status",
+        params,
+    ):
         counts[row["status"]] = row["n"]
     return counts
 

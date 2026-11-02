@@ -4,6 +4,8 @@
     "depends_on": {},
     "devices": [],
     "environment": {
+      "APP_ADMIN_PASSWORD_HASH": "changeme",
+      "APP_ADMIN_USER": "admin",
       "FETCH_BLOCKED_NETWORKS": "",
       "HOME_PUBLIC_IP": "",
       "JELLYFIN_API_KEY": "",

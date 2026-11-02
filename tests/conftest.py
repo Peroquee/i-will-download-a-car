@@ -11,6 +11,7 @@ the run instead of silently skipping it.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -56,3 +57,27 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _test_admin(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Issue #44: the app now needs a login for nearly everything. Tests of other things should not
+    each have to log in, so by default every request counts as a test admin (a hook that exists
+    only for this: `ytp.auth.TEST_ACCOUNT`, which nothing in the app ever sets). A test of the real
+    login is marked `real_auth` and gets no such account."""
+    try:
+        from ytp import auth
+        from ytp.accounts import Account
+    except ModuleNotFoundError:  # the integration job has no app dependencies: no app to log in to
+        yield
+        return
+
+    previous = auth.TEST_ACCOUNT
+    if request.node.get_closest_marker("real_auth"):
+        auth.TEST_ACCOUNT = None
+    else:
+        auth.TEST_ACCOUNT = Account(
+            1, "test-admin", "admin", False, "2026-01-01T00:00:00.000Z", None
+        )
+    yield
+    auth.TEST_ACCOUNT = previous

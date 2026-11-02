@@ -164,27 +164,49 @@ def test_the_lan_check_uses_the_connections_own_address_not_a_header():
 
 
 @pytest.mark.security
-def test_the_guard_checks_the_lan_before_the_login():
+def test_the_lan_check_comes_first_and_answers_403():
+    lan = re.search(r"^\(lan_only\) \{\n(.*?)^\}", CODE, re.S | re.M)
+    assert lan
+    body = lan.group(1)
+    assert body.index("@outside not remote_ip") < body.index("respond @outside")
+    assert "403" in body
+    assert "basic_auth" not in body
+
+
+@pytest.mark.security
+def test_the_qbittorrent_guard_checks_the_lan_before_the_login():
     guard = re.search(r"^\(guard\) \{\n(.*?)^\}", CODE, re.S | re.M)
     assert guard
     body = guard.group(1)
-    assert body.index("@outside not remote_ip") < body.index("respond @outside")
-    assert body.index("respond @outside") < body.index("basic_auth")
-    assert "403" in body
+    assert body.index("import lan_only") < body.index("basic_auth")
     assert "{$PROXY_USER} {$PROXY_PASSWORD_HASH}" in body
 
 
 @pytest.mark.security
 @pytest.mark.parametrize(
-    ("address", "upstream"), [(":8080", "app:8000"), (":8081", "gluetun:8080")]
+    ("address", "guard", "upstream"),
+    [
+        # #44: the app has its own accounts, so Caddy only checks the LAN there;
+        # the qBittorrent port keeps the proxy's basic auth (admin only)
+        (":8080", "lan_only", "app:8000"),
+        (":8081", "guard", "gluetun:8080"),
+    ],
 )
-def test_every_public_listener_applies_the_guard_before_proxying(address, upstream):
+def test_every_public_listener_applies_its_guard_before_proxying(address, guard, upstream):
     block = site_block(address)
     route = re.search(r"route \{\n(.*)\n\t\}", block, re.S)
     assert route, "the guard and the upstream must sit in one `route` so their order is kept"
     inner = route.group(1)
-    assert inner.index("import guard") < inner.index(f"reverse_proxy {upstream}")
+    assert inner.index(f"import {guard}") < inner.index(f"reverse_proxy {upstream}")
     assert inner.count("reverse_proxy") == 1
+    assert inner.count("import ") == 1
+
+
+@pytest.mark.security
+def test_only_the_qbittorrent_port_asks_for_basic_auth():
+    assert "basic_auth" not in site_block(":8080")
+    assert "basic_auth" not in site_block("http://127.0.0.1:8082")
+    assert "basic_auth" in CODE
 
 
 def test_the_caddyfile_listens_on_exactly_the_container_ports_compose_publishes():
@@ -196,7 +218,9 @@ def test_the_caddyfile_listens_on_exactly_the_container_ports_compose_publishes(
 @pytest.mark.security
 def test_the_only_other_listener_is_the_loopback_health_check():
     addresses = re.findall(r"^(\S+) \{$", CODE, re.M)
-    others = [a for a in addresses if not re.fullmatch(r":\d+", a) and a != "(guard)"]
+    others = [
+        a for a in addresses if not re.fullmatch(r":\d+", a) and a not in ("(guard)", "(lan_only)")
+    ]
     assert others == ["http://127.0.0.1:8082"]
     block = site_block("http://127.0.0.1:8082")
     assert "bind 127.0.0.1" in block
