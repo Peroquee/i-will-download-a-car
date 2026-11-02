@@ -172,8 +172,10 @@ What to fill in (the template explains each line):
 
 `.env` is gitignored; CI scans history for leaked secrets (`lint:secrets`).
 The `watchdog` (a later issue) is behind the `planned` profile, so `docker compose up -d` only
-starts what exists. The `proxy` needs `PROXY_USER` and `PROXY_PASSWORD_HASH` first: run
-`make proxy-password` (and set `PROXY_BIND` to the VM's LAN address), see [proxy.md](proxy.md).
+starts what exists. The `proxy` needs `PROXY_USER` and `PROXY_PASSWORD_HASH` first (the qBittorrent
+port's login): run `make proxy-password` (and set `PROXY_BIND` to the VM's LAN address), see
+[proxy.md](proxy.md). The app's own login needs the first admin: `make admin-password`, see
+[accounts.md](accounts.md).
 
 **ExpressVPN has no port forwarding.** Torrents still download, but nobody can
 connect *to* you through the VPN, so you get fewer peers and slower speeds on

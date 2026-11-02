@@ -1,12 +1,17 @@
 # Reverse proxy and login (issue #29)
 
 The app can trigger downloads, and qBittorrent's Web UI can do worse, so neither is
-reachable directly. **Caddy** is the only way in from the LAN. It does two things before it
-passes a request on, in this order:
+reachable directly. **Caddy** is the only way in from the LAN. Before it passes a request on:
 
-1. **LAN check.** The client's address must be inside `LAN_SUBNET` (default `192.168.178.0/24`),
-   otherwise Caddy answers `403` and the request goes no further.
-2. **Login.** HTTP basic auth: `401` unless user and password match.
+1. **LAN check (both ports).** The client's address must be inside `LAN_SUBNET` (default
+   `192.168.178.0/24`), otherwise Caddy answers `403` and the request goes no further.
+2. **Login, depending on the port.**
+   - The **app port** (`PROXY_PORT`) has no proxy login since #44: the app has its own accounts,
+     sessions and permissions and answers `401` itself ([accounts.md](accounts.md)). Caddy only
+     keeps the LAN check there.
+   - The **qBittorrent port** (`PROXY_QBT_PORT`) keeps HTTP basic auth (`PROXY_USER` /
+     `PROXY_PASSWORD_HASH`): `401` unless user and password match. That is the admin's door;
+     qBittorrent has its own login behind it.
 
 ```
 LAN client ──► VM:80    ─► Caddy ─► app:8000        (over the compose bridge)
@@ -27,7 +32,9 @@ you ever want TLS, Caddy can do it with its internal CA; nothing here requires i
    then publishes the proxy on that address only, and Compose refuses to start if the address
    does not exist. `PROXY_PORT` (default 80) is the app, `PROXY_QBT_PORT` (default 8081) the
    qBittorrent Web UI.
-2. **Login.** `make proxy-password` asks for a password (twice, at least 12 characters), has
+2. **Logins.** The app's first admin: `make admin-password` (scrypt hash in `APP_ADMIN_USER` /
+   `APP_ADMIN_PASSWORD_HASH`, see [accounts.md](accounts.md)). The qBittorrent port:
+   `make proxy-password` asks for a password (twice, at least 12 characters), has
    Caddy hash it with bcrypt and writes `PROXY_USER` and `PROXY_PASSWORD_HASH` to `.env`. The
    password itself is never written, logged or put on a command line. `--user NAME` changes the
    user (default `admin`). Run it again any time to change the password, then
@@ -43,13 +50,14 @@ you ever want TLS, Caddy can do it with its internal CA; nothing here requires i
    scripts/proxy/verify_proxy.py --host 192.168.178.123    # when PROXY_BIND is 0.0.0.0
    ```
 
-   It asks for the password and prints PASS/FAIL per check: `401` without a login (with a
-   `WWW-Authenticate: Basic` challenge) and with a wrong password, `200` with the right one
-   on both ports, and the app's own port 8000 and qBittorrent's own port not reachable on the
-   VM's LAN address. Exit code 0 means all passed.
+   It asks for the proxy password (the qBittorrent port's) and prints PASS/FAIL per check: the
+   app answers `/health` with `200` through the proxy and `401` (from the app, **without** a
+   `WWW-Authenticate: Basic` challenge) on `/api/jobs`; the qBittorrent port answers `401`
+   without a login and `200` with it; the app's own port 8000 and qBittorrent's own port are not
+   reachable on the VM's LAN address. Exit code 0 means all passed.
 
-Then open `http://<vm>/` for the app and `http://<vm>:8081/` for qBittorrent (browser login
-first, then qBittorrent's own login, which stays on as a second layer).
+Then open `http://<vm>/` for the app (the app's login page) and `http://<vm>:8081/` for
+qBittorrent (browser login first, then qBittorrent's own login, which stays on as a second layer).
 
 ## Design and decisions
 
@@ -79,7 +87,10 @@ cannot be tested without the real UI. Caddy passes the `Host` header through unc
 CSRF check, which compares `Origin` with `Host`, is **on** and keeps working.
 
 **The proxy login is not passed on.** The browser sends the basic-auth login (`Authorization:
-Basic ...`) with every request; Caddy checks it and, by default, would forward it. Both
+Basic ...`) with every request to the qBittorrent port; Caddy checks it and, by default, would
+forward it. (The app port has no basic auth any more, but keeps the rule: whatever a client puts
+in that header never reaches the app, and the app does not use it either; its login is the
+session cookie.) Both
 `reverse_proxy` blocks therefore remove the header (`header_up -Authorization`): no backend has a
 use for the proxy password, and qBittorrent 5.3 answers `401` to **any** request that carries an
 Authorization header (it reads one as API-key authentication), whatever the `Host` header says.
@@ -130,10 +141,14 @@ config is mounted read-only as a folder (`./proxy`). The version is pinned (`CAD
 
 **Fail closed.** The Caddyfile reads `LAN_SUBNET`, `PROXY_USER` and `PROXY_PASSWORD_HASH` from
 the environment; Compose requires all three; an empty value makes Caddy refuse to start or
-refuse every request. Nothing is served half-configured.
+refuse every request. Nothing is served half-configured. (The app port needs only the LAN
+subnet, but the proxy still starts as one piece: without a qBittorrent login it does not start.)
+The app itself fails closed too: with no account nobody gets past the login page, and the app
+logs an error that says how to make the admin.
 
 **Passwords and brute force.** bcrypt (cost 14) makes every guess slow, but Caddy has no
-rate limit of its own. The login is only reachable from the LAN. Use a long password. The hash
+rate limit of its own, so the qBittorrent port is protected by the LAN check and a long password.
+(The app brakes guessing itself: [accounts.md](accounts.md).) The hash
 is in `.env` (mode 600, gitignored) and is visible with `docker compose config` and
 `docker inspect`: it is a hash, not the password, but treat those outputs as private.
 Caddy's access log (JSON, `docker compose logs proxy`) redacts the `Authorization` header.
@@ -147,10 +162,10 @@ which Compose keeps literally. If you ever edit it by hand, keep the quotes.
 | What | Where | Needs |
 | --- | --- | --- |
 | Compose service: pinned image, user, read-only, capabilities, ports bound to `PROXY_BIND`, app unpublished, required login | `tests/unit/test_proxy_config.py`, `tests/integration/test_compose_config.py` | nothing / Compose CLI (CI) |
-| Caddyfile decisions: `remote_ip` before `basic_auth`, no `client_ip`/`trusted_proxies`, no admin API, listeners = published ports | `tests/unit/test_proxy_config.py` | nothing (CI) |
+| Caddyfile decisions: `remote_ip` before `basic_auth`, basic auth on the qBittorrent port only, no `client_ip`/`trusted_proxies`, no admin API, listeners = published ports | `tests/unit/test_proxy_config.py` | nothing (CI) |
 | `set_password.py`: hash via stdin, quoting, idempotent, mode kept, bad input | `tests/unit/test_proxy_set_password.py` | nothing (CI) |
 | `verify_proxy.py` against a fake proxy | `tests/unit/test_proxy_verify.py` | nothing (CI) |
-| The real Caddyfile in a real Caddy: valid, 401/200 inside, **403 outside including spoofed `X-Forwarded-For`**, refused requests never reach the upstream, fail closed | `tests/system/test_c10_proxy.py` | Docker daemon (`make test-system` on the VM, or the ytp-host runner) |
+| The real Caddyfile in a real Caddy: valid, qBittorrent port 401/200 inside and the app port passing requests on, **403 outside on both ports including spoofed `X-Forwarded-For`**, refused requests never reach the upstream, fail closed | `tests/system/test_c10_proxy.py` | Docker daemon (`make test-system` on the VM, or the ytp-host runner) |
 | The running stack from the LAN | `make proxy-check` | the stack running |
 
 The outside-the-LAN refusal is shown by the system test, not by `make proxy-check`: one machine
@@ -160,8 +175,10 @@ not in.
 
 ## Troubleshooting
 
-- **`401` with the right password:** the hash was not written (still `changeme`), or it lost its
-  quotes. Run `make proxy-password` again, then `docker compose up -d`.
+- **`401` on the app page with the right password:** that is the app's login, not the proxy's:
+  see [accounts.md](accounts.md) (lost password: `make admin-password`, then restart the app).
+- **`401` on port 8081 with the right password:** the hash was not written (still `changeme`), or
+  it lost its quotes. Run `make proxy-password` again, then `docker compose up -d`.
 - **`403`:** the client is not in `LAN_SUBNET`. From the VM itself use its LAN address, not
   `127.0.0.1`; if even that gives `403`, test from a PC.
 - **`docker compose up` says "cannot assign requested address":** `PROXY_BIND` is not an address
