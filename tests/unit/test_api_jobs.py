@@ -133,7 +133,14 @@ def test_an_empty_list_has_zero_counts(client):
     body = list_jobs(client).json()
     assert body == {
         "jobs": [],
-        "counts": {"queued": 0, "downloading": 0, "organizing": 0, "done": 0, "failed": 0},
+        "counts": {
+            "queued": 0,
+            "downloading": 0,
+            "organizing": 0,
+            "done": 0,
+            "failed": 0,
+            "dismissed": 0,
+        },
     }
 
 

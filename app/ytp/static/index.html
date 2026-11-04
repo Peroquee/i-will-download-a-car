@@ -306,6 +306,10 @@
 
       <section class="jobs" aria-labelledby="dash-recent-title">
         <h2 id="dash-recent-title" class="jobs-title" data-i18n="dash.recent"></h2>
+        <div class="jobs-tools">
+          <button type="button" id="dash-dismiss-all" class="ghost small" data-i18n="dash.dismiss_all" hidden></button>
+          <button type="button" id="dash-show-dismissed" class="ghost small" aria-pressed="false" hidden></button>
+        </div>
         <ul id="dash-recent-list" class="job-list"></ul>
         <p id="dash-recent-empty" class="note" data-i18n="dash.recent_empty" hidden></p>
       </section>
@@ -642,6 +646,8 @@
     "vpn.country": "Ausgang: {country}",
     "jobs.retry": "Nochmal versuchen",
     "jobs.retrying": "Wird erneut gestartet …",
+    "jobs.dismiss": "Ausblenden",
+    "jobs.restore": "Wieder einblenden",
     "jobs.no_reason": "Kein Grund gemeldet.",
     "jobs.id": "Auftrag #{id}",
     "jobs.progress": "{n} %",
@@ -669,6 +675,9 @@
     "dash.active_empty": "Gerade läuft und wartet nichts.",
     "dash.recent": "Zuletzt fertig oder fehlgeschlagen",
     "dash.recent_empty": "Noch nichts abgeschlossen.",
+    "dash.dismiss_all": "Alle fehlgeschlagenen ausblenden",
+    "dash.show_dismissed": "Ausgeblendete anzeigen ({n})",
+    "dash.hide_dismissed": "Ausgeblendete verbergen",
     "dash.vpn": "VPN und Wächter",
     "dash.vpn_empty": "Noch keine Wechsel aufgezeichnet.",
     "dash.since": "seit {when}",
@@ -1062,6 +1071,8 @@
     "vpn.country": "exit: {country}",
     "jobs.retry": "Try again",
     "jobs.retrying": "Starting again …",
+    "jobs.dismiss": "Dismiss",
+    "jobs.restore": "Show again",
     "jobs.no_reason": "No reason was reported.",
     "jobs.id": "Job #{id}",
     "jobs.progress": "{n}%",
@@ -1089,6 +1100,9 @@
     "dash.active_empty": "Nothing is running or waiting right now.",
     "dash.recent": "Recently finished or failed",
     "dash.recent_empty": "Nothing has finished yet.",
+    "dash.dismiss_all": "Dismiss all failed",
+    "dash.show_dismissed": "Show dismissed ({n})",
+    "dash.hide_dismissed": "Hide dismissed",
     "dash.vpn": "VPN and watchdog",
     "dash.vpn_empty": "No changes recorded yet.",
     "dash.since": "since {when}",

@@ -17,7 +17,8 @@
     var dashData = null;         // last answer of /api/dashboard
     var dashFailed = false;
     var extraAlert = null;       // an older alert named by the address (#alert-12)
-    var busy = {};               // "ack:12", "ack-all", "retry:7" while a request runs
+    var showDismissed = false;   // list the failed jobs this account dismissed as well
+    var busy = {};               // "ack:12", "ack-all", "retry:7", "dismiss:7" while a request runs
     var timer = null;
 
     function el(tag, className, text) {
@@ -150,6 +151,48 @@
       return li;
     }
 
+    /* "Ausblenden" / "Wieder einblenden": hides a failed job for this account (it stays, and can
+       still be retried); the input page's red "failed: N" no longer counts it. */
+    function dismissButton(job) {
+      var key = "dismiss:" + job.id;
+      var label = job.dismissed ? "jobs.restore" : "jobs.dismiss";
+      var button = el("button", "ghost small dismiss", t(label));
+      button.type = "button";
+      button.disabled = !!busy[key];
+      button.setAttribute("aria-label", t(label) + ": " + job.label);
+      button.addEventListener("click", function () {
+        busy[key] = true;
+        renderDashboard();
+        var done = job.dismissed ? ctx.restoreJob(job.id) : ctx.dismissJob(job.id);
+        done.then(function () { delete busy[key]; refreshDashboard(); });
+      });
+      return button;
+    }
+
+    /* The two buttons above the list: dismiss every failed job, show or hide the dismissed ones. */
+    function renderRecentTools() {
+      var failed = dashData.recent.some(function (job) { return job.status === "failed" && !job.dismissed; });
+      var all = $("dash-dismiss-all");
+      all.hidden = !failed;
+      all.disabled = !!busy["dismiss-all"];
+      var count = dashData.dismissed || 0;
+      var toggle = $("dash-show-dismissed");
+      toggle.hidden = count === 0 && !showDismissed;
+      toggle.textContent = t(showDismissed ? "dash.hide_dismissed" : "dash.show_dismissed", { n: count });
+      toggle.setAttribute("aria-pressed", showDismissed ? "true" : "false");
+    }
+
+    function dismissAll() {
+      busy["dismiss-all"] = true;
+      renderDashboard();
+      ctx.dismissAllFailed().then(function () { delete busy["dismiss-all"]; refreshDashboard(); });
+    }
+
+    function toggleDismissed() {
+      showDismissed = !showDismissed;
+      refreshDashboard();
+    }
+
     function recentRow(job) {
       var li = el("li", "job" + (job.status === "failed" ? " job-failed" : job.status === "done" ? " job-done" : ""));
       var top = el("div", "job-top");
@@ -162,7 +205,9 @@
       var when = ctx.timeText(job.updated_at);
       if (when) meta.push(when);
       li.appendChild(el("div", "job-meta", meta.join(" · ")));
+      if (job.dismissed) li.classList.add("job-dismissed");
       if (job.status === "failed") li.appendChild(el("p", "job-error", job.error || t("jobs.no_reason")));
+      if (job.status === "failed") li.appendChild(dismissButton(job));
       if (job.can_retry) {
         var button = el("button", "ghost small", t(busy["retry:" + job.id] ? "jobs.retrying" : "jobs.retry"));
         button.type = "button";
@@ -269,6 +314,7 @@
       recent.textContent = "";
       dashData.recent.forEach(function (job) { recent.appendChild(recentRow(job)); });
       $("dash-recent-empty").hidden = dashData.recent.length > 0;
+      renderRecentTools();
       renderBacklogs(dashData.backlogs);
       renderVpn(dashData.vpn);
       focusVpn();
@@ -336,7 +382,7 @@
 
     function refreshDashboard() {
       if (view !== "dashboard") return Promise.resolve();
-      return ctx.getJson("/api/dashboard").then(function (data) {
+      return ctx.getJson("/api/dashboard" + (showDismissed ? "?dismissed=1" : "")).then(function (data) {
         dashData = data;
         dashFailed = false;
       }).catch(function () { dashFailed = true; }).then(renderDashboard);
@@ -384,6 +430,8 @@
     function start() {
       $("alert-strip-ack").addEventListener("click", acknowledgeAll);
       $("dash-alerts-ack").addEventListener("click", acknowledgeAll);
+      $("dash-dismiss-all").addEventListener("click", dismissAll);
+      $("dash-show-dismissed").addEventListener("click", toggleDismissed);
       root.addEventListener("hashchange", function () {
         focused = null;
         /* Input and subscriptions are one address with two hashes: switch without a reload. */

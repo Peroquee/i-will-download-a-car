@@ -949,8 +949,11 @@ def test_migrations_only_add_in_one_release():
     only. Dropping or renaming happens in a LATER release once no code uses it, so the previous
     version can still run on the new schema. 0005 rebuilt the jobs table and is the one exception
     (it keeps every row and id, tested in test_podcast_migration); a new exception must be added
-    here on purpose, with a reason."""
+    here on purpose, with a reason. 0013 has a DELETE FROM only inside a trigger that clears the
+    new job_dismissals table: it touches no existing data, and the previous version never reads
+    that table, so it still runs on the new schema."""
     allowed = {"0005_podcasts.sql"}
+    allowed_words = {"0013_job_dismissals.sql": {"DELETE FROM"}}
     risky = ("DROP TABLE", "DROP COLUMN", "DROP INDEX", "RENAME TO", "RENAME COLUMN", "DELETE FROM")
     offenders = []
     for path in sorted((ROOT / "app/ytp/migrations").glob("*.sql")):
@@ -959,5 +962,9 @@ def test_migrations_only_add_in_one_release():
         code = "\n".join(
             line.split("--")[0] for line in path.read_text(encoding="utf-8").splitlines()
         ).upper()
-        offenders += [f"{path.name}: {word}" for word in risky if word in code]
+        offenders += [
+            f"{path.name}: {word}"
+            for word in risky
+            if word in code and word not in allowed_words.get(path.name, ())
+        ]
     assert not offenders, offenders

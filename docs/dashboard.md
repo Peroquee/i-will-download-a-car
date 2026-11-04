@@ -21,7 +21,7 @@ unread. It polls every 5 seconds with the VPN bar (not while the tab is hidden).
 | Part | What it shows |
 |---|---|
 | Running and waiting | every queued, downloading or organizing job of every kind (torrent, YouTube, podcast) with percent, downloaded of total, speed and remaining time. Refreshed every 3 seconds while the page is open. |
-| Recently finished or failed | the 20 newest, with the reason for a failure and the same **Try again** as the job list (`POST /api/jobs/{id}/retry`). |
+| Recently finished or failed | the 20 newest, with the reason for a failure and the same **Try again** as the job list (`POST /api/jobs/{id}/retry`). A failed job also has **Dismiss** (*Ausblenden*), and there is **Dismiss all failed** above the list. A dismissed job no longer counts in the red "failed: N" on the input page and leaves this list; **Show dismissed (N)** brings it back, with **Show again** per job. Dismissing is not deleting: the job stays and can still be retried, and a retry clears the dismissal (a job that fails again shows again). It is per account, also for an admin: a user dismisses only their own jobs, an admin any, and nobody else's view changes (`POST/DELETE /api/jobs/{id}/dismiss`, `POST /api/jobs/dismiss-failed`). |
 | VPN and watchdog | the current state and the history of changes (time, state, "torrents paused"). |
 | Storage | free space on the media drive. |
 | Alerts | the whole log (newest first, 50), each with *what happened*, *what the app did* and *what you can do*, in German or English; unread ones are highlighted and can be marked as read. |
