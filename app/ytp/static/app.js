@@ -895,6 +895,9 @@
         request: request,
         isAdmin: function () { return !auth || auth.isAdmin(); },
         retryJob: function (id) { return post("/api/jobs/" + id + "/retry", {}).catch(function () { return null; }); },
+        dismissJob: function (id) { return post("/api/jobs/" + id + "/dismiss", {}).catch(function () { return null; }); },
+        restoreJob: function (id) { return request("DELETE", "/api/jobs/" + id + "/dismiss").catch(function () { return null; }); },
+        dismissAllFailed: function () { return post("/api/jobs/dismiss-failed", {}).catch(function () { return null; }); },
       }) : null;   // an old cached dashboard.js must not take the form down with it
     } catch (e) { dash = null; }
     try {

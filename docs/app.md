@@ -497,6 +497,12 @@ failed, with a button "Failed only" for when they have scrolled out of the 50. A
   torrent goes to qBittorrent again; a video goes back into the download queue. If qBittorrent
   refuses or is unreachable the job is `failed` again with the new reason (502/503, as for
   `POST /api/magnet`). The route is covered by the same-origin check like every other POST.
+- `counts.failed` leaves out the failed jobs the asking account dismissed, and `counts.dismissed`
+  says how many those are (the input page's red "failed: N" line reads `counts.failed`). Every job
+  also has `dismissed`. `POST /api/jobs/{id}/dismiss` hides a failed job for the asking account (409
+  if it is not failed, 404 if it is unknown or not theirs), `DELETE` on the same path shows it
+  again, `POST /api/jobs/dismiss-failed` dismisses every failed job the account can see. Nothing is
+  deleted; a retry clears the dismissal. See docs/dashboard.md.
 
 **The magnet link is kept for retries.** A retry needs the trackers, which the infohash alone does
 not have, so migration `0003_job_source` adds `jobs.source` and the magnet endpoint stores the

@@ -1066,3 +1066,98 @@ def test_a_finished_run_has_no_stop_button():
     out = dashboard_with([done], {"read": "#dash-backlog-list"})
     assert ["DELETE", "/api/podcasts/backlog/7"] not in out["fetched"]
     assert out["errors"] == []
+
+
+# --- dismissing failed jobs: the dashboard buttons and the input page's red line ---
+
+FAILED_JOB = {
+    "id": 7, "type": "youtube", "kind": "youtube", "label": "Blender - Big Buck Bunny",
+    "status": "failed", "error": "HTTP 403", "can_retry": True, "dismissed": False,
+    "created_at": "", "updated_at": "",
+}  # fmt: skip
+DONE_JOB = {**FAILED_JOB, "id": 8, "status": "done", "error": None, "can_retry": False}
+
+
+def dashboard_jobs(recent, dismissed=0, *steps, language="en-US"):
+    answers = {
+        "/api/dashboard": {**ANSWERS["/api/dashboard"], "recent": recent, "dismissed": dismissed},
+        "POST /api/jobs/7/dismiss": {"id": 7, "dismissed": True},
+        "DELETE /api/jobs/7/dismiss": {"id": 7, "dismissed": False},
+        "POST /api/jobs/dismiss-failed": {"dismissed": 1},
+    }
+    return page("/dashboard", language=language, answers=answers, steps=[*steps])
+
+
+@needs_node
+def test_a_failed_job_can_be_dismissed_from_the_dashboard():
+    out = dashboard_jobs([FAILED_JOB], 0, {"click": "#dash-recent-list .dismiss"})
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/jobs/7/dismiss"] in out["fetched"]
+    # The list is fetched again afterwards, so the row goes away.
+    assert out["fetched"].count(["GET", "/api/dashboard"]) >= 2
+
+
+@needs_node
+def test_the_dismiss_button_says_ausblenden_in_german_and_names_the_job():
+    out = dashboard_jobs([FAILED_JOB], 0, {"read": "#dash-recent-list"}, language="de")
+    assert "Ausblenden" in out["reads"]["#dash-recent-list"]["text"]
+    out = dashboard_jobs([FAILED_JOB], 0, {"read": "#dash-recent-list"})
+    assert "Dismiss" in out["reads"]["#dash-recent-list"]["text"]
+
+
+@needs_node
+def test_a_finished_job_has_no_dismiss_button():
+    out = dashboard_jobs([DONE_JOB], 0, {"read": "#dash-recent-list"})
+    assert "Dismiss" not in out["reads"]["#dash-recent-list"]["text"]
+    out = dashboard_jobs([DONE_JOB], 0, {"read": "#dash-dismiss-all"})
+    assert out["reads"]["#dash-dismiss-all"]["hidden"] is True
+
+
+@needs_node
+def test_dismiss_all_failed_shows_only_with_failed_jobs_and_posts():
+    out = dashboard_jobs([FAILED_JOB, DONE_JOB], 0, {"read": "#dash-dismiss-all"})
+    assert out["reads"]["#dash-dismiss-all"]["hidden"] is False
+    assert "Dismiss all failed" in out["reads"]["#dash-dismiss-all"]["text"]
+    out = dashboard_jobs([FAILED_JOB], 0, {"click": "#dash-dismiss-all"})
+    assert out["errors"] == [], out["errors"]
+    assert ["POST", "/api/jobs/dismiss-failed"] in out["fetched"]
+
+
+@needs_node
+def test_the_show_dismissed_toggle_appears_only_when_there_are_dismissed_jobs():
+    out = dashboard_jobs([DONE_JOB], 0, {"read": "#dash-show-dismissed"})
+    assert out["reads"]["#dash-show-dismissed"]["hidden"] is True
+    out = dashboard_jobs([DONE_JOB], 2, {"read": "#dash-show-dismissed"})
+    assert out["reads"]["#dash-show-dismissed"]["hidden"] is False
+    assert out["reads"]["#dash-show-dismissed"]["text"] == "Show dismissed (2)"
+    out = dashboard_jobs([DONE_JOB], 2, {"read": "#dash-show-dismissed"}, language="de")
+    assert out["reads"]["#dash-show-dismissed"]["text"] == "Ausgeblendete anzeigen (2)"
+
+
+@needs_node
+def test_the_toggle_asks_for_the_dismissed_jobs_and_a_dismissed_job_can_be_shown_again():
+    shown = {**FAILED_JOB, "dismissed": True}
+    out = dashboard_jobs([DONE_JOB], 1, {"click": "#dash-show-dismissed"})
+    assert out["errors"] == [], out["errors"]
+    assert ["GET", "/api/dashboard?dismissed=1"] in out["fetched"]
+    out = dashboard_jobs([shown], 1, {"read": "#dash-recent-list"}, {"read": "#dash-dismiss-all"})
+    assert "Show again" in out["reads"]["#dash-recent-list"]["text"]
+    assert out["reads"]["#dash-dismiss-all"]["hidden"] is True  # nothing left to dismiss
+    out = dashboard_jobs([shown], 1, {"click": "#dash-recent-list .dismiss"})
+    assert ["DELETE", "/api/jobs/7/dismiss"] in out["fetched"]
+
+
+@needs_node
+def test_a_dismissed_failed_job_does_not_colour_the_input_line_red():
+    gone = {"jobs": [], "counts": {"queued": 0, "failed": 0, "dismissed": 1}}
+    out = page("/", answers={"/api/jobs": gone}, steps=[
+        {"read": "#jobs-mini"}, {"read": "#jobs-mini-text"},
+    ])  # fmt: skip
+    assert "failed" not in out["reads"]["#jobs-mini-text"]["text"]
+    assert "jobs-mini-has-failed" not in out["reads"]["#jobs-mini"]["cls"]
+    still = {"jobs": [], "counts": {"queued": 0, "failed": 1, "dismissed": 0}}
+    out = page("/", answers={"/api/jobs": still}, steps=[
+        {"read": "#jobs-mini"}, {"read": "#jobs-mini-text"},
+    ])  # fmt: skip
+    assert "failed: 1" in out["reads"]["#jobs-mini-text"]["text"]
+    assert "jobs-mini-has-failed" in out["reads"]["#jobs-mini"]["cls"]
