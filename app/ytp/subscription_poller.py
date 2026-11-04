@@ -8,9 +8,21 @@ are DUE and hands new videos to the YouTube download queue (#18). Rules:
   so channels drift apart instead of all going at once. Within a run there are a few seconds of
   pause between two channels. After a failure a channel is tried again after 10 minutes (or the
   base interval if that is shorter), not after a full hour.
+* **Where the list comes from.** yt-dlp lists the channel's newest uploads first
+  (`channel_videos.py`, the RSS feed answers 404 for whole networks); the RSS feed is the
+  fallback if that fails. If both fail the error says it is YouTube (`feeds.SERVICE_*`), which the
+  alert monitor turns into ONE alert, not one per channel.
 * **First subscribe.** Only videos published AFTER the subscription was made are downloaded; the
   back catalogue never is. The subscription's `backfill` (default 0) is the exception: the first
   poll also takes that many of the newest older videos.
+* **New or old, without dates.** The yt-dlp list has no dates (the RSS feed has). The poll walks
+  the list from the newest video and stops at the first one it knows (settled in an earlier poll:
+  `seen_videos`) or that is older than the subscription. A video it does not know is dated by
+  one yt-dlp look at it (the same look that decides live / premiere / Short, #39), so it costs
+  nothing extra. A video that already has a job, or was skipped on purpose, is known. The
+  settled videos are written down only when a poll got to its end: if it had to stop early (a
+  look failed for a passing reason, or `MAX_PROBES_PER_POLL`), the next poll starts again at the
+  newest video and the work already done (the jobs) is not repeated.
 * **No seen-list of its own.** A video is "seen" when the queue already has a job for it (done,
   running, queued or failed): the unique index of `jobs` decides, so a video fetched by hand, or
   shown by two channels, is downloaded once, and a failed video is NOT re-queued by every poll
@@ -41,12 +53,22 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from . import accounts, jobs, skipped_videos, subscriptions
+from . import accounts, jobs, seen_videos, skipped_videos, subscriptions
+from .channel_videos import ChannelLister
 from .db import Database
-from .feeds import FeedClient, FeedEntry, FeedError, parse_feed, parse_time
+from .feeds import (
+    CHANNEL_GONE,
+    SERVICE_BOT,
+    SERVICE_DOWN,
+    FeedClient,
+    FeedEntry,
+    FeedError,
+    parse_feed,
+    parse_time,
+)
 from .metadata import sanitize_name
 from .subscriptions import Subscription
-from .video_filter import skip_reason
+from .video_filter import VideoTraits, skip_reason
 from .youtube import ProbeError, VideoRef, YoutubeProbe
 from .youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker, job_external_id
 
@@ -61,6 +83,10 @@ PROBE_PAUSE_SECONDS = (1.0, 3.0)  # between two metadata probes (#39)
 MAX_PROBES_PER_POLL = 8
 # Probe failures that say nothing about the video: judge it again at the next poll.
 TRANSIENT_PROBE_KINDS = frozenset({"network", "bot_check", "timeout", "busy"})
+
+
+# "Newer than any subscription": a video that cannot be dated but must not be taken for old.
+NEW_FOR_SURE = datetime.max.replace(tzinfo=UTC)
 
 
 class PollBusy(Exception):
@@ -93,11 +119,12 @@ def new_entries(sub: Subscription, entries: list[FeedEntry]) -> list[FeedEntry]:
     """The entries to queue, oldest first: published after subscribing, plus on the very first
     poll the `backfill` newest older ones."""
     subscribed = parse_time(sub.created_at) or datetime.now(UTC)
-    wanted = [e for e in entries if e.published > subscribed]
+    dated = [e for e in entries if e.published is not None]
+    wanted = [e for e in dated if e.published > subscribed]  # type: ignore[operator]
     if sub.last_checked is None and sub.backfill > 0:
-        older = [e for e in entries if e.published <= subscribed]  # entries are newest first
-        wanted += older[: sub.backfill]
-    return sorted(wanted, key=lambda e: e.published)
+        older = [e for e in dated if e.published <= subscribed]  # type: ignore[operator]
+        wanted += older[: sub.backfill]  # entries are newest first
+    return sorted(wanted, key=lambda e: e.published)  # type: ignore[arg-type,return-value]
 
 
 class SubscriptionPoller:
@@ -117,6 +144,7 @@ class SubscriptionPoller:
         pause: tuple[float, float] = PAUSE_SECONDS,
         probe: YoutubeProbe | None = None,
         probe_pause: tuple[float, float] = PROBE_PAUSE_SECONDS,
+        lister: ChannelLister | None = None,
     ):
         self.db = db
         self.feeds = feeds
@@ -127,6 +155,7 @@ class SubscriptionPoller:
         self._rng = rng or random.Random()
         self._pause = pause
         self.probe = probe  # None: no filtering (every new video is queued)
+        self.lister = lister  # None: the RSS feed alone (the list from yt-dlp comes first)
         self._probe_pause = probe_pause
         self.stop = threading.Event()  # set at shutdown: a run in progress ends early
         self._manual = threading.Lock()
@@ -159,28 +188,96 @@ class SubscriptionPoller:
 
     # -- polling -------------------------------------------------------------------------------
 
+    def _entries(self, sub: Subscription) -> list[FeedEntry]:
+        """The channel's newest videos, newest first: from yt-dlp, else from the RSS feed.
+        Raises FeedError with a text that says what really happened."""
+        listing_error: ProbeError | None = None
+        if self.lister is not None:
+            try:
+                return self.lister.list(sub.channel_id)
+            except ProbeError as error:
+                if error.kind == "not_found":
+                    raise FeedError("not_found", CHANNEL_GONE) from None
+                listing_error = error
+                logger.warning(
+                    "channel list from yt-dlp failed, trying the RSS feed",
+                    extra={"subscription_id": sub.id, "kind": error.kind},
+                )
+        try:
+            return parse_feed(self.feeds.fetch(sub.channel_id), sub.channel_id)
+        except FeedError as feed_error:
+            if listing_error is None:
+                raise
+            if listing_error.kind == "network" and feed_error.kind == "network":
+                raise  # nothing reaches YouTube at all: the VPN or the line is down
+            text = SERVICE_BOT if listing_error.kind == "bot_check" else SERVICE_DOWN
+            raise FeedError("temporary", text) from None
+
     def poll(self, sub: Subscription) -> int:
         """Look at one channel now. Returns how many videos were queued; raises FeedError.
         Records last_checked/last_error either way."""
         try:
-            entries = parse_feed(self.feeds.fetch(sub.channel_id), sub.channel_id)
+            entries = self._entries(sub)
         except FeedError as error:
             subscriptions.record_poll(self.db, sub.id, error.message, self._now())
             raise
+        subscribed = parse_time(sub.created_at) or self._now()
+        seen = seen_videos.ids(self.db, sub.id)
+        skipped = skipped_videos.skipped_ids(self.db, sub.id)
+        judge = _Judge(self, sub)
+
+        # Walk from the newest video down to the first one that is settled or older than the
+        # subscription; `wanted` are the new ones (newest first, with their place in the list).
+        wanted: list[tuple[int, FeedEntry]] = []
+        boundary: int | None = None
+        stopped_early = False
+        for index, entry in enumerate(entries):
+            if entry.video_id in seen:
+                boundary = index
+                break
+            has_job = (
+                jobs.find_job(self.db, JOB_TYPE, job_external_id(entry.video_id, sub.target))
+                is not None
+            )
+            if entry.video_id in skipped and not has_job:
+                continue  # judged new at an earlier poll and left out on purpose
+            published = entry.published
+            if published is None and not has_job:
+                try:
+                    published = judge.date_of(entry)
+                except _Postpone:
+                    stopped_early = True
+                    break
+            if published is not None and published <= subscribed:
+                boundary = index
+                break
+            wanted.append((index, entry))
+        if (
+            boundary is not None
+            and sub.last_checked is None
+            and sub.backfill > 0
+            and not stopped_early
+        ):
+            wanted += list(enumerate(entries))[boundary : boundary + sub.backfill]
+
         queued = 0
         followers = accounts.followers(self.db, "channel", sub.id)
-        judge = _Judge(self, sub)
-        for entry in new_entries(sub, entries):
+        for _, entry in sorted(wanted, key=lambda pair: pair[0], reverse=True):  # oldest first
             external_id = job_external_id(entry.video_id, sub.target)
             if jobs.find_job(self.db, JOB_TYPE, external_id) is None and not judge.allows(entry):
                 continue
+            published_day = (
+                (entry.published or judge.published_of(entry))
+                if (sub.target == "podcast")
+                else None
+            )
             metadata = YoutubeJobMetadata(
                 video_id=entry.video_id,
                 channel=sub.channel_name,
                 title=sanitize_name(entry.title, entry.video_id),
                 target=sub.target,
                 audio_only=sub.audio_only,
-                published=(entry.published.date().isoformat() if sub.target == "podcast" else None),
+                published=published_day.date().isoformat() if published_day else None,
             )
             job, outcome = jobs.submit_job(
                 self.db,
@@ -192,6 +289,8 @@ class SubscriptionPoller:
             for follower in followers:  # everybody who follows the channel sees the job
                 accounts.add_job_owner(self.db, job.id, follower)
             queued += outcome == "created"
+        if not stopped_early and not judge.postponed:
+            seen_videos.add(self.db, sub.id, [e.video_id for e in entries])
         subscriptions.record_poll(self.db, sub.id, None, self._now())
         logger.info(
             "channel polled",
@@ -248,17 +347,67 @@ class SubscriptionPoller:
         return result
 
 
+class _Postpone(Exception):
+    """A video cannot be looked at now (a passing failure, or enough looks for this poll)."""
+
+
 class _Judge:
-    """Decides, for the new videos of ONE poll, whether each is queued (`allows`)."""
+    """Looks at the new videos of ONE poll: their date (`date_of`, for lists without dates) and
+    whether each is queued (`allows`). Both use the same single yt-dlp look per video."""
 
     def __init__(self, poller: SubscriptionPoller, sub: Subscription):
         self._poller = poller
         self._sub = sub
         self._known = skipped_videos.skipped_ids(poller.db, sub.id)
+        self._looked: dict[str, VideoTraits | ProbeError] = {}
         self._probes = 0
         self._probing_down = False
         self.skipped = 0
         self.postponed = 0
+
+    def _traits(self, entry: FeedEntry) -> VideoTraits:
+        """One look at the video (cached for this poll). Raises ProbeError for a permanent
+        failure and `_Postpone` for a passing one or when the looks of this poll are used up."""
+        cached = self._looked.get(entry.video_id)
+        if isinstance(cached, ProbeError):
+            raise cached
+        if cached is not None:
+            return cached
+        if self._poller.probe is None or self._probing_down or self._probes >= MAX_PROBES_PER_POLL:
+            self.postponed += 1
+            raise _Postpone
+        if self._probes:
+            self._poller._sleep(self._poller._rng.uniform(*self._poller._probe_pause))
+        self._probes += 1
+        try:
+            traits = self._poller.probe.traits_blocking(VideoRef(entry.video_id))
+        except ProbeError as error:
+            if error.kind in TRANSIENT_PROBE_KINDS and error.kind != "live":
+                self._probing_down = error.kind in {"network", "bot_check"}
+                self.postponed += 1
+                logger.warning(
+                    "video not judged yet, will try again",
+                    extra={"subscription_id": self._sub.id, "kind": error.kind},
+                )
+                raise _Postpone from None
+            self._looked[entry.video_id] = error
+            raise
+        self._looked[entry.video_id] = traits
+        return traits
+
+    def date_of(self, entry: FeedEntry) -> datetime | None:
+        """When the video went online. A video that cannot be looked at for good (private,
+        members-only, a stream that has not started, ...) counts as new: the download or the
+        verdict then names the reason. Raises `_Postpone` if it cannot be looked at now."""
+        try:
+            return self._traits(entry).published or NEW_FOR_SURE
+        except ProbeError:
+            return NEW_FOR_SURE
+
+    def published_of(self, entry: FeedEntry) -> datetime | None:
+        """The date of a video already looked at (None if it was not, or has none)."""
+        traits = self._looked.get(entry.video_id)
+        return traits.published if isinstance(traits, VideoTraits) else None
 
     def allows(self, entry: FeedEntry) -> bool:
         if entry.video_id in self._known:
@@ -267,25 +416,13 @@ class _Judge:
             return self._skip(entry, "short")
         if self._poller.probe is None:
             return True
-        if self._probing_down or self._probes >= MAX_PROBES_PER_POLL:
-            self.postponed += 1
-            return False
-        if self._probes:
-            self._poller._sleep(self._poller._rng.uniform(*self._poller._probe_pause))
-        self._probes += 1
         try:
-            traits = self._poller.probe.traits_blocking(VideoRef(entry.video_id))
+            traits = self._traits(entry)
+        except _Postpone:
+            return False
         except ProbeError as error:
             if error.kind == "live":  # yt-dlp refuses a stream that runs or has not started yet
                 return self._skip(entry, "premiere" if error.upcoming else "live")
-            if error.kind in TRANSIENT_PROBE_KINDS:
-                self._probing_down = error.kind in {"network", "bot_check"}
-                self.postponed += 1
-                logger.warning(
-                    "video not judged yet, will try again",
-                    extra={"subscription_id": self._sub.id, "kind": error.kind},
-                )
-                return False
             # Private, deleted, members-only, ...: the download names the reason in the job list.
             return True
         reason = skip_reason(traits)
@@ -298,7 +435,7 @@ class _Judge:
             entry.video_id,
             reason,
             sanitize_name(entry.title, entry.video_id),
-            entry.published.isoformat(),
+            entry.published.isoformat() if entry.published else None,
         )
         self._known.add(entry.video_id)
         self.skipped += 1

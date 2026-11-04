@@ -43,6 +43,7 @@ only reads and writes the app's own tables; it controls nothing.
 | `vpn_recovered` | info | back to `ok` after one of the four above |
 | `job_failed` | error | a job failed (any kind, including "no sources for 7 days" from #40). Only jobs that fail after the app started watching; old failures are not announced |
 | `feed_error` | warning | a channel or podcast got a new or different `last_error`; not repeated while the same error stays |
+| `youtube_unavailable` | warning | channels fail because of YouTube as a whole (the channel list from yt-dlp **and** the RSS feed failed, `feeds.SERVICE_WIDE`): ONE alert for all channels, not one each; again only after it was gone and came back |
 | `disk_low` | warning / error | the media drive has less than 10 % / 5 % free; once per crossing |
 | `backlog_paused` | warning | "All episodes" of a podcast (#45) stopped queuing because the next episode would leave too little room; once per pause, written by `podcast_backlog.py` (not by the monitor) |
 

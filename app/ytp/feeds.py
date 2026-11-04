@@ -16,6 +16,12 @@ and needs no API key. The feed comes from the internet, so it is treated as untr
 
 Failures are `FeedError(kind, message)`: `network` (not reachable, probably the VPN), `not_found`
 (404: the channel is gone), `temporary` (429/5xx), `bad_feed` (anything unreadable).
+
+Since 2026-11 the feed is only the fallback: `channel_videos.py` lists the channel with yt-dlp
+first, because YouTube answers the feed with 404 for whole networks. A 404 of the FEED therefore
+does not mean "this channel has no feed"; the texts below say what happened, and the ones that
+concern YouTube as a whole (`SERVICE_WIDE`) are recognised by the alert monitor, which raises ONE
+alert for all channels instead of one per channel.
 """
 
 from __future__ import annotations
@@ -38,6 +44,29 @@ CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}")
 _DTD = re.compile(r"<!\s*(doctype|entity)", re.IGNORECASE)
 
 
+# Messages that are about YouTube, not about one channel. Kept as constants: the alert monitor
+# recognises them by their text (`is_service_wide`).
+SERVICE_DOWN = (
+    "YouTube is not giving out video lists right now (the channel page and the RSS feed both "
+    "failed). That is on YouTube's side, not this channel's. The app tries again."
+)
+SERVICE_BOT = (
+    "YouTube asks for proof that this is not a bot, and its RSS feed is not available either. "
+    "Try again later, or set YTDLP_PROXY empty to ask YouTube directly instead of through the VPN."
+)
+SERVICE_RSS_404 = (
+    "YouTube's RSS feed is not available (HTTP 404). YouTube switches it off for whole networks "
+    "at times; it is not about this channel."
+)
+CHANNEL_GONE = "YouTube says this channel does not exist any more (deleted or renamed?)."
+SERVICE_WIDE = frozenset({SERVICE_DOWN, SERVICE_BOT, SERVICE_RSS_404})
+
+
+def is_service_wide(message: str | None) -> bool:
+    """Is this a `last_error` that says YouTube is the problem, for every channel alike?"""
+    return message in SERVICE_WIDE
+
+
 class FeedError(Exception):
     def __init__(self, kind: str, message: str):
         super().__init__(message)
@@ -49,7 +78,7 @@ class FeedError(Exception):
 class FeedEntry:
     video_id: str
     title: str
-    published: datetime  # timezone-aware, UTC
+    published: datetime | None  # timezone-aware UTC; None for a listing made with yt-dlp
     short_link: bool = False  # the feed's own link is a /shorts/ address (#39)
 
 
@@ -123,7 +152,7 @@ def parse_feed(data: bytes, channel_id: str | None = None) -> list[FeedEntry]:
             continue
         title = " ".join((node.findtext(f"{ATOM}title") or "").split())
         entries.append(FeedEntry(video_id, title, published, _is_short_link(node)))
-    entries.sort(key=lambda e: e.published, reverse=True)
+    entries.sort(key=lambda e: e.published or datetime.min.replace(tzinfo=UTC), reverse=True)
     return entries
 
 
@@ -176,7 +205,7 @@ class FeedClient:
         finally:
             conn.close()
         if status == 404:
-            raise FeedError("not_found", "YouTube has no feed for this channel (HTTP 404)")
+            raise FeedError("not_found", SERVICE_RSS_404)
         if status == 429 or status >= 500:
             raise FeedError("temporary", f"YouTube answered HTTP {status}; will try again later")
         if status != 200:

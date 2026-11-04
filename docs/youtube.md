@@ -94,15 +94,17 @@ issue text says `/data/media/youtube/...`; the stack's real library folder is `M
 ## Subscriptions: `/api/subscriptions` (issue #19)
 
 A subscription is a channel the app watches for new videos (the polling itself is #20). The
-channel's RSS feed is keyed by the channel id (`UC...`, 24 characters), not by the `@handle`, so
-the id is looked up **once**, when subscribing, and stored.
+channel's list of videos is keyed by the channel id (`UC...`, 24 characters), not by the `@handle`,
+so the id is looked up **once**, when subscribing, and stored.
 
 - `POST /api/subscriptions {"channel": ..., "name": ..., "backfill": 0}`. `channel` can be the
-  channel id, an `@handle`, a `youtube.com/channel/UC...` or `youtube.com/@handle` address
-  (optionally with a tab like `/videos`), or the address of **one video** (which is how the form
-  subscribes: the channel is read from the video). Everything else is refused with a message, the
-  same way as for videos (other sites, ports, logins, playlists, the legacy `/c/` and `/user/`
-  names), and what yt-dlp gets is rebuilt from the parsed value. The lookup uses the same proxy and
+  channel id, an `@handle`, a `youtube.com/channel/UC...`, `youtube.com/@handle` or the old-style
+  `youtube.com/c/name` / `youtube.com/user/name` address (optionally with a tab like `/videos`),
+  or the address of **one video** (which is how the form subscribes: the channel is read from the
+  video). All of them end in the same stored `UC...` id (`tests/system/test_c20_channel_listing.py`
+  checks `@mkbhd`, `/c/mkbhd`, `/user/marquesbrownlee`, `/channel/UC...` against real YouTube).
+  Everything else is refused with a message, the same way as for videos (other sites, ports,
+  logins, playlists), and what yt-dlp gets is rebuilt from the parsed value. The lookup uses the same proxy and
   restricted yt-dlp as the probe (YouTube extractors only, nothing downloaded, nothing cached).
   Answers: 201 with the subscription; 200 `duplicate: true` if the channel is already subscribed
   (nothing changes, whatever address was used); 422 per field; 409 above 200 subscriptions; a failed
@@ -113,7 +115,8 @@ the id is looked up **once**, when subscribing, and stored.
   nothing usable is left). An explicit name goes through the same check as everywhere else.
 - `backfill` (0-15, default **0**) is how many of the channel's existing videos the first poll
   should also fetch. The default means: **only videos published after subscribing; the back
-  catalogue is never downloaded.** 15 is the size of a channel's RSS feed.
+  catalogue is never downloaded.** 15 is the size of a channel's RSS feed (the list from yt-dlp
+  is longer, but the limit stays).
 - `GET /api/subscriptions` lists them (by name) with `last_checked` and `last_error` (both empty
   until the poller of #20 has run; it records them with `subscriptions.record_poll`).
 - `DELETE /api/subscriptions/{id}` unsubscribes (204; 404 if unknown). Videos already downloaded
@@ -127,9 +130,44 @@ A scheduler job (`subscription-poll`, every minute) looks at the subscribed chan
 and queues their new videos in the same queue as `POST /api/youtube/download` (#18). Everything
 after that is the normal download path: job list, retry, filing, Jellyfin refresh.
 
-- **The feed:** `https://www.youtube.com/feeds/videos.xml?channel_id=UC...`, the 15 newest videos,
-  no API key. It is fetched through the same proxy as yt-dlp (`YTDLP_PROXY`, the VPN by default;
-  empty = directly), without following redirects, with a 15-second timeout and a 1 MB limit.
+- **Where the list of new videos comes from (changed 2026-11).** YouTube's RSS feed
+  (`feeds/videos.xml?channel_id=UC...`) answered **404 for every channel** from 2026-11-04 on, from
+  the VM host and from the container, also for the playlist variants; public reports say it does
+  that for whole networks, on and off, since December 2025. The poller therefore asks **yt-dlp
+  first** (`app/ytp/channel_videos.py`): the *flat* listing of
+  `https://www.youtube.com/channel/<id>/videos`, the 30 newest entries (cut off after 30: yt-dlp
+  would otherwise page through the whole channel), one request, no extraction of the single
+  videos. That tab lists neither Shorts nor live streams. Same proxy (`YTDLP_PROXY`), same
+  restricted yt-dlp as every other lookup. The RSS feed is the **fallback** if the listing fails
+  (a bot check, a timeout, ...): it has dates and the Short signal for free, but it is the part
+  that breaks. Why yt-dlp first and not the other way round: it works now, its path is exercised
+  every hour instead of a fallback nobody notices, and a doomed 404 per channel per hour is
+  avoided. The RSS feed is fetched through the same proxy, without following redirects, with a
+  15-second timeout and a 1 MB limit.
+- **The list has no dates.** A flat yt-dlp entry carries id, title and duration, but no upload
+  time. So the poll walks the list from the newest video and stops at the first video that is
+  **settled** (an earlier poll saw it through: `subscription_seen_videos`, migration 0012) or **older
+  than the subscription**. A video it does not know is dated by one yt-dlp look at it, the same look
+  that decides live / premiere / Short (#39), so the cost is no more than before: one look per new
+  video. A video with a job, or one that was skipped on purpose, is known without a look. If a
+  look fails for a passing reason (network, bot check, timeout) or the 8 looks of a poll are used,
+  the poll stops there, nothing is marked settled and the next poll starts again at the newest
+  video (jobs already made are not repeated). A video that can never be looked at (private, members
+  only) counts as new, so its job shows the reason. Somebody newly following a channel clears the
+  settled list, so the videos already queued become theirs too (#44). The first poll after this
+  update costs one look per existing subscription (the first video without a job); nothing is
+  downloaded that was not new. One gap: a video published in the minute between subscribing and
+  the first poll can be taken for old if a newer old video is above it; the list is newest-first,
+  so in practice only that minute is affected.
+- **Errors say what happened.** The old text "YouTube has no feed for this channel (HTTP 404)" was
+  wrong when YouTube as a whole is the problem. Now: the channel does not exist any more (yt-dlp
+  says so: "YouTube says this channel does not exist any more"); or both the list and the feed
+  failed, which is YouTube's side ("YouTube is not giving out video lists right now ...", a bot
+  check has its own text with the `YTDLP_PROXY` hint); or nothing reaches YouTube at all (the VPN
+  text, and the run stops after the first channel). Errors about YouTube as a whole share one
+  text for every channel, which is how the alert monitor recognises them: **one** alert
+  (`youtube_unavailable`) instead of one per channel; it comes again only if the problem went away
+  and returned.
 - **The XML is untrusted.** Any `<!DOCTYPE` or `<!ENTITY` makes the feed be refused before it is
   parsed (a real feed has neither; they are what entity-expansion attacks need), so the standard
   library parser is enough and no dependency was added. Only the video id (11 characters), the

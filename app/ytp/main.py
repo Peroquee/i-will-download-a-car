@@ -18,6 +18,7 @@ from fastapi import FastAPI, Response, status
 
 from . import __version__, accounts, api, auth, auth_api
 from .auth import AuthMiddleware, LoginLimiter
+from .channel_videos import ChannelLister
 from .channels import ChannelResolver
 from .clients.jellyfin import JellyfinClient, LibraryRefresher
 from .clients.qbittorrent import QbitClient
@@ -142,6 +143,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.youtube_worker,
             poll_minutes=settings.subscription_poll_minutes or 60,
             probe=app.state.youtube,  # lives, premieres and Shorts are left out (#39)
+            # The list of a channel's newest videos comes from yt-dlp (the RSS feed is the
+            # fallback: YouTube answers it with 404 for whole networks), through the same proxy.
+            lister=ChannelLister(app.state.youtube),
         )
         if settings.subscription_poll_minutes > 0:
             # New videos of subscribed channels go into the YouTube queue (#20). The feeds are

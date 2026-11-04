@@ -7,13 +7,13 @@ The channel RSS feed (#20) is keyed by the channel id (`UC` + 22 characters), no
 
 * a channel id (`UCxxxxxxxxxxxxxxxxxxxxxx`),
 * a handle (`@name`),
-* the address of a channel on youtube.com: `/channel/UC...` or `/@name`, optionally followed by
-  a tab such as `/videos`,
+* the address of a channel on youtube.com: `/channel/UC...`, `/@name`, or the old-style
+  `/c/name` and `/user/name`, optionally followed by a tab such as `/videos`,
 * the address of ONE video (the channel is read from the video, which is what the YouTube form
   has at hand when "subscribe" is ticked).
 
-Everything else (other sites, ports, logins, playlists, the legacy `/c/` and `/user/` names)
-is refused with a message before yt-dlp sees anything, and what yt-dlp gets is rebuilt from the
+Everything else (other sites, ports, logins, playlists) is refused with a message before yt-dlp
+sees anything, and what yt-dlp gets is rebuilt from the
 parsed value, never the pasted text. The lookup goes through the same proxy and the same
 restricted yt-dlp as the probe (see youtube.py), and never starts a download.
 """
@@ -45,6 +45,9 @@ logger = logging.getLogger(__name__)
 
 CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}")
 HANDLE = re.compile(r"@[A-Za-z0-9._-]{3,30}")
+# /c/name and /user/name: letters, digits, dots, dashes, underscores (names with other letters
+# arrive percent-encoded, which the pattern allows as well)
+LEGACY_NAME = re.compile(r"[A-Za-z0-9._%-]{1,100}")
 CHANNEL_TABS = frozenset({"", "videos", "featured", "streams", "shorts", "about", "playlists"})
 
 
@@ -54,15 +57,16 @@ class InvalidChannel(ValueError):
 
 @dataclass(frozen=True)
 class ChannelRef:
-    kind: str  # "id" | "handle" | "video"
-    value: str  # the channel id, the handle with its "@", or the video id
+    kind: str  # "id" | "handle" | "legacy" | "video"
+    # the channel id, the handle with its "@", "c/name" or "user/name", or the video id
+    value: str
 
     @property
     def url(self) -> str:
         """The only address handed to yt-dlp for an id or a handle: rebuilt from the value."""
         if self.kind == "id":
             return f"https://www.youtube.com/channel/{self.value}"
-        if self.kind == "handle":
+        if self.kind in {"handle", "legacy"}:
             return f"https://www.youtube.com/{self.value}"
         return f"https://www.youtube.com/watch?v={self.value}"
 
@@ -115,8 +119,15 @@ def parse_channel_ref(text: str) -> ChannelRef:
             if len(segments) <= 2 and (segments[1] if len(segments) > 1 else "") in CHANNEL_TABS:
                 return ChannelRef("handle", first)
         elif first in {"c", "user"}:
+            name = segments[1] if len(segments) > 1 else ""
+            if (
+                LEGACY_NAME.fullmatch(name)
+                and len(segments) <= 3
+                and (segments[2] if len(segments) > 2 else "") in CHANNEL_TABS
+            ):
+                return ChannelRef("legacy", f"{first}/{name}")
             raise InvalidChannel(
-                "this old-style channel address cannot be used: paste the @handle address, "
+                "this old-style channel address is not valid: paste the @handle address, "
                 "the /channel/UC... address, or a video of the channel"
             )
         elif first in {"playlist"}:
