@@ -10,6 +10,7 @@ the run instead of silently skipping it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -57,6 +58,21 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _no_real_channel_listing(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """The channel poller asks yt-dlp (YouTube) for a channel's videos. A test must never do that
+    by accident (an app made with `create_app` has a real lister): it fails like a network error
+    unless the test passes its own `extract`. Tests of the real thing are gated system tests."""
+    if request.node.get_closest_marker("real_ytdlp"):
+        return
+
+    def refuse(url, options, limit):
+        raise OSError("tests do not list channels on YouTube")
+
+    with contextlib.suppress(ModuleNotFoundError):  # a job without the app's packages: no app
+        monkeypatch.setattr("ytp.channel_videos._list_with_ytdlp", refuse)
 
 
 @pytest.fixture(autouse=True)

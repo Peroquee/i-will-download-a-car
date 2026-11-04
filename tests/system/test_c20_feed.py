@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-from ytp.feeds import FeedClient, parse_feed
+from ytp.feeds import FeedClient, FeedError, parse_feed
 
 pytestmark = [
     pytest.mark.network,
@@ -29,7 +29,13 @@ PROXY = os.environ.get("YTP_YTDLP_PROXY", "")
 
 
 def test_the_real_feed_has_recent_videos_in_the_expected_shape():
-    entries = parse_feed(FeedClient(PROXY).fetch(BLENDER), BLENDER)
+    try:
+        data = FeedClient(PROXY).fetch(BLENDER)
+    except FeedError as error:
+        if error.kind == "not_found":  # YouTube answers the feed with 404 for whole networks
+            pytest.skip("YouTube's RSS feed is off for this network (HTTP 404): fallback only")
+        raise
+    entries = parse_feed(data, BLENDER)
     assert entries, "the channel has published videos"
     assert len(entries) <= 15
     assert all(len(e.video_id) == 11 and e.title for e in entries)

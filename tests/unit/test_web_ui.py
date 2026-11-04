@@ -1016,7 +1016,7 @@ ALERT_KINDS = (
     "vpn_down", "vpn_blind", "egress_mismatch", "watchdog_silent", "vpn_recovered",
     "job_failed", "feed_error", "disk_low",
     "update_done", "update_blocked", "update_rolled_back", "update_rolled_back_db",
-    "update_halted", "update_checks", "backlog_paused",
+    "update_halted", "update_checks", "backlog_paused", "youtube_unavailable",
 )  # fmt: skip
 
 
@@ -1065,6 +1065,8 @@ def test_alert_texts_only_use_values_the_monitor_provides():
         "update_checks": {"sha"},
         # the back catalogue stopped for lack of room (#45, podcast_backlog.py)
         "backlog_paused": {"podcast", "free_gb", "done", "total"},
+        # YouTube gives no channel lists at all (feeds.SERVICE_WIDE, monitor.check_feeds)
+        "youtube_unavailable": {"reason"},
     }
     t = translations()
     for lang in ("de", "en"):

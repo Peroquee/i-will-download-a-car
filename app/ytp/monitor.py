@@ -37,6 +37,7 @@ from typing import Any
 
 from . import alertlog, jobs
 from .db import Database
+from .feeds import is_service_wide
 from .jobs_api import job_label
 from .scheduler import get_state, set_state
 
@@ -205,6 +206,7 @@ class AlertMonitor:
     def check_feeds(self) -> None:
         seen: dict[str, str] = _load(self.db, KEY_FEEDS, {})
         current: dict[str, str] = {}
+        service_wide: set[str] = set()  # the same message for any number of channels: one alert
         for kind, table, name_column in (
             ("channel", "subscriptions", "channel_name"),
             ("podcast", "podcast_subscriptions", "title"),
@@ -215,6 +217,22 @@ class AlertMonitor:
             ):
                 key = f"{kind}:{row['id']}"
                 digest = hashlib.sha256(row["last_error"].encode()).hexdigest()[:16]
+                if kind == "channel" and is_service_wide(row["last_error"]):
+                    # YouTube is the problem, for every channel alike (feeds.SERVICE_WIDE): one
+                    # alert for all of them, not one per channel.
+                    key = f"service:{digest}"
+                    if key not in service_wide and seen.get(key) != digest:
+                        alertlog.add(
+                            self.db,
+                            "youtube_unavailable",
+                            "warning",
+                            "YouTube is not listing videos right now",
+                            row["last_error"],
+                            {"reason": row["last_error"]},
+                        )
+                    service_wide.add(key)
+                    current[key] = digest
+                    continue
                 current[key] = digest
                 if seen.get(key) != digest:
                     alertlog.add(

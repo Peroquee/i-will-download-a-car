@@ -49,7 +49,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import accounts, skipped_videos, subscriptions
+from . import accounts, seen_videos, skipped_videos, subscriptions
 from .apiutil import PROBE_STATUS, followed_view, may_use, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
 from .feeds import FeedError
@@ -118,7 +118,10 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
     # One channel is one subscription however many people follow it: asking again only adds the
     # asker as a follower (the settings stay those of the first one).
     account = request.state.account
-    await asyncio.to_thread(accounts.follow, db, "channel", subscription.id, account.id)
+    joined = await asyncio.to_thread(accounts.follow, db, "channel", subscription.id, account.id)
+    if joined and not created:
+        # the next poll walks the list again, so the videos already queued become theirs too
+        await asyncio.to_thread(seen_videos.clear, db, subscription.id)
     others = len(await asyncio.to_thread(accounts.followers, db, "channel", subscription.id)) - 1
     logger.info("subscription", extra={"subscription_id": subscription.id, "new": created})
     return JSONResponse(

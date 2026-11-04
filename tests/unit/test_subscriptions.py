@@ -52,6 +52,14 @@ ENV = {
         (f"https://m.youtube.com/channel/{CID}/about?foo=bar#x", "id", CID),
         ("https://www.youtube.com/@kurzgesagt", "handle", "@kurzgesagt"),
         ("https://www.youtube.com/@kurzgesagt/videos", "handle", "@kurzgesagt"),
+        ("https://www.youtube.com/c/SomeName", "legacy", "c/SomeName"),
+        ("https://www.youtube.com/c/SomeName/videos", "legacy", "c/SomeName"),
+        ("https://www.youtube.com/user/some.user-1", "legacy", "user/some.user-1"),
+        (
+            "https://www.youtube.com/c/%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB",
+            "legacy",
+            "c/%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB",
+        ),
         (f"https://www.youtube.com/watch?v={VIDEO}", "video", VIDEO),
         (f"https://youtu.be/{VIDEO}", "video", VIDEO),
         (f"https://www.youtube.com/watch?v={VIDEO}&list=PLx&t=5", "video", VIDEO),
@@ -59,6 +67,15 @@ ENV = {
 )
 def test_accepted_channel_addresses(text, kind, value):
     assert parse_channel_ref(text) == ChannelRef(kind, value)
+
+
+def test_old_style_addresses_are_rebuilt_not_passed_on():
+    """yt-dlp is given an address made from the parsed name, never the pasted text."""
+    ref = parse_channel_ref("https://m.youtube.com/user/SomeName/videos?evil=1#x")
+    assert ref.url == "https://www.youtube.com/user/SomeName"
+    assert (
+        parse_channel_ref("https://www.youtube.com/c/Name").url == "https://www.youtube.com/c/Name"
+    )
 
 
 @pytest.mark.security
@@ -79,8 +96,13 @@ def test_accepted_channel_addresses(text, kind, value):
         f"ftp://www.youtube.com/channel/{CID}",
         f"https://user:pw@www.youtube.com/channel/{CID}",
         f"https://www.youtube.com:8443/channel/{CID}",
-        "https://www.youtube.com/c/SomeName",
-        "https://www.youtube.com/user/SomeName",
+        "https://www.youtube.com/c/",
+        "https://www.youtube.com/user",
+        "https://www.youtube.com/c/Some Name",
+        "https://www.youtube.com/c/Name/evil",
+        "https://www.youtube.com/c/Name/videos/extra",
+        "https://www.youtube.com/user/Na;me",
+        "https://www.youtube.com/c/" + "a" * 101,
         "https://www.youtube.com/playlist?list=PLabc",
         f"https://www.youtube.com/channel/{CID}/../../etc",
         f"https://www.youtube.com/channel/{CID}/videos/extra",
@@ -455,3 +477,13 @@ def test_the_status_keys_of_a_lookup_failure_are_all_known():
 
     for kind in ("private", "unavailable", "network", "timeout", "busy", "unknown", "unsupported"):
         assert kind in PROBE_STATUS
+
+
+def test_an_old_style_address_is_resolved_with_the_rebuilt_address(tmp_path):
+    seen = []
+    probe = YoutubeProbe(timeout=1.0, extract=fake_extract(seen=seen))
+    res = ChannelResolver(probe, extract=probe._extract)
+    channel = asyncio.run(res.resolve(parse_channel_ref("https://m.youtube.com/user/SomeName?x=1")))
+    assert channel.channel_id == CID
+    assert seen[0][0] == "https://www.youtube.com/user/SomeName"
+    assert seen[0][1]["allowed_extractors"] == ["youtube", "youtube:tab"]

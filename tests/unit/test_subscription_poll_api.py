@@ -61,6 +61,7 @@ def running(tmp_path: Path, minutes: str) -> Iterator[TestClient]:
     try:
         test_client.app.state.poller.feeds = FakeFeeds()
         test_client.app.state.poller.probe = FakeTraitsProbe()  # never the real YouTube
+        test_client.app.state.poller.lister = None  # the RSS feed alone (the fake above)
         yield test_client
     finally:
         test_client.__exit__(None, None, None)

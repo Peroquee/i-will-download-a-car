@@ -23,6 +23,7 @@ Videos pasted by hand are never filtered; this is only used by the poller.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 SHORT_MAX_SECONDS = 180
@@ -40,6 +41,7 @@ class VideoTraits:
     width: int = 0
     height: int = 0
     webpage_url: str = ""
+    published: datetime | None = None  # when it went online, if yt-dlp says (the list has no date)
 
     @classmethod
     def from_info(cls, info: dict[str, Any]) -> VideoTraits:
@@ -54,7 +56,27 @@ class VideoTraits:
             width=width,
             height=height,
             webpage_url=_text(info.get("webpage_url")),
+            published=_published(info),
         )
+
+
+def _published(info: dict[str, Any]) -> datetime | None:
+    """The time a video went online: the release time, else the upload time, else the upload
+    date (midnight UTC, so a video of the day of subscribing counts as new, never as old)."""
+    for key in ("release_timestamp", "timestamp"):
+        value = info.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            try:
+                return datetime.fromtimestamp(value, UTC)
+            except (OverflowError, OSError, ValueError):
+                return None
+    day = info.get("upload_date")
+    if isinstance(day, str) and len(day) == 8 and day.isdigit():
+        try:
+            return datetime(int(day[:4]), int(day[4:6]), int(day[6:]), 23, 59, 59, tzinfo=UTC)
+        except ValueError:
+            return None
+    return None
 
 
 def _text(value: Any) -> str:
