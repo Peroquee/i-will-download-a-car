@@ -2,7 +2,9 @@
 
     {"active": [{id, type, kind, label, status, progress, done_bytes, total_bytes, speed, eta,
                  created_at, updated_at}, ...],
-     "recent": [{id, type, kind, label, status, error, can_retry, created_at, updated_at}, ...],
+     "recent": [{id, type, kind, label, status, error, can_retry, dismissed, created_at,
+                 updated_at}, ...],
+     "dismissed": n,
      "vpn": {"current": {state, since, paused, egress, country}, "history": [{time, condition,
              paused, reason}, ...]},
      "disk": {free_percent, free_gb, total_gb} | null,
@@ -20,7 +22,9 @@
   folder (`autodeploy-status.json`: the installed version, the last result, paused or halted; no
   address and no secret), or null when automatic updates are not set up.
 * `recent`: the 20 newest done/failed jobs with the reason for a failure; `can_retry` is true for
-  a failed one (the retry itself is POST /api/jobs/{id}/retry).
+  a failed one (the retry itself is POST /api/jobs/{id}/retry). Failed jobs the asking account
+  dismissed (POST /api/jobs/{id}/dismiss) are left out unless `?dismissed=1` is given; `dismissed`
+  counts them either way (the page's "show dismissed (N)" toggle).
 * `vpn.current` is the watchdog's status reduced to what is safe to show (no address); `history`
   the last changes of the VPN condition the app recorded, newest first.
 """
@@ -102,7 +106,7 @@ def active_row(
     return row
 
 
-def recent_row(job: Job) -> dict[str, Any]:
+def recent_row(job: Job, dismissed: bool = False) -> dict[str, Any]:
     return {
         "id": job.id,
         "type": job.type,
@@ -111,12 +115,13 @@ def recent_row(job: Job) -> dict[str, Any]:
         "status": job.status,
         "error": job.error,
         "can_retry": job.status == "failed",
+        "dismissed": dismissed,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
 
 
-async def dashboard(request: Request):
+async def dashboard(request: Request, dismissed: int = 0):
     db = request.app.state.db
     if db is None:
         return problem(503, "The database is not available; see /health.")
@@ -124,7 +129,12 @@ async def dashboard(request: Request):
     account = request.state.account
     owner = visible_to(request)  # a user sees their own jobs, an admin all of them
     active = await asyncio.to_thread(jobs.active_jobs, db, owner)
-    recent = await asyncio.to_thread(jobs.recent_finished, db, RECENT, owner)
+    viewer = account.id
+    recent = await asyncio.to_thread(
+        jobs.recent_finished, db, RECENT, owner, viewer, include_dismissed=bool(dismissed)
+    )
+    hidden = await asyncio.to_thread(jobs.dismissed_ids, db, viewer, [j.id for j in recent])
+    dismissed_total = await asyncio.to_thread(jobs.dismissed_count, db, owner, viewer)
     torrents: dict[str, Torrent] = {}
     if any(
         j.status == "downloading" and j.type not in (YOUTUBE_JOB_TYPE, PODCAST_JOB_TYPE)
@@ -155,7 +165,8 @@ async def dashboard(request: Request):
         {
             "backlogs": [run.as_dict() for run in backlogs],
             "active": [active_row(j, torrents, progress, details) for j in active],
-            "recent": [recent_row(j) for j in recent],
+            "recent": [recent_row(j, j.id in hidden) for j in recent],
+            "dismissed": dismissed_total,
             "vpn": {"current": current, "history": history},
             "disk": disk,
             "deploy": deploy,

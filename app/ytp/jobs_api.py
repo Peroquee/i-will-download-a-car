@@ -2,12 +2,15 @@
 
 GET /api/jobs?limit=50&status=failed
     {"jobs": [{"id", "type", "kind", "label", "status", "error", "progress", "can_retry",
-               "created_at", "updated_at"}, ...],
-     "counts": {"queued": n, "downloading": n, "organizing": n, "done": n, "failed": n}}
+               "dismissed", "created_at", "updated_at"}, ...],
+     "counts": {"queued": n, "downloading": n, "organizing": n, "done": n, "failed": n,
+                "dismissed": n}}
 
     Newest first. `kind` is the library (movies, series, audiobooks, music, youtube), `label` a
     readable name made from the stored metadata, `progress` 0-100 or null when unknown (queued,
     failed, or qBittorrent cannot be asked right now). The magnet link is never part of the answer.
+    `counts.failed` leaves out the failed jobs the asking account dismissed (that is the number
+    the input page shows in red); `counts.dismissed` is how many those are.
 
 POST /api/jobs/{id}/retry
     Only for a `failed` job: it goes back to `queued` and is handed over again (a torrent to
@@ -129,7 +132,9 @@ def job_progress(job: Job, torrents: dict[str, int], youtube: dict[int, int]) ->
     return torrents.get(job.external_id.lower())
 
 
-def summarize(job: Job, torrents: dict[str, int], youtube: dict[int, int]) -> dict[str, Any]:
+def summarize(
+    job: Job, torrents: dict[str, int], youtube: dict[int, int], dismissed: bool = False
+) -> dict[str, Any]:
     return {
         "id": job.id,
         "type": job.type,
@@ -139,6 +144,7 @@ def summarize(job: Job, torrents: dict[str, int], youtube: dict[int, int]) -> di
         "error": job.error,
         "progress": job_progress(job, torrents, youtube),
         "can_retry": job.status == "failed",
+        "dismissed": dismissed,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
@@ -160,7 +166,10 @@ async def list_jobs(request: Request, limit: int = DEFAULT_LIMIT, status: str | 
     limit = max(1, min(limit, MAX_LIMIT))
     owner = visible_to(request)
     rows = await asyncio.to_thread(jobs.list_jobs, db, limit=limit, status=status, owner_id=owner)
-    counts = await asyncio.to_thread(jobs.status_counts, db, owner)
+    viewer = request.state.account.id
+    counts = await asyncio.to_thread(jobs.status_counts, db, owner, viewer)
+    counts["dismissed"] = await asyncio.to_thread(jobs.dismissed_count, db, owner, viewer)
+    hidden = await asyncio.to_thread(jobs.dismissed_ids, db, viewer, [j.id for j in rows])
     torrents: dict[str, int] = {}
     own_work = (YOUTUBE_JOB_TYPE, PODCAST_JOB_TYPE)
     if any(j.status == "downloading" and j.type not in own_work for j in rows):
@@ -170,7 +179,10 @@ async def list_jobs(request: Request, limit: int = DEFAULT_LIMIT, status: str | 
     podcast_worker = request.app.state.podcast_worker
     if podcast_worker is not None:
         youtube.update(podcast_worker.progress)
-    return {"jobs": [summarize(j, torrents, youtube) for j in rows], "counts": counts}
+    return {
+        "jobs": [summarize(j, torrents, youtube, j.id in hidden) for j in rows],
+        "counts": counts,
+    }
 
 
 async def retry_job(job_id: int, request: Request):
@@ -226,6 +238,51 @@ async def retry_job(job_id: int, request: Request):
     return summarize(queued, {}, {})
 
 
+async def _own_job(request: Request, job_id: int):
+    """(job, None) if the asking account may see the job, else (None, the 404/503 answer)."""
+    db, failure = _db_or_503(request)
+    if failure is not None:
+        return None, failure
+    job = await asyncio.to_thread(jobs.get_job, db, job_id)
+    owner = visible_to(request)
+    if job is None or (owner is not None and not accounts.owns_job(db, job_id, owner)):
+        return None, problem(404, "no such job")
+    return job, None
+
+
+async def dismiss_job(job_id: int, request: Request):
+    job, failure = await _own_job(request, job_id)
+    if failure is not None:
+        return failure
+    stored = await asyncio.to_thread(
+        jobs.dismiss, request.app.state.db, job_id, request.state.account.id
+    )
+    if not stored:
+        return problem(409, "only a failed job can be dismissed", job.id)
+    return {"id": job_id, "dismissed": True}
+
+
+async def restore_job(job_id: int, request: Request):
+    _, failure = await _own_job(request, job_id)
+    if failure is not None:
+        return failure
+    await asyncio.to_thread(jobs.restore, request.app.state.db, job_id, request.state.account.id)
+    return {"id": job_id, "dismissed": False}
+
+
+async def dismiss_failed(request: Request):
+    db, failure = _db_or_503(request)
+    if failure is not None:
+        return failure
+    count = await asyncio.to_thread(
+        jobs.dismiss_all_failed, db, visible_to(request), request.state.account.id
+    )
+    return {"dismissed": count}
+
+
 def register(app: FastAPI) -> None:
     app.add_api_route("/api/jobs", list_jobs, methods=["GET"])
+    app.add_api_route("/api/jobs/dismiss-failed", dismiss_failed, methods=["POST"])
+    app.add_api_route("/api/jobs/{job_id}/dismiss", dismiss_job, methods=["POST"])
+    app.add_api_route("/api/jobs/{job_id}/dismiss", restore_job, methods=["DELETE"])
     app.add_api_route("/api/jobs/{job_id}/retry", retry_job, methods=["POST"])

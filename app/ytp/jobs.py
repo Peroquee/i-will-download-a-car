@@ -210,13 +210,23 @@ def active_jobs(db: Database, owner_id: int | None = None) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
-def recent_finished(db: Database, limit: int = 20, owner_id: int | None = None) -> list[Job]:
-    """The newest done and failed jobs, by when they last changed."""
+def recent_finished(
+    db: Database,
+    limit: int = 20,
+    owner_id: int | None = None,
+    viewer_id: int | None = None,
+    include_dismissed: bool = True,
+) -> list[Job]:
+    """The newest done and failed jobs, by when they last changed.
+
+    `viewer_id` + `include_dismissed=False`: leave out the failed jobs that account dismissed.
+    """
     join, params = _visible(owner_id)
+    hide, hide_params = _not_dismissed(viewer_id, include_dismissed)
     rows = db.query(
-        f"SELECT jobs.* FROM jobs{join} WHERE jobs.status IN ('done', 'failed') "
+        f"SELECT jobs.* FROM jobs{join} WHERE jobs.status IN ('done', 'failed'){hide} "
         "ORDER BY jobs.updated_at DESC, jobs.id DESC LIMIT ?",
-        (*params, limit),
+        (*params, *hide_params, limit),
     )
     return [Job.from_row(row) for row in rows]
 
@@ -234,16 +244,93 @@ def list_jobs(
     return [Job.from_row(row) for row in rows]
 
 
-def status_counts(db: Database, owner_id: int | None = None) -> dict[str, int]:
-    """How many jobs are in each status (zero for the empty ones)."""
+def status_counts(
+    db: Database, owner_id: int | None = None, viewer_id: int | None = None
+) -> dict[str, int]:
+    """How many jobs are in each status (zero for the empty ones).
+
+    With `viewer_id`, `failed` leaves out the failed jobs that account dismissed (the input page's
+    red "failed: N" line); `dismissed_count` says how many those are.
+    """
     join, params = _visible(owner_id)
+    hide, hide_params = _not_dismissed(viewer_id, False)
     counts = dict.fromkeys(("queued", "downloading", "organizing", "done", "failed"), 0)
     for row in db.query(
-        f"SELECT jobs.status AS status, COUNT(*) AS n FROM jobs{join} GROUP BY jobs.status",
-        params,
+        f"SELECT jobs.status AS status, COUNT(*) AS n FROM jobs{join} "
+        f"WHERE 1 = 1{hide} GROUP BY jobs.status",
+        (*params, *hide_params),
     ):
         counts[row["status"]] = row["n"]
     return counts
+
+
+def _not_dismissed(viewer_id: int | None, include_dismissed: bool) -> tuple[str, tuple[int, ...]]:
+    """SQL (to append to a WHERE) hiding the failed jobs `viewer_id` dismissed."""
+    if viewer_id is None or include_dismissed:
+        return "", ()
+    return (
+        " AND NOT (jobs.status = 'failed' AND EXISTS (SELECT 1 FROM job_dismissals d "
+        "WHERE d.job_id = jobs.id AND d.account_id = ?))",
+        (viewer_id,),
+    )
+
+
+def dismissed_ids(db: Database, viewer_id: int, job_ids: list[int]) -> set[int]:
+    """Which of these jobs the account has dismissed."""
+    if not job_ids:
+        return set()
+    marks = ", ".join("?" for _ in job_ids)
+    rows = db.query(
+        f"SELECT job_id FROM job_dismissals WHERE account_id = ? AND job_id IN ({marks})",
+        (viewer_id, *job_ids),
+    )
+    return {row["job_id"] for row in rows}
+
+
+def dismissed_count(db: Database, owner_id: int | None, viewer_id: int) -> int:
+    """How many failed jobs the account may see and has dismissed."""
+    join, params = _visible(owner_id)
+    rows = db.query(
+        f"SELECT COUNT(*) AS n FROM jobs{join} JOIN job_dismissals d "
+        "ON d.job_id = jobs.id AND d.account_id = ? WHERE jobs.status = 'failed'",
+        (*params, viewer_id),
+    )
+    return rows[0]["n"]
+
+
+def dismiss(db: Database, job_id: int, account_id: int) -> bool:
+    """Hide a failed job for this account. False if the job is not `failed` (nothing stored)."""
+    with db.transaction() as conn:
+        failed = conn.execute(
+            "SELECT 1 FROM jobs WHERE id = ? AND status = 'failed'", (job_id,)
+        ).fetchone()
+        if failed is None:
+            return False
+        conn.execute(
+            "INSERT OR IGNORE INTO job_dismissals (job_id, account_id) VALUES (?, ?)",
+            (job_id, account_id),
+        )
+        return True
+
+
+def restore(db: Database, job_id: int, account_id: int) -> None:
+    """Show a dismissed job again (a no-op when it was not dismissed)."""
+    with db.transaction() as conn:
+        conn.execute(
+            "DELETE FROM job_dismissals WHERE job_id = ? AND account_id = ?", (job_id, account_id)
+        )
+
+
+def dismiss_all_failed(db: Database, owner_id: int | None, account_id: int) -> int:
+    """Dismiss every failed job the account may see; returns how many were newly dismissed."""
+    join, params = _visible(owner_id)
+    with db.transaction() as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO job_dismissals (job_id, account_id) "
+            f"SELECT jobs.id, ? FROM jobs{join} WHERE jobs.status = 'failed'",
+            (account_id, *params),
+        )
+        return cursor.rowcount
 
 
 def get_source(db: Database, job_id: int) -> str | None:
