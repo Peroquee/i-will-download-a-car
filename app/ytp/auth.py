@@ -55,6 +55,14 @@ POLICY: dict[tuple[str, str], str] = {
     ("*", "/static"): PUBLIC,
     ("POST", "/api/auth/login"): PUBLIC,
     ("GET", "/api/auth/me"): PUBLIC,  # answers 401 itself: "who am I?" is a question for anyone
+    # the transcription PC (docs/transcription.md): no login, the routes check their own secret
+    # (X-Transcriber-Token, or the per-attempt key of the media URL) and are 404 when it is unset
+    ("GET", "/api/transcriber/status"): PUBLIC,
+    ("POST", "/api/transcriber/claim"): PUBLIC,
+    ("GET", "/api/transcriber/jobs/{transcription_id}/media"): PUBLIC,
+    ("POST", "/api/transcriber/jobs/{transcription_id}/heartbeat"): PUBLIC,
+    ("POST", "/api/transcriber/jobs/{transcription_id}/result"): PUBLIC,
+    ("POST", "/api/transcriber/jobs/{transcription_id}/fail"): PUBLIC,
     # any logged-in account
     ("POST", "/api/auth/logout"): USER,
     ("POST", "/api/auth/password"): USER,

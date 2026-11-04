@@ -27,6 +27,17 @@ it as it is. YouTube serves AAC in an mp4 container and Opus in webm; yt-dlp's
 player, phone and Jellyfin client plays it and it can carry a cover picture and tags; Opus is the
 fallback when no AAC stream exists. Nothing is ever converted to mp3 (that would be a lossy
 re-encode of a lossy stream). Tags and the cover are added afterwards by `ytp.audiotags`.
+
+**Subtitles** (docs/transcription.md): when the video has subtitles in one of `subtitle_langs`
+(`YOUTUBE_SUBTITLE_LANGS`, default `de,en`), they are fetched in a SECOND, separate yt-dlp pass
+after the video is complete, converted to SRT and filed next to the video as
+`<title> [<id>].<lang>.srt`, which Jellyfin picks up as an external subtitle. Separate on purpose:
+a subtitle that cannot be fetched must never fail the video, and a video without subtitles (most
+of them) costs no extra request, because the first pass already says which subtitles exist. Only
+subtitles a person made are taken by default; YouTube's automatic captions only with
+`YOUTUBE_AUTO_SUBTITLES=1`, and then only in the video's own language (YouTube also offers
+machine translations of them into every language, which are never taken). A video that ends up
+without any is handed to the Whisper transcription queue (`ytp.transcriptions`).
 """
 
 from __future__ import annotations
@@ -35,6 +46,7 @@ import errno
 import json
 import logging
 import os
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -56,6 +68,8 @@ INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
     "upload_date", "description", "tags", "categories", "width", "height", "fps",
 )  # fmt: skip
+MAX_SUBTITLE_BYTES = 10 * 1024**2  # an SRT of a 10-hour video is a few MB; more is not subtitles
+_LANG = re.compile(r"[a-z]{2,3}")
 
 
 class DownloadFailed(Exception):
@@ -122,6 +136,85 @@ def download_options(
     return options
 
 
+@dataclass(frozen=True)
+class SubtitleChoice:
+    key: str  # yt-dlp's name of the track ("en", "de-DE", "de-orig")
+    lang: str  # what the file is named with, for Jellyfin: the base language ("en", "de")
+    automatic: bool
+
+
+def base_language(key: str) -> str | None:
+    """`de-DE` / `de_DE` / `de-orig` -> `de`; None for something that is not a language."""
+    base = re.split(r"[-_]", key.strip().lower(), maxsplit=1)[0]
+    return base if _LANG.fullmatch(base) else None
+
+
+def choose_subtitles(
+    info: dict[str, Any], langs: tuple[str, ...], *, automatic: bool = False
+) -> list[SubtitleChoice]:
+    """Which of the video's subtitle tracks to fetch: at most one per wanted language, in the
+    order of `langs`; a track named exactly like the language wins over a regional one.
+
+    Automatic captions (only with `automatic`) count only in the video's own language: YouTube
+    lists machine translations into every language next to them, which are useless.
+    """
+    manual = info.get("subtitles") if isinstance(info.get("subtitles"), dict) else {}
+    auto = info.get("automatic_captions")
+    auto = auto if automatic and isinstance(auto, dict) else {}
+    original = base_language(str(info.get("language") or ""))
+    chosen: list[SubtitleChoice] = []
+    for lang in langs:
+        candidates = [
+            (key, False) for key in manual if key != "live_chat" and base_language(key) == lang
+        ]
+        if not candidates and lang == original:
+            # `<lang>-orig` is the caption track itself; plain `<lang>` may be a translation
+            candidates = [(key, True) for key in auto if key == f"{lang}-orig"] or [
+                (key, True) for key in auto if key == lang
+            ]
+        if candidates:
+            candidates.sort(key=lambda item: (item[0].lower() != lang, item[0]))
+            key, is_auto = candidates[0]
+            chosen.append(SubtitleChoice(key, lang, is_auto))
+    return chosen
+
+
+def subtitle_options(
+    workdir: Path, choices: list[SubtitleChoice], *, proxy: str, socket_timeout: float
+) -> dict[str, Any]:
+    """The yt-dlp options of the subtitle pass: no media, exactly the chosen tracks, as SRT."""
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "noplaylist": True,
+        "allowed_extractors": ["youtube"],
+        "cachedir": False,
+        "enable_file_urls": False,
+        "geo_bypass": False,
+        "color": "never",
+        "logger": _SilentLogger(),
+        "socket_timeout": socket_timeout,
+        "retries": 2,
+        "extractor_retries": 1,
+        "skip_download": True,
+        "writesubtitles": any(not c.automatic for c in choices),
+        "writeautomaticsub": any(c.automatic for c in choices),
+        # yt-dlp reads these as regular expressions; the keys are matched exactly.
+        "subtitleslangs": [re.escape(c.key) for c in choices],
+        "subtitlesformat": "srt/vtt/best",
+        "outtmpl": {"default": "%(id)s.%(ext)s"},
+        "paths": {"home": str(workdir), "temp": str(workdir)},
+        "postprocessors": [
+            {"key": "FFmpegSubtitlesConvertor", "format": "srt", "when": "before_dl"}
+        ],
+        "writethumbnail": False,
+        "writeinfojson": False,
+        "overwrites": True,
+        **({"proxy": proxy} if proxy else {}),
+    }
+
+
 def _download_with_ytdlp(url: str, options: dict[str, Any]) -> dict[str, Any]:
     import yt_dlp
 
@@ -160,11 +253,20 @@ def upload_date(info: dict[str, Any]) -> date | None:
 
 
 @dataclass(frozen=True)
+class Subtitle:
+    lang: str  # base language, e.g. "de": the file becomes `<stem>.<lang>.srt`
+    path: Path  # the SRT in the work folder
+    automatic: bool = False
+
+
+@dataclass(frozen=True)
 class Downloaded:
     video: Path  # the main file: the video, or the audio file for audio_only
     thumbnail: Path | None
     info: dict[str, Any]
     audio_only: bool = False
+    subtitles: tuple[Subtitle, ...] = ()
+    language: str | None = None  # the spoken language as YouTube states it (a Whisper hint)
 
 
 class YoutubeDownloader:
@@ -176,12 +278,16 @@ class YoutubeDownloader:
         socket_timeout: float = 20.0,
         download: Callable[[str, dict[str, Any]], dict[str, Any]] = _download_with_ytdlp,
         min_free_bytes: int = MIN_FREE_BYTES,
+        subtitle_langs: tuple[str, ...] = (),
+        automatic_subtitles: bool = False,
     ):
         self.proxy = proxy
         self.max_height = max_height
         self._socket_timeout = socket_timeout
         self._download = download
         self._min_free = min_free_bytes
+        self.subtitle_langs = subtitle_langs
+        self.automatic_subtitles = automatic_subtitles
 
     def download(
         self,
@@ -224,12 +330,47 @@ class YoutubeDownloader:
                 "yt-dlp finished without producing "
                 + ("an audio file" if audio_only else "a video file")
             )
+        subtitles = () if audio_only else self._subtitles(ref, workdir, info)
         return Downloaded(
             media,
             _find(workdir, ref.video_id, THUMBNAIL_EXTENSIONS),
             summary(info, ref),
             audio_only,
+            subtitles,
+            base_language(str(info.get("language") or "")),
         )
+
+    def _subtitles(
+        self, ref: VideoRef, workdir: Path, info: dict[str, Any]
+    ) -> tuple[Subtitle, ...]:
+        """The second pass: fetch the chosen subtitle tracks as SRT. Never raises: a video
+        without its subtitles is still a good video (and goes to Whisper instead)."""
+        if not self.subtitle_langs:
+            return ()
+        choices = choose_subtitles(info, self.subtitle_langs, automatic=self.automatic_subtitles)
+        if not choices:
+            return ()
+        options = subtitle_options(
+            workdir, choices, proxy=self.proxy, socket_timeout=self._socket_timeout
+        )
+        try:
+            self._download(ref.url, options)
+        except Exception as exc:  # yt-dlp's DownloadError, a network error, a bug: all the same
+            logger.warning(
+                "subtitles could not be fetched",
+                extra={"video_id": ref.video_id, "error": type(exc).__name__},
+            )
+        found = []
+        for choice in choices:
+            path = workdir / f"{ref.video_id}.{choice.key}.srt"
+            if not path.is_file() or path.is_symlink():
+                continue
+            size = path.stat().st_size
+            if size == 0 or size > MAX_SUBTITLE_BYTES:
+                logger.warning("subtitle file left out", extra={"video_id": ref.video_id})
+                continue
+            found.append(Subtitle(choice.lang, path, choice.automatic))
+        return tuple(found)
 
 
 def _find(folder: Path, video_id: str, extensions: tuple[str, ...]) -> Path | None:
@@ -275,6 +416,8 @@ def place(
         json.dumps(downloaded.info, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     moves.append((info_path, folder / f"{stem}.info.json"))
+    for subtitle in downloaded.subtitles:
+        moves.append((subtitle.path, folder / f"{stem}.{subtitle.lang}.srt"))
     moves.append((downloaded.video, folder / f"{stem}{downloaded.video.suffix.lower()}"))
     placed = []
     for source, target in moves:
@@ -288,5 +431,22 @@ def place(
             if exc.errno != errno.EXDEV:
                 raise DownloadFailed(f"could not file {target.name[:60]}: {exc.strerror}") from exc
             shutil.move(str(source), str(target))
+        placed.append(target)
+    return placed
+
+
+def subtitle_path(video: Path, lang: str) -> Path:
+    """Where Jellyfin looks for an external subtitle of `video`: `<video stem>.<lang>.srt`."""
+    return video.with_name(f"{video.stem}.{lang}.srt")
+
+
+def place_subtitles(downloaded: Downloaded, video: Path) -> list[Path]:
+    """Move the downloaded subtitles next to an already filed `video` (podcast episodes, whose
+    name is decided by `ytp.podcasts`). Existing files are left alone."""
+    placed = []
+    for subtitle in downloaded.subtitles:
+        target = subtitle_path(video, subtitle.lang)
+        if not (target.exists() or target.is_symlink()):
+            shutil.move(str(subtitle.path), str(target))
         placed.append(target)
     return placed

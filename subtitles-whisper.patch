@@ -1,0 +1,4136 @@
+diff --git a/.env.example b/.env.example
+index 402e3c7..bb0b91e 100644
+--- a/.env.example
++++ b/.env.example
+@@ -158,6 +158,25 @@ YOUTUBE_MAX_HEIGHT=1080
+ # Each channel gets its own slightly different interval, so they do not all go at once.
+ SUBSCRIPTION_POLL_MINUTES=60
+ 
++# --- Subtitles and Whisper (docs/transcription.md) ----------------------------------------------
++# Subtitles fetched with a YouTube video and filed next to it as `<video>.<lang>.srt` (Jellyfin
++# shows them), in this order, comma-separated language codes. EMPTY = fetch no subtitles.
++YOUTUBE_SUBTITLE_LANGS=de,en
++# 1 = also take YouTube's automatic captions (only in the video's own language) when no person made
++# a subtitle. 0 (default) = leave those videos to Whisper, which does better.
++YOUTUBE_AUTO_SUBTITLES=0
++# The secret the transcription PC sends (X-Transcriber-Token). EMPTY = no Whisper: videos without
++# subtitles stay without. Make one with: python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
++# and put the same value into the PC's /etc/ytp-transcriber.env.
++TRANSCRIBER_TOKEN=
++# Read by scripts/transcriber/wake.py on THIS machine (not by a container): the network card of the
++# transcription PC (aa:bb:cc:dd:ee:ff) that the Wake-on-LAN packet is for. EMPTY = never wake it.
++TRANSCRIBER_PC_MAC=
++# Where the Wake-on-LAN packet is sent: the broadcast address of the network the PC is in.
++TRANSCRIBER_WOL_ADDRESS=255.255.255.255
++# Hours in which the PC may be woken, like 1-7 (from 01:00 to 06:59) or 22-6; EMPTY = any time.
++TRANSCRIBER_WAKE_HOURS=
++
+ # --- Accounts (#44, docs/accounts.md) ----------------------------------------------------
+ # The app has its own accounts (name + password, admin or user). The FIRST admin comes from here:
+ # at start the app creates it if it does not exist, and sets its password to this hash whenever
+diff --git a/README.md b/README.md
+index 1bc7022..41fe532 100644
+--- a/README.md
++++ b/README.md
+@@ -86,6 +86,7 @@ docs/testing.md        test levels, markers and rules
+ docs/operations.md     backups and restore, updates (pinned versions), log rotation
+ scripts/ops/           backup/restore and the yt-dlp update check
+ docs/youtube.md        YouTube probe and download, the VPN route, yt-dlp upkeep
++docs/transcription.md  subtitles from YouTube, Whisper on a GPU PC woken over the network
+ docs/installer.md      the guided installer: what it does, re-running, updating, the answers file
+ install.sh, update.sh  the guided installer and updater (start here)
+ AI-HELP.md             paste into an AI chat for step-by-step help (English)
+diff --git a/app/ytp/api.py b/app/ytp/api.py
+index 5c6628c..159fccf 100644
+--- a/app/ytp/api.py
++++ b/app/ytp/api.py
+@@ -31,7 +31,16 @@ from fastapi.responses import JSONResponse
+ from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
+ from pydantic_core import PydanticCustomError
+ 
+-from . import accounts, alerts_api, dashboard_api, jobs, jobs_api, podcasts_api, subscriptions_api
++from . import (
++    accounts,
++    alerts_api,
++    dashboard_api,
++    jobs,
++    jobs_api,
++    podcasts_api,
++    subscriptions_api,
++    transcriber_api,
++)
+ from .apiutil import PROBE_STATUS, hand_to_qbittorrent, problem
+ from .clients.qbittorrent import QbitClient
+ from .clients.watchdog import WatchdogStatusClient
+@@ -259,3 +268,4 @@ def register(app: FastAPI) -> None:
+     dashboard_api.register(app)
+     subscriptions_api.register(app)
+     podcasts_api.register(app)
++    transcriber_api.register(app)
+diff --git a/app/ytp/auth.py b/app/ytp/auth.py
+index 7970a39..3f5529a 100644
+--- a/app/ytp/auth.py
++++ b/app/ytp/auth.py
+@@ -55,6 +55,14 @@ POLICY: dict[tuple[str, str], str] = {
+     ("*", "/static"): PUBLIC,
+     ("POST", "/api/auth/login"): PUBLIC,
+     ("GET", "/api/auth/me"): PUBLIC,  # answers 401 itself: "who am I?" is a question for anyone
++    # the transcription PC (docs/transcription.md): no login, the routes check their own secret
++    # (X-Transcriber-Token, or the per-attempt key of the media URL) and are 404 when it is unset
++    ("GET", "/api/transcriber/status"): PUBLIC,
++    ("POST", "/api/transcriber/claim"): PUBLIC,
++    ("GET", "/api/transcriber/jobs/{transcription_id}/media"): PUBLIC,
++    ("POST", "/api/transcriber/jobs/{transcription_id}/heartbeat"): PUBLIC,
++    ("POST", "/api/transcriber/jobs/{transcription_id}/result"): PUBLIC,
++    ("POST", "/api/transcriber/jobs/{transcription_id}/fail"): PUBLIC,
+     # any logged-in account
+     ("POST", "/api/auth/logout"): USER,
+     ("POST", "/api/auth/password"): USER,
+diff --git a/app/ytp/config.py b/app/ytp/config.py
+index 6c5853a..60ab0f3 100644
+--- a/app/ytp/config.py
++++ b/app/ytp/config.py
+@@ -22,6 +22,8 @@ from . import accounts, passwords
+ from .egress import parse_networks
+ 
+ LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
++TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
++FALSE_WORDS = frozenset({"0", "false", "no", "off"})
+ 
+ # Media type -> the environment variable naming its library folder (relative to DATA_ROOT).
+ # Same variables and meaning as .env.example and scripts/host/create-layout.sh.
+@@ -90,6 +92,18 @@ class Settings:
+     # i.e. the home network's own global IPv6 prefixes. Semi-secret like HOME_PUBLIC_IP: never in
+     # repr/str or a log line, only the count (see `summary`).
+     fetch_blocked_networks: tuple = field(default=(), repr=False)
++    # YouTube subtitles to fetch with a video, in this order (docs/transcription.md); empty = none.
++    youtube_subtitle_langs: tuple[str, ...] = ("de", "en")
++    # Also take YouTube's automatic captions (in the video's own language) when no person-made
++    # subtitle exists. Off by default: Whisper does better than YouTube's captions.
++    youtube_auto_subtitles: bool = False
++    # The shared secret of the transcription PC (docs/transcription.md). A secret: never in
++    # repr/str or a log line. Empty = no transcription queue (videos without subtitles stay so).
++    transcriber_token: str = field(default="", repr=False)
++
++    @property
++    def transcription_enabled(self) -> bool:
++        return bool(self.transcriber_token)
+ 
+     @property
+     def qbit_configured(self) -> bool:
+@@ -125,6 +139,8 @@ class Settings:
+             "fetch_blocked_networks": len(self.fetch_blocked_networks),
+             "admin_user": self.admin_user,
+             "admin_bootstrap": bool(self.admin_password_hash),
++            "youtube_subtitle_langs": list(self.youtube_subtitle_langs),
++            "transcription_enabled": self.transcription_enabled,
+         }
+ 
+     @classmethod
+@@ -270,6 +286,36 @@ class Settings:
+             except ValueError as exc:  # names the entry's position, never its value
+                 problems.append(f"{name}: {exc}")
+ 
++        raw_langs = env.get("YOUTUBE_SUBTITLE_LANGS")  # unset = default, set but empty = none
++        subtitle_langs: list[str] = []
++        for item in ("de,en" if raw_langs is None else raw_langs).split(","):
++            lang = item.strip().lower()
++            if not lang:
++                continue
++            if not re.fullmatch(r"[a-z]{2,3}", lang):
++                problems.append(
++                    "YOUTUBE_SUBTITLE_LANGS must be language codes like de,en (comma-separated), "
++                    f"got {item.strip()!r}"
++                )
++            elif lang not in subtitle_langs:
++                subtitle_langs.append(lang)
++
++        auto_subtitles = False
++        raw_auto = text("YOUTUBE_AUTO_SUBTITLES", "0").lower()
++        if raw_auto in TRUE_WORDS:
++            auto_subtitles = True
++        elif raw_auto not in FALSE_WORDS:
++            problems.append(f"YOUTUBE_AUTO_SUBTITLES must be 0 or 1, got {raw_auto!r}")
++
++        transcriber_token = text("TRANSCRIBER_TOKEN")
++        if transcriber_token == "changeme":
++            transcriber_token = ""  # the template's placeholder: transcription not set up
++        elif transcriber_token and not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", transcriber_token):
++            problems.append(
++                "TRANSCRIBER_TOKEN must be at least 32 characters of A-Z a-z 0-9 _ - "
++                "(make one with: python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
++            )
++
+         if problems:
+             raise ConfigError(problems)
+         return cls(
+@@ -296,6 +342,9 @@ class Settings:
+             admin_user=admin_user,
+             admin_password_hash=admin_hash,
+             fetch_blocked_networks=tuple(blocked),
++            youtube_subtitle_langs=tuple(subtitle_langs),
++            youtube_auto_subtitles=auto_subtitles,
++            transcriber_token=transcriber_token,
+         )
+ 
+ 
+diff --git a/app/ytp/main.py b/app/ytp/main.py
+index f497163..c280845 100644
+--- a/app/ytp/main.py
++++ b/app/ytp/main.py
+@@ -92,7 +92,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+         app.state.youtube_worker = YoutubeWorker(
+             app.state.db,
+             settings,
+-            YoutubeDownloader(proxy=settings.ytdlp_proxy, max_height=settings.youtube_max_height),
++            YoutubeDownloader(
++                proxy=settings.ytdlp_proxy,
++                max_height=settings.youtube_max_height,
++                subtitle_langs=settings.youtube_subtitle_langs,
++                automatic_subtitles=settings.youtube_auto_subtitles,
++            ),
+             app.state.jellyfin,
+         )
+         threading.Thread(
+diff --git a/app/ytp/migrations/0014_transcriptions.sql b/app/ytp/migrations/0014_transcriptions.sql
+new file mode 100644
+index 0000000..7f25190
+--- /dev/null
++++ b/app/ytp/migrations/0014_transcriptions.sql
+@@ -0,0 +1,48 @@
++-- Videos waiting for a Whisper transcription (docs/transcription.md). Additive: nothing existing
++-- changes.
++--
++-- A YouTube video that arrives without subtitles gets a row here. The transcription PC (woken
++-- over the network by scripts/transcriber/wake.py) takes rows one at a time over the app's
++-- /api/transcriber/* routes, streams the video, and sends back an SRT, which the app files next
++-- to the video as `<video stem>.<lang>.srt` for Jellyfin.
++--
++--   queued -> running -> done          running -> queued (the PC failed or stopped answering,
++--                                                         fewer than 3 attempts) or failed
++--
++-- `media_path` is relative to DATA_ROOT (the app's /data), so a different mount point on the
++-- host changes nothing. `media_key` is a random per-attempt key that lets the PC fetch exactly
++-- this one file while the row is `running`, without the worker token on a command line.
++CREATE TABLE transcriptions (
++    id           INTEGER PRIMARY KEY AUTOINCREMENT,
++    job_id       INTEGER REFERENCES jobs (id) ON DELETE SET NULL,
++    media_path   TEXT NOT NULL UNIQUE,
++    -- The spoken language YouTube states (a hint for Whisper); NULL = let Whisper detect it.
++    language     TEXT,
++    status       TEXT NOT NULL DEFAULT 'queued',
++    attempts     INTEGER NOT NULL DEFAULT 0,
++    error        TEXT,
++    worker       TEXT,
++    media_key    TEXT,
++    progress     INTEGER,
++    heartbeat_at TEXT,
++    -- What came back: the language Whisper heard, and the file (NULL = no speech, no file).
++    result_lang  TEXT,
++    result_path  TEXT,
++    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
++    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
++
++    CHECK (status IN ('queued', 'running', 'done', 'failed')),
++    CHECK (media_path <> '' AND substr(media_path, 1, 1) <> '/'),
++    CHECK (attempts >= 0),
++    CHECK (progress IS NULL OR progress BETWEEN 0 AND 100)
++);
++
++CREATE INDEX transcriptions_status ON transcriptions (status, id);
++
++CREATE TRIGGER transcriptions_touch_updated_at
++AFTER UPDATE ON transcriptions
++FOR EACH ROW
++WHEN NEW.updated_at = OLD.updated_at
++BEGIN
++    UPDATE transcriptions SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = NEW.id;
++END;
+diff --git a/app/ytp/static/index.html b/app/ytp/static/index.html
+index 46132fe..6590857 100644
+--- a/app/ytp/static/index.html
++++ b/app/ytp/static/index.html
+@@ -729,6 +729,10 @@
+     "alert.job_failed.what": "„{label}“ (Auftrag #{job_id}) ist fehlgeschlagen. Grund: {reason}",
+     "alert.job_failed.did": "Der Auftrag ist als fehlgeschlagen markiert. Dateien, die schon in der Bibliothek liegen, bleiben unberührt.",
+     "alert.job_failed.todo": "Die Ursache beheben und dann beim Auftrag hier im Dashboard „Nochmal versuchen“ drücken.",
++    "alert.transcription_failed.title": "Transkription fehlgeschlagen: {name}",
++    "alert.transcription_failed.what": "Whisper konnte „{name}“ nach {attempts} Versuchen nicht transkribieren. Grund: {reason}",
++    "alert.transcription_failed.did": "Das Video bleibt ohne Untertitel in der Bibliothek; es wird nicht mehr automatisch versucht.",
++    "alert.transcription_failed.todo": "Die Ursache auf dem Transkriptions-PC beheben (journalctl -u ytp-transcriber), dann das Video noch einmal herunterladen: dann kommt es wieder in die Warteschlange.",
+     "alert.youtube_unavailable.title": "YouTube liefert gerade keine Videolisten",
+     "alert.youtube_unavailable.what": "Die App kann die neuesten Videos der abonnierten Kanäle nicht abfragen: {reason}",
+     "alert.youtube_unavailable.did": "Alle paar Minuten wird es erneut versucht. Dieser Hinweis kommt nur einmal, nicht einmal pro Kanal. Es geht nichts verloren: neue Videos werden nachgeholt, sobald es wieder klappt (solange sie unter den letzten 30 des Kanals stehen).",
+@@ -1154,6 +1158,10 @@
+     "alert.job_failed.what": "“{label}” (job #{job_id}) failed. Reason: {reason}",
+     "alert.job_failed.did": "The job is marked as failed. Files that are already in the library are not touched.",
+     "alert.job_failed.todo": "Fix the cause, then press “Try again” on the job here on the dashboard.",
++    "alert.transcription_failed.title": "Transcription failed: {name}",
++    "alert.transcription_failed.what": "Whisper could not transcribe “{name}” after {attempts} attempts. Reason: {reason}",
++    "alert.transcription_failed.did": "The video stays in the library without subtitles; it is not tried again automatically.",
++    "alert.transcription_failed.todo": "Fix the cause on the transcription PC (journalctl -u ytp-transcriber), then download the video again: that puts it back in the queue.",
+     "alert.youtube_unavailable.title": "YouTube is not listing videos right now",
+     "alert.youtube_unavailable.what": "The app cannot ask for the newest videos of the subscribed channels: {reason}",
+     "alert.youtube_unavailable.did": "It tries again every few minutes. You get this notice once, not once per channel. Nothing is lost: new videos are picked up as soon as it works again (as long as they are among the channel's latest 30).",
+diff --git a/app/ytp/transcriber_api.py b/app/ytp/transcriber_api.py
+new file mode 100644
+index 0000000..18afac5
+--- /dev/null
++++ b/app/ytp/transcriber_api.py
+@@ -0,0 +1,188 @@
++"""The transcription PC's side of the app (docs/transcription.md).
++
++These routes are not for people and not behind the login: the PC proves itself with the shared
++secret `TRANSCRIBER_TOKEN` in the `X-Transcriber-Token` header (the proxy strips `Authorization`,
++see proxy/Caddyfile). Without `TRANSCRIBER_TOKEN` in `.env` every route answers 404, as if it
++did not exist. They are still LAN-only like everything behind the proxy.
++
++GET  /api/transcriber/status
++    {"queued", "running", "done", "failed", "pending_downloads", "worker_last_seen"}
++
++POST /api/transcriber/claim                    {"worker": "main-pc"}
++    200 {"id", "attempt", "language", "name", "size", "media_url"}  a video to transcribe
++    204                                                              nothing to do
++    `media_url` is relative to the app (`/api/transcriber/jobs/<id>/media?key=...`) and works
++    only for this attempt, while it runs; it needs no token (so ffmpeg can read it directly,
++    with range requests, without the token on its command line).
++
++GET  /api/transcriber/jobs/{id}/media?key=...  the video file (ranges supported)
++POST /api/transcriber/jobs/{id}/heartbeat      {"progress": 0-100}    200 | 409 not running
++POST /api/transcriber/jobs/{id}/result         {"language": "de", "srt": "1\\n00:00:00,000 --> ..."}
++    200 {"status": "done", "subtitle": "<file name>" | null}; the SRT is filed next to the video
++    and Jellyfin refreshes that library. 422 not SRT / bad language, 409 not running, 410 gone.
++POST /api/transcriber/jobs/{id}/fail           {"error": "CUDA out of memory"}
++    200 {"status": "queued" | "failed"}: tried again later, or given up after 3 attempts.
++
++The PC never names a path: it gets an id and sends text, and the app decides where it goes.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import hmac
++import logging
++
++from fastapi import FastAPI, Request
++from fastapi.responses import FileResponse, JSONResponse, Response
++from pydantic import BaseModel, ConfigDict, Field
++
++from . import transcriptions
++from .apiutil import problem
++from .transcriptions import TranscriptionError
++
++logger = logging.getLogger(__name__)
++
++TOKEN_HEADER = "x-transcriber-token"
++ERROR_STATUS = {"not_found": 404, "conflict": 409, "invalid": 422, "gone": 410}
++
++
++class ClaimRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++    worker: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
++
++
++class HeartbeatRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++    progress: int | None = Field(default=None, ge=0, le=100)
++
++
++class ResultRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++    language: str = Field(min_length=2, max_length=3)
++    srt: str = Field(max_length=transcriptions.MAX_SRT_BYTES)
++
++
++class FailRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++    error: str = Field(min_length=1, max_length=2000)
++
++
++def _guard(request: Request, *, token: bool = True):
++    """(db, None) when the request may go on, else (None, the answer)."""
++    settings = request.app.state.settings
++    if not settings.transcription_enabled:
++        return None, problem(404, "Not Found")
++    if token:
++        sent = request.headers.get(TOKEN_HEADER, "")
++        if not hmac.compare_digest(sent.encode(), settings.transcriber_token.encode()):
++            return None, problem(401, "a valid X-Transcriber-Token is required")
++    db = request.app.state.db
++    if db is None:
++        return None, problem(503, "The database is not available; see /health.")
++    return db, None
++
++
++def _error(exc: TranscriptionError) -> JSONResponse:
++    return problem(ERROR_STATUS.get(exc.kind, 400), exc.message)
++
++
++async def status(request: Request):
++    db, failure = _guard(request)
++    if failure is not None:
++        return failure
++    return JSONResponse(await asyncio.to_thread(transcriptions.status, db))
++
++
++async def claim(body: ClaimRequest, request: Request):
++    db, failure = _guard(request)
++    if failure is not None:
++        return failure
++    data_root = request.app.state.settings.data_root
++    try:
++        row = await asyncio.to_thread(transcriptions.claim, db, data_root, body.worker)
++    except TranscriptionError as exc:
++        return _error(exc)
++    if row is None:
++        return Response(status_code=204)
++    path = transcriptions.media_file(data_root, row.media_path)
++    return JSONResponse(
++        {
++            "id": row.id,
++            "attempt": row.attempts,
++            "language": row.language,
++            "name": path.name if path else None,
++            "size": path.stat().st_size if path else None,
++            "media_url": f"/api/transcriber/jobs/{row.id}/media?key={row.media_key}",
++        }
++    )
++
++
++async def media(transcription_id: int, request: Request, key: str = ""):
++    db, failure = _guard(request, token=False)  # the per-attempt key is the credential
++    if failure is not None:
++        return failure
++    data_root = request.app.state.settings.data_root
++    try:
++        _, path = await asyncio.to_thread(
++            transcriptions.media_for, db, data_root, transcription_id, key
++        )
++    except TranscriptionError as exc:
++        return _error(exc)
++    return FileResponse(path, media_type="application/octet-stream")
++
++
++async def heartbeat(transcription_id: int, body: HeartbeatRequest, request: Request):
++    db, failure = _guard(request)
++    if failure is not None:
++        return failure
++    alive = await asyncio.to_thread(transcriptions.heartbeat, db, transcription_id, body.progress)
++    if not alive:
++        return problem(409, "this transcription is not running any more")
++    return JSONResponse({"status": "running"})
++
++
++async def result(transcription_id: int, body: ResultRequest, request: Request):
++    db, failure = _guard(request)
++    if failure is not None:
++        return failure
++    settings = request.app.state.settings
++    try:
++        row = await asyncio.to_thread(
++            transcriptions.complete,
++            db,
++            settings.data_root,
++            transcription_id,
++            body.language,
++            body.srt,
++        )
++    except TranscriptionError as exc:
++        return _error(exc)
++    except OSError as exc:
++        logger.warning("could not file the subtitle", extra={"error": str(exc)})
++        return problem(500, f"could not write the subtitle: {exc.strerror or exc}")
++    if row.result_path:
++        request.app.state.jellyfin.request_refresh(row.result_path.split("/", 1)[0])
++    name = row.result_path.rsplit("/", 1)[-1] if row.result_path else None
++    return JSONResponse({"status": row.status, "subtitle": name})
++
++
++async def fail(transcription_id: int, body: FailRequest, request: Request):
++    db, failure = _guard(request)
++    if failure is not None:
++        return failure
++    try:
++        row = await asyncio.to_thread(transcriptions.fail, db, transcription_id, body.error)
++    except TranscriptionError as exc:
++        return _error(exc)
++    return JSONResponse({"status": row.status, "attempts": row.attempts})
++
++
++def register(app: FastAPI) -> None:
++    app.add_api_route("/api/transcriber/status", status, methods=["GET"])
++    app.add_api_route("/api/transcriber/claim", claim, methods=["POST"])
++    app.add_api_route("/api/transcriber/jobs/{transcription_id}/media", media, methods=["GET"])
++    app.add_api_route(
++        "/api/transcriber/jobs/{transcription_id}/heartbeat", heartbeat, methods=["POST"]
++    )
++    app.add_api_route("/api/transcriber/jobs/{transcription_id}/result", result, methods=["POST"])
++    app.add_api_route("/api/transcriber/jobs/{transcription_id}/fail", fail, methods=["POST"])
+diff --git a/app/ytp/transcriptions.py b/app/ytp/transcriptions.py
+new file mode 100644
+index 0000000..f4937cc
+--- /dev/null
++++ b/app/ytp/transcriptions.py
+@@ -0,0 +1,414 @@
++"""The Whisper transcription queue (docs/transcription.md).
++
++A YouTube video filed without subtitles (`ytp.youtube_download`) gets a row in `transcriptions`.
++The app never runs Whisper itself (it has no GPU): a PC with one is woken over the network when
++rows are waiting (`scripts/transcriber/wake.py` on the media VM), boots from the network, and its
++worker (`scripts/transcriber/pc/worker.py`) talks to the app over `ytp.transcriber_api`:
++
++1. **claim** the oldest queued row: it becomes `running`, gets a fresh random `media_key` and an
++   attempt is counted;
++2. **stream** the video from `/api/transcriber/jobs/<id>/media?key=<media_key>` (only this file,
++   only while this attempt runs);
++3. send a **heartbeat** while Whisper works (progress for the log; a row whose heartbeat stops
++   for `LEASE_SECONDS` goes back to the queue: the PC crashed, lost power or was switched off);
++4. send the **result** (SRT text and the language Whisper heard) or a **failure**.
++
++The app files the SRT itself, next to the video as `<video stem>.<lang>.srt` (the name Jellyfin
++reads as an external subtitle), written to a temporary name and renamed, never over an existing
++subtitle, and asks Jellyfin to refresh that library. So the PC needs no access to the media share
++and cannot write anywhere: everything it sends is validated here.
++
++A failed attempt is retried up to `MAX_ATTEMPTS` times in all, then the row is `failed` and an
++alert says so (the "never fail silently" rule). A video that is gone by the time it is claimed
++fails at once.
++
++Plain functions over `ytp.db.Database`, like `ytp.jobs`; standard library only.
++"""
++
++from __future__ import annotations
++
++import hmac
++import json
++import logging
++import os
++import re
++import secrets
++import sqlite3
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++from . import alertlog
++from .db import Database
++from .youtube_download import subtitle_path
++
++logger = logging.getLogger(__name__)
++
++STATUSES = ("queued", "running", "done", "failed")
++MAX_ATTEMPTS = 3
++LEASE_SECONDS = 600  # no heartbeat for 10 minutes = the PC is gone
++MAX_SRT_BYTES = 10 * 1024**2
++MAX_ERROR_LENGTH = 500
++WORKER_STATE_KEY = "transcriber.worker"
++_LANG = re.compile(r"[a-z]{2,3}")
++_WORKER = re.compile(r"[A-Za-z0-9._-]{1,64}")
++_CUE_TIME = re.compile(
++    r"^\d{1,3}:[0-5]\d:[0-5]\d[,.]\d{3} --> \d{1,3}:[0-5]\d:[0-5]\d[,.]\d{3}\s*$", re.M
++)
++
++
++class TranscriptionError(Exception):
++    """A request of the transcription PC that cannot be done. `kind` picks the HTTP status."""
++
++    def __init__(self, kind: str, message: str):
++        self.kind = kind  # not_found | conflict | invalid | gone
++        self.message = message
++        super().__init__(message)
++
++
++@dataclass(frozen=True)
++class Transcription:
++    id: int
++    job_id: int | None
++    media_path: str
++    language: str | None
++    status: str
++    attempts: int
++    error: str | None
++    worker: str | None
++    media_key: str | None
++    progress: int | None
++    heartbeat_at: str | None
++    result_lang: str | None
++    result_path: str | None
++    created_at: str
++    updated_at: str
++
++    @classmethod
++    def from_row(cls, row: sqlite3.Row) -> Transcription:
++        return cls(**{name: row[name] for name in cls.__dataclass_fields__})
++
++
++def get(db: Database, transcription_id: int) -> Transcription | None:
++    rows = db.query("SELECT * FROM transcriptions WHERE id = ?", (transcription_id,))
++    return Transcription.from_row(rows[0]) if rows else None
++
++
++def valid_language(value: object) -> str | None:
++    """An ISO 639-1/-2 code in lower case (`de`, `en`, `yue`), or None."""
++    text = str(value or "").strip().lower()
++    return text if _LANG.fullmatch(text) else None
++
++
++def relative_media_path(data_root: Path, video: Path) -> str:
++    """The video's path below DATA_ROOT, as stored. Raises ValueError for anything outside."""
++    return video.resolve().relative_to(data_root.resolve()).as_posix()
++
++
++# ---------------------------------------------------------------------------------- queueing
++
++
++def enqueue(
++    db: Database,
++    data_root: Path,
++    video: Path,
++    *,
++    language: str | None = None,
++    job_id: int | None = None,
++) -> bool:
++    """Queue `video` for Whisper. True if it is (now) waiting, False if it was done before.
++
++    Idempotent: a video is queued once (keyed by its path). One that failed before is queued
++    again with fresh attempts: downloading the same video again is how a person retries.
++    """
++    relative = relative_media_path(data_root, video)
++    with db.transaction() as conn:
++        cursor = conn.execute(
++            "INSERT INTO transcriptions (job_id, media_path, language) VALUES (?, ?, ?) "
++            "ON CONFLICT (media_path) DO NOTHING",
++            (job_id, relative, valid_language(language)),
++        )
++        if cursor.rowcount == 1:
++            logger.info("transcription queued", extra={"media": relative})
++            return True
++        row = conn.execute(
++            "SELECT status FROM transcriptions WHERE media_path = ?", (relative,)
++        ).fetchone()
++        if row["status"] == "failed":
++            conn.execute(
++                "UPDATE transcriptions SET status = 'queued', attempts = 0, error = NULL, "
++                "media_key = NULL, progress = NULL, worker = NULL, language = ? "
++                "WHERE media_path = ?",
++                (valid_language(language), relative),
++            )
++            return True
++        return row["status"] in ("queued", "running")
++
++
++def release_stale(db: Database, lease_seconds: int = LEASE_SECONDS) -> int:
++    """Running rows whose PC stopped sending heartbeats go back to the queue (or fail when they
++    used up their attempts). Returns how many were released."""
++    cutoff = f"-{int(lease_seconds)} seconds"
++    with db.transaction() as conn:
++        stale = conn.execute(
++            "SELECT * FROM transcriptions WHERE status = 'running' AND (heartbeat_at IS NULL "
++            "OR heartbeat_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?))",
++            (cutoff,),
++        ).fetchall()
++        for row in stale:
++            _retry_or_fail(conn, row, "the transcription PC stopped answering")
++    return len(stale)
++
++
++def claim(db: Database, data_root: Path, worker: str) -> Transcription | None:
++    """Take the oldest queued row for `worker` (it becomes `running`); None if there is none.
++
++    One transaction, so two PCs can never take the same video. A row whose video is gone (deleted
++    in the meantime) fails on the spot and the next one is taken.
++    """
++    if not _WORKER.fullmatch(worker):
++        raise TranscriptionError("invalid", "worker must be 1-64 letters, digits, . _ -")
++    release_stale(db)
++    touch_worker(db, worker)
++    while True:
++        with db.transaction() as conn:
++            row = conn.execute(
++                "SELECT * FROM transcriptions WHERE status = 'queued' ORDER BY id LIMIT 1"
++            ).fetchone()
++            if row is None:
++                return None
++            if media_file(data_root, row["media_path"]) is None:
++                conn.execute(
++                    "UPDATE transcriptions SET status = 'failed', error = ? WHERE id = ?",
++                    ("the video is not in the library any more", row["id"]),
++                )
++                continue
++            conn.execute(
++                "UPDATE transcriptions SET status = 'running', attempts = attempts + 1, "
++                "error = NULL, worker = ?, media_key = ?, progress = 0, "
++                "heartbeat_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
++                (worker, secrets.token_urlsafe(32), row["id"]),
++            )
++            claimed = conn.execute(
++                "SELECT * FROM transcriptions WHERE id = ?", (row["id"],)
++            ).fetchone()
++        logger.info(
++            "transcription claimed",
++            extra={
++                "transcription_id": claimed["id"],
++                "worker": worker,
++                "attempt": claimed["attempts"],
++            },
++        )
++        return Transcription.from_row(claimed)
++
++
++def media_file(data_root: Path, media_path: str) -> Path | None:
++    """The stored path as a file below DATA_ROOT, or None (gone, or would lead outside)."""
++    root = data_root.resolve()
++    candidate = (root / media_path).resolve()
++    if not candidate.is_relative_to(root) or not candidate.is_file():
++        return None
++    return candidate
++
++
++def media_for(
++    db: Database, data_root: Path, transcription_id: int, key: str
++) -> tuple[Transcription, Path]:
++    """The file a running attempt may stream, checked against its `media_key`."""
++    row = get(db, transcription_id)
++    if row is None or row.status != "running" or not row.media_key:
++        raise TranscriptionError("not_found", "no running transcription with this id")
++    if not hmac.compare_digest(row.media_key.encode(), key.encode()):
++        raise TranscriptionError("not_found", "no running transcription with this id")
++    path = media_file(data_root, row.media_path)
++    if path is None:
++        raise TranscriptionError("gone", "the video is not in the library any more")
++    return row, path
++
++
++def heartbeat(db: Database, transcription_id: int, progress: int | None = None) -> bool:
++    """The PC is still on it. False if the row is not running any more (released, or done)."""
++    value = None if progress is None else max(0, min(100, int(progress)))
++    with db.transaction() as conn:
++        cursor = conn.execute(
++            "UPDATE transcriptions SET heartbeat_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
++            "progress = COALESCE(?, progress) WHERE id = ? AND status = 'running'",
++            (value, transcription_id),
++        )
++        return cursor.rowcount == 1
++
++
++def fail(db: Database, transcription_id: int, error: str) -> Transcription:
++    """The PC could not do it: try again later, or give up after `MAX_ATTEMPTS`."""
++    with db.transaction() as conn:
++        row = conn.execute(
++            "SELECT * FROM transcriptions WHERE id = ? AND status = 'running'", (transcription_id,)
++        ).fetchone()
++        if row is None:
++            raise TranscriptionError("conflict", "this transcription is not running")
++        _retry_or_fail(conn, row, error.strip() or "the transcription failed")
++        return Transcription.from_row(
++            conn.execute(
++                "SELECT * FROM transcriptions WHERE id = ?", (transcription_id,)
++            ).fetchone()
++        )
++
++
++def _retry_or_fail(conn: sqlite3.Connection, row: sqlite3.Row, error: str) -> None:
++    error = error[:MAX_ERROR_LENGTH]
++    if row["attempts"] < MAX_ATTEMPTS:
++        conn.execute(
++            "UPDATE transcriptions SET status = 'queued', error = ?, media_key = NULL, "
++            "progress = NULL WHERE id = ?",
++            (error, row["id"]),
++        )
++        logger.warning(
++            "transcription attempt failed, queued again",
++            extra={"transcription_id": row["id"], "attempt": row["attempts"], "reason": error},
++        )
++        return
++    conn.execute(
++        "UPDATE transcriptions SET status = 'failed', error = ?, media_key = NULL WHERE id = ?",
++        (error, row["id"]),
++    )
++    name = Path(row["media_path"]).name
++    alertlog.insert(
++        conn,
++        "transcription_failed",
++        "warning",
++        f"A transcription failed: {name}",
++        f"Whisper could not transcribe {name} after {row['attempts']} attempts: {error}",
++        {"name": name, "reason": error, "attempts": row["attempts"]},
++        key=f"transcription:{row['id']}:{row['updated_at']}",
++    )
++    logger.warning("transcription failed", extra={"transcription_id": row["id"], "reason": error})
++
++
++# ---------------------------------------------------------------------------------- the result
++
++
++def normalise_srt(text: str) -> str:
++    """The SRT as it is filed: UTF-8 text, `\\n` line ends, ending in one newline.
++
++    Raises TranscriptionError("invalid") for something that is not an SRT (an empty text is
++    allowed and means: no speech in the video, no file).
++    """
++    if len(text.encode("utf-8", errors="replace")) > MAX_SRT_BYTES:
++        raise TranscriptionError("invalid", "the subtitle text is too large")
++    if "\x00" in text:
++        raise TranscriptionError("invalid", "the subtitle text contains NUL characters")
++    cleaned = text.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n").strip()
++    if not cleaned:
++        return ""
++    if not _CUE_TIME.search(cleaned):
++        raise TranscriptionError("invalid", "this is not SRT: no cue with a time line")
++    return cleaned + "\n"
++
++
++def complete(
++    db: Database, data_root: Path, transcription_id: int, language: str, srt: str
++) -> Transcription:
++    """File the SRT the PC sent and mark the row `done`. Returns the updated row.
++
++    An existing subtitle in that language (from YouTube, or one a person put there) is never
++    replaced; the row is done all the same. An empty SRT (no speech) files nothing.
++    """
++    lang = valid_language(language)
++    if lang is None:
++        raise TranscriptionError("invalid", "language must be an ISO 639 code like 'de'")
++    text = normalise_srt(srt)
++    row = get(db, transcription_id)
++    if row is None or row.status != "running":
++        raise TranscriptionError("conflict", "this transcription is not running")
++    video = media_file(data_root, row.media_path)
++    if video is None:
++        raise TranscriptionError("gone", "the video is not in the library any more")
++    target: Path | None = None
++    if text:
++        target = subtitle_path(video, lang)
++        if target.exists() or target.is_symlink():
++            logger.info("subtitle exists, leaving it", extra={"target": target.name})
++        else:
++            _write_atomically(target, text)
++    with db.transaction() as conn:
++        cursor = conn.execute(
++            "UPDATE transcriptions SET status = 'done', error = NULL, media_key = NULL, "
++            "progress = 100, result_lang = ?, result_path = ? WHERE id = ? AND status = 'running'",
++            (
++                lang,
++                relative_media_path(data_root, target) if target is not None else None,
++                transcription_id,
++            ),
++        )
++        if cursor.rowcount != 1:
++            raise TranscriptionError("conflict", "this transcription is not running")
++    logger.info(
++        "transcription filed",
++        extra={"transcription_id": transcription_id, "language": lang, "empty": not text},
++    )
++    done = get(db, transcription_id)
++    assert done is not None
++    return done
++
++
++def _write_atomically(target: Path, text: str) -> None:
++    temporary = target.with_name(f".{target.name}.{secrets.token_hex(4)}.part")
++    try:
++        with open(temporary, "x", encoding="utf-8", newline="\n") as handle:
++            handle.write(text)
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(temporary, target)
++    except BaseException:
++        temporary.unlink(missing_ok=True)
++        raise
++
++
++# ---------------------------------------------------------------------------------- status
++
++
++def touch_worker(db: Database, worker: str) -> None:
++    """Remember that a transcription PC asked (the wake script does not wake a PC that is up)."""
++    with db.transaction() as conn:
++        conn.execute(
++            "INSERT INTO app_state (key, value) VALUES (?, ?) "
++            "ON CONFLICT (key) DO UPDATE SET value = excluded.value, "
++            "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
++            (WORKER_STATE_KEY, json.dumps({"worker": worker})),
++        )
++
++
++# YouTube jobs that may still end up in the queue: not finished, and not audio only / music.
++PENDING_DOWNLOADS_SQL = (
++    "SELECT COUNT(*) AS n FROM jobs WHERE type = 'youtube' "
++    "AND status IN ('queued', 'downloading', 'organizing') "
++    "AND COALESCE(json_extract(metadata, '$.target'), 'video') IN ('video', 'podcast') "
++    "AND COALESCE(json_extract(metadata, '$.audio_only'), 0) = 0"
++)
++
++
++def status(db: Database) -> dict[str, Any]:
++    """What the wake script and the PC decide on: is there (or will there soon be) work?
++
++    `pending_downloads` are YouTube downloads still in progress that may end without subtitles,
++    i.e. *potential* transcriptions: the PC stays up a while for them instead of shutting down
++    and being woken again ten minutes later.
++    """
++    release_stale(db)
++    counts = {name: 0 for name in STATUSES}
++    for row in db.query("SELECT status, COUNT(*) AS n FROM transcriptions GROUP BY status"):
++        counts[row["status"]] = row["n"]
++    pending = db.query(PENDING_DOWNLOADS_SQL)[0]["n"]
++    seen = db.query("SELECT updated_at FROM app_state WHERE key = ?", (WORKER_STATE_KEY,))
++    return {
++        **counts,
++        "pending_downloads": pending,
++        "worker_last_seen": seen[0]["updated_at"] if seen else None,
++    }
++
++
++def recent(db: Database, limit: int = 20) -> list[Transcription]:
++    """The newest rows, newest first."""
++    rows = db.query("SELECT * FROM transcriptions ORDER BY id DESC LIMIT ?", (limit,))
++    return [Transcription.from_row(row) for row in rows]
+diff --git a/app/ytp/youtube_download.py b/app/ytp/youtube_download.py
+index 28849e2..c3fa3d0 100644
+--- a/app/ytp/youtube_download.py
++++ b/app/ytp/youtube_download.py
+@@ -27,6 +27,17 @@ it as it is. YouTube serves AAC in an mp4 container and Opus in webm; yt-dlp's
+ player, phone and Jellyfin client plays it and it can carry a cover picture and tags; Opus is the
+ fallback when no AAC stream exists. Nothing is ever converted to mp3 (that would be a lossy
+ re-encode of a lossy stream). Tags and the cover are added afterwards by `ytp.audiotags`.
++
++**Subtitles** (docs/transcription.md): when the video has subtitles in one of `subtitle_langs`
++(`YOUTUBE_SUBTITLE_LANGS`, default `de,en`), they are fetched in a SECOND, separate yt-dlp pass
++after the video is complete, converted to SRT and filed next to the video as
++`<title> [<id>].<lang>.srt`, which Jellyfin picks up as an external subtitle. Separate on purpose:
++a subtitle that cannot be fetched must never fail the video, and a video without subtitles (most
++of them) costs no extra request, because the first pass already says which subtitles exist. Only
++subtitles a person made are taken by default; YouTube's automatic captions only with
++`YOUTUBE_AUTO_SUBTITLES=1`, and then only in the video's own language (YouTube also offers
++machine translations of them into every language, which are never taken). A video that ends up
++without any is handed to the Whisper transcription queue (`ytp.transcriptions`).
+ """
+ 
+ from __future__ import annotations
+@@ -35,6 +46,7 @@ import errno
+ import json
+ import logging
+ import os
++import re
+ import shutil
+ from collections.abc import Callable
+ from dataclasses import dataclass
+@@ -56,6 +68,8 @@ INFO_KEYS = (
+     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
+     "upload_date", "description", "tags", "categories", "width", "height", "fps",
+ )  # fmt: skip
++MAX_SUBTITLE_BYTES = 10 * 1024**2  # an SRT of a 10-hour video is a few MB; more is not subtitles
++_LANG = re.compile(r"[a-z]{2,3}")
+ 
+ 
+ class DownloadFailed(Exception):
+@@ -122,6 +136,85 @@ def download_options(
+     return options
+ 
+ 
++@dataclass(frozen=True)
++class SubtitleChoice:
++    key: str  # yt-dlp's name of the track ("en", "de-DE", "de-orig")
++    lang: str  # what the file is named with, for Jellyfin: the base language ("en", "de")
++    automatic: bool
++
++
++def base_language(key: str) -> str | None:
++    """`de-DE` / `de_DE` / `de-orig` -> `de`; None for something that is not a language."""
++    base = re.split(r"[-_]", key.strip().lower(), maxsplit=1)[0]
++    return base if _LANG.fullmatch(base) else None
++
++
++def choose_subtitles(
++    info: dict[str, Any], langs: tuple[str, ...], *, automatic: bool = False
++) -> list[SubtitleChoice]:
++    """Which of the video's subtitle tracks to fetch: at most one per wanted language, in the
++    order of `langs`; a track named exactly like the language wins over a regional one.
++
++    Automatic captions (only with `automatic`) count only in the video's own language: YouTube
++    lists machine translations into every language next to them, which are useless.
++    """
++    manual = info.get("subtitles") if isinstance(info.get("subtitles"), dict) else {}
++    auto = info.get("automatic_captions")
++    auto = auto if automatic and isinstance(auto, dict) else {}
++    original = base_language(str(info.get("language") or ""))
++    chosen: list[SubtitleChoice] = []
++    for lang in langs:
++        candidates = [
++            (key, False) for key in manual if key != "live_chat" and base_language(key) == lang
++        ]
++        if not candidates and lang == original:
++            # `<lang>-orig` is the caption track itself; plain `<lang>` may be a translation
++            candidates = [(key, True) for key in auto if key == f"{lang}-orig"] or [
++                (key, True) for key in auto if key == lang
++            ]
++        if candidates:
++            candidates.sort(key=lambda item: (item[0].lower() != lang, item[0]))
++            key, is_auto = candidates[0]
++            chosen.append(SubtitleChoice(key, lang, is_auto))
++    return chosen
++
++
++def subtitle_options(
++    workdir: Path, choices: list[SubtitleChoice], *, proxy: str, socket_timeout: float
++) -> dict[str, Any]:
++    """The yt-dlp options of the subtitle pass: no media, exactly the chosen tracks, as SRT."""
++    return {
++        "quiet": True,
++        "no_warnings": True,
++        "noprogress": True,
++        "noplaylist": True,
++        "allowed_extractors": ["youtube"],
++        "cachedir": False,
++        "enable_file_urls": False,
++        "geo_bypass": False,
++        "color": "never",
++        "logger": _SilentLogger(),
++        "socket_timeout": socket_timeout,
++        "retries": 2,
++        "extractor_retries": 1,
++        "skip_download": True,
++        "writesubtitles": any(not c.automatic for c in choices),
++        "writeautomaticsub": any(c.automatic for c in choices),
++        # yt-dlp reads these as regular expressions; the keys are matched exactly.
++        "subtitleslangs": [re.escape(c.key) for c in choices],
++        "subtitlesformat": "srt/vtt/best",
++        "outtmpl": {"default": "%(id)s.%(ext)s"},
++        "paths": {"home": str(workdir), "temp": str(workdir)},
++        "postprocessors": [
++            {"key": "FFmpegSubtitlesConvertor", "format": "srt", "when": "before_dl"}
++        ],
++        "writethumbnail": False,
++        "writeinfojson": False,
++        "overwrites": True,
++        **({"proxy": proxy} if proxy else {}),
++    }
++
++
+ def _download_with_ytdlp(url: str, options: dict[str, Any]) -> dict[str, Any]:
+     import yt_dlp
+ 
+@@ -159,12 +252,21 @@ def upload_date(info: dict[str, Any]) -> date | None:
+         return None
+ 
+ 
++@dataclass(frozen=True)
++class Subtitle:
++    lang: str  # base language, e.g. "de": the file becomes `<stem>.<lang>.srt`
++    path: Path  # the SRT in the work folder
++    automatic: bool = False
++
++
+ @dataclass(frozen=True)
+ class Downloaded:
+     video: Path  # the main file: the video, or the audio file for audio_only
+     thumbnail: Path | None
+     info: dict[str, Any]
+     audio_only: bool = False
++    subtitles: tuple[Subtitle, ...] = ()
++    language: str | None = None  # the spoken language as YouTube states it (a Whisper hint)
+ 
+ 
+ class YoutubeDownloader:
+@@ -176,12 +278,16 @@ class YoutubeDownloader:
+         socket_timeout: float = 20.0,
+         download: Callable[[str, dict[str, Any]], dict[str, Any]] = _download_with_ytdlp,
+         min_free_bytes: int = MIN_FREE_BYTES,
++        subtitle_langs: tuple[str, ...] = (),
++        automatic_subtitles: bool = False,
+     ):
+         self.proxy = proxy
+         self.max_height = max_height
+         self._socket_timeout = socket_timeout
+         self._download = download
+         self._min_free = min_free_bytes
++        self.subtitle_langs = subtitle_langs
++        self.automatic_subtitles = automatic_subtitles
+ 
+     def download(
+         self,
+@@ -224,13 +330,48 @@ class YoutubeDownloader:
+                 "yt-dlp finished without producing "
+                 + ("an audio file" if audio_only else "a video file")
+             )
++        subtitles = () if audio_only else self._subtitles(ref, workdir, info)
+         return Downloaded(
+             media,
+             _find(workdir, ref.video_id, THUMBNAIL_EXTENSIONS),
+             summary(info, ref),
+             audio_only,
++            subtitles,
++            base_language(str(info.get("language") or "")),
+         )
+ 
++    def _subtitles(
++        self, ref: VideoRef, workdir: Path, info: dict[str, Any]
++    ) -> tuple[Subtitle, ...]:
++        """The second pass: fetch the chosen subtitle tracks as SRT. Never raises: a video
++        without its subtitles is still a good video (and goes to Whisper instead)."""
++        if not self.subtitle_langs:
++            return ()
++        choices = choose_subtitles(info, self.subtitle_langs, automatic=self.automatic_subtitles)
++        if not choices:
++            return ()
++        options = subtitle_options(
++            workdir, choices, proxy=self.proxy, socket_timeout=self._socket_timeout
++        )
++        try:
++            self._download(ref.url, options)
++        except Exception as exc:  # yt-dlp's DownloadError, a network error, a bug: all the same
++            logger.warning(
++                "subtitles could not be fetched",
++                extra={"video_id": ref.video_id, "error": type(exc).__name__},
++            )
++        found = []
++        for choice in choices:
++            path = workdir / f"{ref.video_id}.{choice.key}.srt"
++            if not path.is_file() or path.is_symlink():
++                continue
++            size = path.stat().st_size
++            if size == 0 or size > MAX_SUBTITLE_BYTES:
++                logger.warning("subtitle file left out", extra={"video_id": ref.video_id})
++                continue
++            found.append(Subtitle(choice.lang, path, choice.automatic))
++        return tuple(found)
++
+ 
+ def _find(folder: Path, video_id: str, extensions: tuple[str, ...]) -> Path | None:
+     for ext in extensions:
+@@ -275,6 +416,8 @@ def place(
+         json.dumps(downloaded.info, ensure_ascii=False, indent=2), encoding="utf-8"
+     )
+     moves.append((info_path, folder / f"{stem}.info.json"))
++    for subtitle in downloaded.subtitles:
++        moves.append((subtitle.path, folder / f"{stem}.{subtitle.lang}.srt"))
+     moves.append((downloaded.video, folder / f"{stem}{downloaded.video.suffix.lower()}"))
+     placed = []
+     for source, target in moves:
+@@ -290,3 +433,20 @@ def place(
+             shutil.move(str(source), str(target))
+         placed.append(target)
+     return placed
++
++
++def subtitle_path(video: Path, lang: str) -> Path:
++    """Where Jellyfin looks for an external subtitle of `video`: `<video stem>.<lang>.srt`."""
++    return video.with_name(f"{video.stem}.{lang}.srt")
++
++
++def place_subtitles(downloaded: Downloaded, video: Path) -> list[Path]:
++    """Move the downloaded subtitles next to an already filed `video` (podcast episodes, whose
++    name is decided by `ytp.podcasts`). Existing files are left alone."""
++    placed = []
++    for subtitle in downloaded.subtitles:
++        target = subtitle_path(video, subtitle.lang)
++        if not (target.exists() or target.is_symlink()):
++            shutil.move(str(subtitle.path), str(target))
++        placed.append(target)
++    return placed
+diff --git a/app/ytp/youtube_jobs.py b/app/ytp/youtube_jobs.py
+index 27e7e04..8662b18 100644
+--- a/app/ytp/youtube_jobs.py
++++ b/app/ytp/youtube_jobs.py
+@@ -26,6 +26,12 @@ submitted and stored in the job's metadata:
+ 
+ The job's `external_id` is the video id for the `video` target (unchanged) and `<id>@<target>` for
+ the others, so the same video can be a video AND a podcast episode, but is queued once per target.
++
++**Subtitles and Whisper** (docs/transcription.md): a video (target `video`, or a podcast episode
++kept as video) is filed with the YouTube subtitles the downloader found. One that has none next to
++it afterwards is put into the transcription queue (`ytp.transcriptions`) when the transcription PC
++is set up (`TRANSCRIBER_TOKEN`). The job is `done` either way: the video is watchable, the
++subtitle follows when the PC has done its work.
+ """
+ 
+ from __future__ import annotations
+@@ -41,7 +47,7 @@ from typing import Any, Literal
+ 
+ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+ 
+-from . import jobs
++from . import jobs, transcriptions
+ from .audiotags import Tags, embed_tags
+ from .clients.jellyfin import LibraryRefresher
+ from .config import Settings
+@@ -56,6 +62,7 @@ from .youtube_download import (
+     DownloadFailed,
+     YoutubeDownloader,
+     place,
++    place_subtitles,
+     upload_date,
+ )
+ 
+@@ -117,6 +124,21 @@ class YoutubeJobMetadata(BaseModel):
+         return self
+ 
+ 
++SUBTITLE_EXTENSIONS = (".srt", ".ass", ".ssa", ".vtt", ".sub")
++
++
++def has_subtitles(video: Path) -> bool:
++    """Is there an external subtitle for `video` already (`<stem>.<anything>.srt` and the like)?"""
++    prefix = f"{video.stem}."
++    try:
++        return any(
++            entry.name.startswith(prefix) and entry.suffix.lower() in SUBTITLE_EXTENSIONS
++            for entry in video.parent.iterdir()
++        )
++    except OSError:
++        return False
++
++
+ def job_external_id(video_id: str, target: str = "video") -> str:
+     """The job key: the video id, plus `@<target>` for anything but the plain video."""
+     return video_id if target == "video" else f"{video_id}@{target}"
+@@ -224,19 +246,38 @@ class YoutubeWorker:
+         downloaded: Downloaded,
+         library: Path,
+     ) -> None:
++        video: Path | None = None  # the filed video, if this job filed one (not audio, not music)
+         try:
+             if meta.target == "podcast":
+-                self._file_podcast(ref, meta, downloaded, library)
++                filed = self._file_podcast(ref, meta, downloaded, library)
++                video = None if downloaded.audio_only else filed
+             elif meta.target == "music":
+                 self._file_music(ref, meta, downloaded, library)
+             else:
+-                place(downloaded, library, meta.channel, meta.title, ref.video_id)
++                video = place(downloaded, library, meta.channel, meta.title, ref.video_id)[-1]
+         except (DownloadFailed, PodcastError, OSError) as exc:
+             self._fail(job, getattr(exc, "message", None) or str(exc))
+             return
+         if jobs.transition(self.db, job.id, "done", expected=("organizing",)):
+             logger.info("job done", extra={"job_id": job.id, "video_id": ref.video_id})
+             self.refresher.request_refresh(self.settings.library_dirs[LIBRARY_KEYS[meta.target]])
++            if video is not None:
++                self._queue_transcription(job, video, downloaded)
++
++    def _queue_transcription(self, job: Job, video: Path, downloaded: Downloaded) -> None:
++        """Hand a video without subtitles to Whisper. Never fails the (finished) job."""
++        if not self.settings.transcription_enabled or has_subtitles(video):
++            return
++        try:
++            transcriptions.enqueue(
++                self.db,
++                self.settings.data_root,
++                video,
++                language=downloaded.language,
++                job_id=job.id,
++            )
++        except Exception:
++            logger.exception("could not queue the transcription", extra={"job_id": job.id})
+ 
+     def _file_music(
+         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path
+@@ -269,7 +310,7 @@ class YoutubeWorker:
+ 
+     def _file_podcast(
+         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path
+-    ) -> None:
++    ) -> Path:
+         """A video as a podcast episode: the same names and folder as an RSS episode (#34).
+ 
+         Audio only: tags (podcast = album, title = episode) and the thumbnail as the cover are
+@@ -304,6 +345,9 @@ class YoutubeWorker:
+             sidecar = target.with_suffix(".jpg")
+             if not sidecar.exists() and not sidecar.is_symlink():
+                 shutil.move(str(downloaded.thumbnail), str(sidecar))
++        if not downloaded.audio_only:
++            place_subtitles(downloaded, target)
++        return target
+ 
+     def _fail(self, job: Job, reason: str) -> None:
+         jobs.transition(
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 65bbb44..d3d657b 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -146,6 +146,9 @@ services:
+       YTDLP_PROXY: ${YTDLP_PROXY-http://gluetun:8888}
+       # Tallest YouTube video to download in pixels (0 = no limit); a disk-space knob (#18).
+       YOUTUBE_MAX_HEIGHT: ${YOUTUBE_MAX_HEIGHT:-1080}
++      YOUTUBE_SUBTITLE_LANGS: ${YOUTUBE_SUBTITLE_LANGS-de,en}
++      YOUTUBE_AUTO_SUBTITLES: ${YOUTUBE_AUTO_SUBTITLES:-0}
++      TRANSCRIBER_TOKEN: ${TRANSCRIBER_TOKEN:-}
+       # How often subscribed channels are checked for new videos, in minutes; 0 = never (#20).
+       SUBSCRIPTION_POLL_MINUTES: ${SUBSCRIPTION_POLL_MINUTES:-60}
+       # Podcast feeds and episodes (#34) are fetched through the same proxy (the VPN); set EMPTY in
+diff --git a/docs/configuration.md b/docs/configuration.md
+index 23cd54b..4536730 100644
+--- a/docs/configuration.md
++++ b/docs/configuration.md
+@@ -85,6 +85,17 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
+ | `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels (144 to 4320); `0` = no limit. A disk-space knob. |
+ | `SUBSCRIPTION_POLL_MINUTES` | `60` | no | How often each subscribed channel is checked (15 to 1440; each channel gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
+ 
++## Subtitles and Whisper ([transcription.md](transcription.md))
++
++| Variable | Default | Required | Meaning |
++|---|---|---|---|
++| `YOUTUBE_SUBTITLE_LANGS` | `de,en` | no | Subtitles fetched with a YouTube video, in this order (comma-separated language codes), filed as `<video>.<lang>.srt`. **Set but empty** = no subtitles. |
++| `YOUTUBE_AUTO_SUBTITLES` | `0` | no | `1` = also take YouTube's automatic captions (only in the video's own language) when no person-made subtitle exists. `0` leaves those videos to Whisper. |
++| `TRANSCRIBER_TOKEN` | empty | no, **secret** | The shared secret of the transcription PC (at least 32 characters, `secrets.token_urlsafe(32)`). Empty = no Whisper queue and the `/api/transcriber/*` routes answer 404. The same value goes into the PC's `/etc/ytp-transcriber.env`. |
++| `TRANSCRIBER_PC_MAC` | empty | no | The MAC address of the PC's network card for Wake-on-LAN. Read by the host script `scripts/transcriber/wake.py`, not by the containers. Empty = never wake it. |
++| `TRANSCRIBER_WOL_ADDRESS` | `255.255.255.255` | no | Where the Wake-on-LAN packet goes: the broadcast address of the PC's network (e.g. `192.168.178.255`). Host script only. |
++| `TRANSCRIBER_WAKE_HOURS` | empty | no | Hours in which the PC may be woken, `1-7` or `22-6` (start inclusive, end exclusive); empty = any time. Host script only. |
++
+ ## Podcasts ([podcasts.md](podcasts.md))
+ 
+ | Variable | Default | Required | Meaning |
+diff --git a/docs/transcription.md b/docs/transcription.md
+new file mode 100644
+index 0000000..4ea560b
+--- /dev/null
++++ b/docs/transcription.md
+@@ -0,0 +1,191 @@
++# Subtitles and Whisper transcription
++
++Every YouTube video should have subtitles in Jellyfin. The app gets them in two ways:
++
++1. **From YouTube**, when the video has them: fetched with the video and filed next to it.
++2. **From Whisper**, for every video that has none: a PC with a GPU (the RTX 2080 Super) is
++   woken over the network, boots from the network into Linux, transcribes everything that waits,
++   and switches itself off again.
++
++```
++ app (media VM)                         wake.py (media VM, timer)           main PC (netboot Linux)
++ ───────────────                        ─────────────────────────           ───────────────────────
++ download video
++ ├─ YouTube subtitles? ── yes ─> <video>.de.srt  (done)
++ └─ no ─> transcriptions: queued ──────> queued and PC not up? ── WoL ──>   boots from the network
++                                                                            ytp-transcriber.service
++          /api/transcriber/claim  <──────────────────────────────────────── worker asks for work
++          /api/transcriber/jobs/1/media ───── video (streamed) ──────────>  ffmpeg -> 16 kHz WAV
++          /api/transcriber/jobs/1/heartbeat <────────────────────────────── faster-whisper on CUDA
++          /api/transcriber/jobs/1/result  <──────────── SRT ─────────────── 
++ <video>.<lang>.srt, Jellyfin refresh
++                                                                            queue empty for 5 min:
++                                                                            exit 77 -> poweroff
++```
++
++## 1. Subtitles from YouTube
++
++With every video (target `video`, and podcast episodes kept as video) the app looks at which
++subtitles YouTube lists. If one exists in a language of `YOUTUBE_SUBTITLE_LANGS` (default `de,en`),
++a second, separate yt-dlp pass fetches exactly those tracks, converts them to SRT and they are
++filed next to the video:
++
++```
++Youtube/<channel>/<title> [<id>].mp4
++Youtube/<channel>/<title> [<id>].de.srt      <- Jellyfin shows "German" in the subtitle menu
++Youtube/<channel>/<title> [<id>].en.srt
++```
++
++- One file per language; `de-DE` and `de` both become `.de.srt` (the plain one wins).
++- Only subtitles a **person** made, by default. YouTube's automatic captions are taken only with
++  `YOUTUBE_AUTO_SUBTITLES=1`, and then only in the video's own language: YouTube also lists
++  machine translations of them into every other language, which are never taken. Whisper is
++  usually better than YouTube's captions, so the default leaves those videos to Whisper.
++- A subtitle that cannot be fetched never fails the video (it goes to Whisper instead). A video
++  without subtitles costs no extra request: the first pass already says which ones exist.
++- Audio-only downloads (podcast episodes, music) get no subtitles and no transcription.
++- `YOUTUBE_SUBTITLE_LANGS=` (set, but empty) switches subtitles off.
++
++## 2. The transcription queue in the app
++
++A video that is filed without any subtitle next to it (`<stem>.*.srt/.ass/.vtt`) gets a row in the
++table `transcriptions` (migration 0014), **if** `TRANSCRIBER_TOKEN` is set. The download job is
++`done` either way: the video can be watched at once, the subtitle follows.
++
++| Status | Meaning |
++|---|---|
++| `queued` | waiting for the PC |
++| `running` | the PC has it (an attempt; the PC sends a heartbeat every 30 s) |
++| `done` | the SRT is filed (or there was no speech: no file) |
++| `failed` | 3 attempts failed, or the video was deleted meanwhile. An alert says so on the dashboard. Downloading the video again queues it again. |
++
++A PC that stops sending heartbeats for 10 minutes (crash, power cut, someone switched it off) loses
++the video back to the queue; that counts as an attempt.
++
++**The PC's routes** (`ytp/transcriber_api.py`) are not behind the login. They need the header
++`X-Transcriber-Token: <TRANSCRIBER_TOKEN>` (not `Authorization`: the proxy removes that one) and
++answer 404 while `TRANSCRIBER_TOKEN` is empty. The video itself is fetched with a per-attempt
++random key in the link instead of the token (so ffmpeg can read it with range requests, and the
++token never appears on a command line); the key works only for that video and only while that
++attempt runs. The PC never names a path: it receives an id and sends text, and the app checks the
++SRT (cue times, size, no NUL), writes it to a temporary name and renames it, never over an existing
++subtitle.
++
++```bash
++# from a LAN machine, to look at the queue
++curl -s -H "X-Transcriber-Token: $TOKEN" http://<vm>:<PROXY_PORT>/api/transcriber/status
++# {"queued": 2, "running": 0, "done": 31, "failed": 0, "pending_downloads": 1, "worker_last_seen": "..."}
++```
++
++## 3. Waking the PC: `scripts/transcriber/wake.py` (media VM)
++
++A systemd timer runs `wake.py run` every 2 minutes. It reads the app's database (read only) and
++sends a Wake-on-LAN packet when videos are queued, the PC's worker has not asked for work in the
++last 3 minutes, no packet went out in the last 10 minutes (booting takes a while), and the hour is
++inside `TRANSCRIBER_WAKE_HOURS` (if set). It never shuts anything down.
++
++Set up, on the media VM, in the install folder:
++
++```bash
++# 1. the settings in .env
++python3 -c 'import secrets; print(secrets.token_urlsafe(32))'   # -> TRANSCRIBER_TOKEN
++#    TRANSCRIBER_TOKEN=<that value>
++#    TRANSCRIBER_PC_MAC=<MAC of the PC's network card that boots from the network>
++#    TRANSCRIBER_WOL_ADDRESS=192.168.178.255     (the broadcast address of the PC's network)
++#    TRANSCRIBER_WAKE_HOURS=                      (optional, e.g. 1-7)
++sudo docker compose up -d app                  # the app reads TRANSCRIBER_TOKEN
++
++# 2. test the packet by hand (the PC must be off, or asleep)
++python3 scripts/transcriber/wake.py wake
++python3 scripts/transcriber/wake.py status
++
++# 3. the timer (as root; runs as your user, who owns config/)
++sudo python3 scripts/transcriber/wake.py install-units --user "$USER"
++systemctl list-timers youtube-premium-transcriber-wake.timer
++```
++
++The VM must be in the same layer-2 network (the same bridge/VLAN) as the PC's network card, or the
++broadcast does not reach it. If the PC is linked to the server through its own switch, give the VM
++a network card on that bridge, or use that network's broadcast address.
++
++## 4. The PC: netboot Linux with the worker
++
++**What the PC must do on its own** (the netboot setup, not part of this repository):
++
++- **Wake-on-LAN** on in the BIOS/UEFI (often "Power On By PCI-E", "Wake on LAN") and, for a PC
++  that was shut down from Windows, in Windows too: device manager -> network card -> "Wake on
++  Magic Packet" on, and **Fast Startup off** (otherwise Windows leaves the card without standby
++  power on many boards).
++- **Boot from the network when woken by the packet**, and from the disk (Windows) otherwise. Many
++  boards have a "Wake on LAN boot device" / "Boot from onboard LAN" option for exactly this; else
++  put network boot first with a short timeout and let the netboot menu default to the local disk
++  unless the server has work. The netboot server (the LXC with dnsmasq, TFTP and NFS, the signed
++  shim + GRUB chain from Ubuntu) then hands it the Linux image.
++- **The NVIDIA driver in the image**, matching the image's kernel. With Secure Boot on, use
++  Ubuntu's signed prebuilt modules (`linux-modules-nvidia-<version>-generic`), not DKMS, or the
++  module will not load. `nvidia-smi` must list the RTX 2080 Super after boot.
++
++**Installing the worker into the image** (once; again after an update of these files): copy the
++folder `scripts/transcriber/pc/` into the image and run, as root inside it (a chroot on the netboot
++server with `/proc`, `/sys`, `/dev` bound in, or the booted PC if its root is writable):
++
++```bash
++sudo ./install.sh
++sudo nano /etc/ytp-transcriber.env    # YTP_APP_URL and TRANSCRIBER_TOKEN
++```
++
++It installs `python3-venv` and `ffmpeg`, a system user `ytp-transcriber`, a virtual environment
++in `/opt/ytp-transcriber` with `faster-whisper` and the CUDA 12 libraries it needs (cuBLAS,
++cuDNN 9, no system CUDA toolkit), and enables `ytp-transcriber.service`.
++
++| Setting (`/etc/ytp-transcriber.env`) | Default | Meaning |
++|---|---|---|
++| `YTP_APP_URL` | (required) | The app as the PC reaches it: `http://<PROXY_BIND>:<PROXY_PORT>`. The PC must be in `LAN_SUBNET`. |
++| `TRANSCRIBER_TOKEN` | (required) | The same value as in the app's `.env`. |
++| `WHISPER_MODEL` | `large-v3-turbo` | Nearly the quality of `large-v3` at several times the speed. `large-v3` for hard German audio, `medium` for less VRAM. |
++| `WHISPER_COMPUTE_TYPE` | `int8_float16` | About 2-3 GB of VRAM. `float16` is a little better and needs about twice as much. |
++| `WHISPER_MODEL_DIR` | `/var/lib/ytp-transcriber/...` | Where the model is kept (1.6 GB for turbo). On a read-only or RAM-backed image, a folder on the server's NVMe over NFS, writable by `ytp-transcriber`, so it is downloaded once and not at every boot. |
++| `WORK_DIR` | `/tmp` | Where the sound is unpacked: about 115 MB per hour of video. |
++| `IDLE_SHUTDOWN_SECONDS` | `300` | Switch off after this long with nothing queued or running. |
++| `WAIT_FOR_DOWNLOADS_SECONDS` | `1800` | While YouTube downloads are still in progress (they may need Whisper), stay up this long at most. |
++| `UNREACHABLE_SHUTDOWN_SECONDS` | `900` | Switch off when the app has not answered for this long. |
++| `SHUTDOWN_WHEN_IDLE` | `1` | `0` = never switch off. |
++| `NETBOOT_ONLY` | `1` | Only switch off when `/proc/cmdline` shows a network boot (`NETBOOT_MARKERS`, default `nfsroot=,root=/dev/nfs,netboot=`): the worker on a normal installation never powers anything off. |
++| `BUSY_COMMAND` | empty | A command that exits 0 while the PC is busy with something else, e.g. `pgrep -x aider` for the coding agent on the same image. |
++
++**When does it switch off?** The worker exits with code 77 and the unit's `ExecStopPost`
++(`poweroff-if-done.sh`, root) powers off, only for 77. It stays on while someone is logged in
++(`who`), while `/run/ytp-transcriber-keep-awake` exists, while `BUSY_COMMAND` says busy, and when
++the system was not booted from the network. Stopping the service by hand never powers off.
++
++**Whisper settings that matter** (fixed in `worker.py`): the voice-activity filter is on (silence
++and music are skipped, which is where Whisper invents text), `condition_on_previous_text` is off
++(no repetition loops), and segments that are exactly one of Whisper's well-known inventions
++("Untertitel im Auftrag des ZDF ...", "Thanks for watching!") are dropped. If YouTube states the
++video's language, it is passed to Whisper; otherwise Whisper detects it from the first 30 seconds,
++and the file is named with the language Whisper heard.
++
++**GPU memory.** If the coding model (Ollama with `qwen3-coder:30b`) is loaded on the same GPU at
++the same time, there is not enough VRAM for both. The attempt then fails with "the GPU ran out of
++memory" and is tried again later (3 attempts). Set `BUSY_COMMAND` so the PC stays up for the coding
++agent, and let Ollama unload its model when idle (`OLLAMA_KEEP_ALIVE`).
++
++## Troubleshooting
++
++| What you see | Where to look |
++|---|---|
++| Videos stay `queued`, the PC does not start | `python3 scripts/transcriber/wake.py status` on the VM (why it does or does not wake); `journalctl -u youtube-premium-transcriber-wake`. Test the packet with `wake.py wake` while the PC is off. |
++| The PC starts, but into Windows | The board does not boot from the network on a WoL wake: see "Boot from the network when woken" above. |
++| The PC boots the netboot Linux but nothing happens | On the PC: `journalctl -u ytp-transcriber -b`. "the app is not reachable": `YTP_APP_URL`, and is the PC in `LAN_SUBNET`? "answered 401": the token differs. |
++| "could not load library libcudnn..." | The venv lacks the CUDA libraries: run `install.sh` again. `nvidia-smi` must work first. |
++| The PC never switches off | `journalctl -u ytp-transcriber` says why ("staying on: someone is logged in", "not booted from the network", ...). |
++| Wrong language in the file name | YouTube stated a wrong language for the video. Rename the file (`.en.srt` -> `.de.srt`) and refresh the library in Jellyfin. |
++| `failed` with "the video is not in the library any more" | The video was deleted or renamed before the PC got to it. Nothing to do. |
++
++## Updating
++
++- yt-dlp is the app's (docs/youtube.md). The PC's `faster-whisper` is pinned in `install.sh`;
++  bump it there and run `install.sh` in the image again.
++- The worker files (`worker.py`, `run.sh`, `poweroff-if-done.sh`, the unit) are copied by
++  `install.sh`; after an update of this repository, copy the folder into the image and run it
++  again. `/etc/ytp-transcriber.env` is kept.
+diff --git a/docs/youtube.md b/docs/youtube.md
+index 4f226a2..0bb24bb 100644
+--- a/docs/youtube.md
++++ b/docs/youtube.md
+@@ -73,6 +73,9 @@ issue text says `/data/media/youtube/...`; the stack's real library folder is `M
+   does not read, and the files are moved (a rename) into the library only when everything is
+   complete, the video last. The work folder is deleted on success and on failure; a file that is
+   already in the library is never overwritten.
++- **Subtitles:** YouTube's subtitles in `YOUTUBE_SUBTITLE_LANGS` (default `de,en`) are filed next
++  to the video as `<title> [<id>].<lang>.srt`; a video without any goes to the Whisper
++  transcription queue when that is set up. See [transcription.md](transcription.md).
+ - **Format:** H.264 video + AAC audio in an mp4 where YouTube has them (plays everywhere, Jellyfin
+   direct-plays it), at most `YOUTUBE_MAX_HEIGHT` pixels high (default 1080, `0` = no limit; a
+   10-minute video is around 100 to 300 MB at 1080). Merging YouTube's separate video and audio
+diff --git a/scripts/transcriber/pc/install.sh b/scripts/transcriber/pc/install.sh
+new file mode 100755
+index 0000000..0f4b48a
+--- /dev/null
++++ b/scripts/transcriber/pc/install.sh
+@@ -0,0 +1,102 @@
++#!/usr/bin/env bash
++# install.sh: install the Whisper worker into the Linux the transcription PC boots from the network.
++#
++# Run as root INSIDE that system: on the booted PC if its root file system is writable, or in a
++# chroot of the netboot image on the netboot server (with /proc, /sys and /dev bound in, and the
++# image's /etc/resolv.conf working). Safe to run again (an update keeps /etc/ytp-transcriber.env).
++#
++#   sudo ./install.sh            install, enable the service
++#   sudo ./install.sh --no-enable   install only (start it yourself: systemctl enable --now ytp-transcriber)
++#
++# What it does: apt packages (python3-venv, ffmpeg), a system user `ytp-transcriber`, a virtual
++# environment in /opt/ytp-transcriber with faster-whisper and the CUDA 12 libraries it needs
++# (cuBLAS, cuDNN 9: no system CUDA toolkit needed), the worker and its unit. It does NOT install the
++# NVIDIA driver: that belongs to the image (it must match the image's kernel), see
++# docs/transcription.md.
++set -euo pipefail
++
++PREFIX=/opt/ytp-transcriber
++ENV_FILE=/etc/ytp-transcriber.env
++UNIT=/etc/systemd/system/ytp-transcriber.service
++SERVICE_USER=ytp-transcriber
++# Pinned like everything else in this project; bump on purpose (docs/transcription.md).
++FASTER_WHISPER=faster-whisper==1.1.1
++CUDA_LIBS=(nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*")
++HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++
++enable=1
++for arg in "$@"; do
++    case "$arg" in
++        --no-enable) enable=0 ;;
++        -h | --help)
++            sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
++            exit 0
++            ;;
++        *)
++            echo "install.sh: unknown option $arg" >&2
++            exit 2
++            ;;
++    esac
++done
++
++if [[ "$(id -u)" -ne 0 ]]; then
++    echo "install.sh: run me as root (sudo ./install.sh)" >&2
++    exit 1
++fi
++if ! command -v apt-get >/dev/null; then
++    echo "install.sh: this needs a Debian or Ubuntu system (apt-get)" >&2
++    exit 1
++fi
++
++echo "== packages"
++export DEBIAN_FRONTEND=noninteractive
++apt-get update -q
++apt-get install -y -q --no-install-recommends python3 python3-venv ffmpeg procps
++
++if command -v nvidia-smi >/dev/null && nvidia-smi -L >/dev/null 2>&1; then
++    echo "== GPU: $(nvidia-smi -L | head -n 1)"
++else
++    echo "!! nvidia-smi does not see a GPU here. In a chroot that is expected; on the PC the image"
++    echo "!! needs the NVIDIA driver for its kernel (Ubuntu: ubuntu-drivers install, or the signed"
++    echo "!! linux-modules-nvidia-*-generic package when Secure Boot is on). See docs/transcription.md."
++fi
++
++echo "== user $SERVICE_USER"
++if ! id "$SERVICE_USER" >/dev/null 2>&1; then
++    useradd --system --home-dir /var/lib/ytp-transcriber --no-create-home \
++        --shell /usr/sbin/nologin "$SERVICE_USER"
++fi
++
++echo "== $PREFIX"
++install -d -m 755 "$PREFIX"
++if [[ ! -x "$PREFIX/venv/bin/python" ]]; then
++    python3 -m venv "$PREFIX/venv"
++fi
++"$PREFIX/venv/bin/pip" install -q --upgrade pip
++"$PREFIX/venv/bin/pip" install -q "$FASTER_WHISPER" "${CUDA_LIBS[@]}"
++install -m 755 "$HERE/worker.py" "$PREFIX/worker.py"
++install -m 755 "$HERE/run.sh" "$PREFIX/run.sh"
++install -m 755 "$HERE/poweroff-if-done.sh" "$PREFIX/poweroff-if-done.sh"
++
++echo "== $ENV_FILE"
++if [[ ! -e "$ENV_FILE" ]]; then
++    install -m 640 -o root -g "$SERVICE_USER" "$HERE/transcriber.env.example" "$ENV_FILE"
++    echo "   written from the example: set YTP_APP_URL and TRANSCRIBER_TOKEN in it"
++else
++    chown root:"$SERVICE_USER" "$ENV_FILE"
++    chmod 640 "$ENV_FILE"
++    echo "   kept as it is"
++fi
++
++echo "== $UNIT"
++install -m 644 "$HERE/ytp-transcriber.service" "$UNIT"
++systemctl daemon-reload 2>/dev/null || true # not possible in a chroot; the next boot reads it
++if [[ "$enable" -eq 1 ]]; then
++    systemctl enable ytp-transcriber.service
++fi
++
++if grep -q '^TRANSCRIBER_TOKEN=changeme' "$ENV_FILE"; then
++    echo
++    echo "Next: edit $ENV_FILE (YTP_APP_URL, TRANSCRIBER_TOKEN), then boot the PC from the network."
++fi
++echo "done."
+diff --git a/scripts/transcriber/pc/poweroff-if-done.sh b/scripts/transcriber/pc/poweroff-if-done.sh
+new file mode 100755
+index 0000000..f681a87
+--- /dev/null
++++ b/scripts/transcriber/pc/poweroff-if-done.sh
+@@ -0,0 +1,12 @@
++#!/usr/bin/env bash
++# poweroff-if-done.sh: ExecStopPost of ytp-transcriber.service: switch the PC off when the
++# worker said "nothing left to do" (exit code 77), and only then.
++#
++# systemd sets EXIT_STATUS for ExecStopPost. Stopping the service by hand (TERM), a crash (any
++# other code) or a reboot never powers anything off. Runs as root (the `+` in the unit).
++set -euo pipefail
++
++if [[ "${EXIT_STATUS:-}" == "77" ]]; then
++    echo "ytp-transcriber: nothing left to transcribe, switching off"
++    systemctl --no-block poweroff
++fi
+diff --git a/scripts/transcriber/pc/run.sh b/scripts/transcriber/pc/run.sh
+new file mode 100755
+index 0000000..a07aacf
+--- /dev/null
++++ b/scripts/transcriber/pc/run.sh
+@@ -0,0 +1,22 @@
++#!/usr/bin/env bash
++# run.sh: start the Whisper worker with the CUDA libraries of its virtual environment.
++#
++# faster-whisper (CTranslate2) needs cuBLAS and cuDNN 9 for CUDA 12. They come as pip packages
++# into the worker's own venv (install.sh), so the netboot image needs only the NVIDIA driver, no
++# system CUDA toolkit. The dynamic loader has to be told where they are before Python starts.
++set -euo pipefail
++
++PREFIX="${YTP_TRANSCRIBER_PREFIX:-/opt/ytp-transcriber}"
++PYTHON="$PREFIX/venv/bin/python"
++
++libs="$("$PYTHON" - <<'PY' 2>/dev/null || true
++import os
++import nvidia.cublas.lib
++import nvidia.cudnn.lib
++print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))
++PY
++)"
++if [[ -n "$libs" ]]; then
++    export LD_LIBRARY_PATH="$libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
++fi
++exec "$PYTHON" "$PREFIX/worker.py" "$@"
+diff --git a/scripts/transcriber/pc/transcriber.env.example b/scripts/transcriber/pc/transcriber.env.example
+new file mode 100644
+index 0000000..207b9a6
+--- /dev/null
++++ b/scripts/transcriber/pc/transcriber.env.example
+@@ -0,0 +1,38 @@
++# /etc/ytp-transcriber.env: settings of the Whisper worker (docs/transcription.md).
++# install.sh copies this file there (mode 640, root:ytp-transcriber). Fill in the first two.
++
++# The app, as the PC reaches it: the proxy address and port of the media VM (PROXY_BIND and
++# PROXY_PORT in the app's .env). The PC must be in LAN_SUBNET, the proxy answers nobody else.
++YTP_APP_URL=http://192.168.178.20:8080
++# The same value as TRANSCRIBER_TOKEN in the app's .env.
++TRANSCRIBER_TOKEN=changeme
++
++# The model. large-v3-turbo: nearly the quality of large-v3 at several times the speed.
++# large-v3 is a little better for difficult German audio and slower; medium needs less VRAM.
++WHISPER_MODEL=large-v3-turbo
++# int8_float16: about 2-3 GB of VRAM on the RTX 2080 Super; float16 for a little more quality.
++WHISPER_COMPUTE_TYPE=int8_float16
++WHISPER_DEVICE=cuda
++WHISPER_BEAM_SIZE=5
++# Where the model is kept (about 1.6 GB for turbo, 3 GB for large-v3). Empty = /var/lib/ytp-transcriber.
++# On a netboot image, a folder on the server's NVMe over NFS keeps it across boots, e.g.
++# WHISPER_MODEL_DIR=/srv/models/whisper  (must be writable by the user ytp-transcriber)
++WHISPER_MODEL_DIR=
++# Where the sound of the current video is unpacked (16 kHz WAV, ~115 MB per hour). Empty = /tmp.
++WORK_DIR=
++
++# Switching off (see worker.py): after IDLE_SHUTDOWN_SECONDS without work; up to
++# WAIT_FOR_DOWNLOADS_SECONDS while YouTube downloads may still bring work; after
++# UNREACHABLE_SHUTDOWN_SECONDS without any answer from the app.
++SHUTDOWN_WHEN_IDLE=1
++IDLE_SHUTDOWN_SECONDS=300
++WAIT_FOR_DOWNLOADS_SECONDS=1800
++UNREACHABLE_SHUTDOWN_SECONDS=900
++# Never power off unless the kernel command line shows a network boot (one of NETBOOT_MARKERS).
++NETBOOT_ONLY=1
++NETBOOT_MARKERS=nfsroot=,root=/dev/nfs,netboot=
++# A command that exits 0 while the PC is busy with something else, e.g. the coding agent:
++# BUSY_COMMAND=pgrep -x aider
++BUSY_COMMAND=
++POLL_SECONDS=30
++LOG_LEVEL=INFO
+diff --git a/scripts/transcriber/pc/worker.py b/scripts/transcriber/pc/worker.py
+new file mode 100755
+index 0000000..f87d823
+--- /dev/null
++++ b/scripts/transcriber/pc/worker.py
+@@ -0,0 +1,546 @@
++#!/usr/bin/env python3
++"""worker.py: the Whisper worker on the transcription PC (docs/transcription.md).
++
++Runs as the systemd service `ytp-transcriber` on the Linux the PC boots from the network. It asks
++the app for videos without subtitles, one at a time, and for each one:
++
++1. lets ffmpeg read the video straight from the app (`media_url`, a per-attempt link with range
++   requests, so a 4 GB video is not copied first) and turn the sound into 16 kHz mono WAV in the
++   work folder (a tmpfs: about 115 MB per hour of video);
++2. runs faster-whisper on the GPU (default `large-v3-turbo`, int8 weights with float16 compute,
++   about 2-3 GB of VRAM, many times faster than real time on an RTX 2080 Super), with the
++   voice-activity filter on and without conditioning on the previous text, the two settings that
++   stop Whisper from inventing text in silence and music and from repeating itself;
++3. sends the SRT back; the app files it next to the video and Jellyfin shows it.
++
++**Switching off.** When there is nothing left to do it exits with code 77, and the unit's
++`ExecStopPost` powers the PC off (only for 77: stopping the service by hand never does). Nothing
++left means: no video queued or running, for `IDLE_SHUTDOWN_SECONDS` (5 min); while YouTube
++downloads that may still need Whisper are in progress, it waits for them up to
++`WAIT_FOR_DOWNLOADS_SECONDS` (30 min). If the app cannot be reached at all for
++`UNREACHABLE_SHUTDOWN_SECONDS` (15 min), it switches off too, so a PC never runs all night for
++nothing. It does NOT switch off while:
++
++* the system was not booted from the network (`NETBOOT_ONLY=1`, the default: on a normal
++  installation the worker never powers anything off), see `NETBOOT_MARKERS`;
++* someone is logged in (`who` lists a session: an SSH login, a desktop);
++* `/run/ytp-transcriber-keep-awake` exists (`sudo touch` it to keep the PC up);
++* `BUSY_COMMAND` (optional) exits 0, e.g. `pgrep -x aider` for the coding agent on the same image.
++
++Settings come from the environment (`/etc/ytp-transcriber.env`, see transcriber.env.example).
++Standard library only, plus `faster_whisper` and the `ffmpeg` program.
++"""
++
++from __future__ import annotations
++
++import contextlib
++import json
++import logging
++import os
++import re
++import shlex
++import socket
++import subprocess
++import sys
++import tempfile
++import time
++import urllib.error
++import urllib.request
++from collections.abc import Callable, Iterable
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Any, Protocol
++
++logger = logging.getLogger("ytp-transcriber")
++
++EXIT_POWEROFF = 77  # the unit powers the PC off for exactly this code
++KEEP_AWAKE_FILE = Path("/run/ytp-transcriber-keep-awake")
++HEARTBEAT_SECONDS = 30.0
++RESULT_TRIES = 5
++FFMPEG_TIMEOUT = 3 * 3600
++# Lines Whisper is known to invent for silence or music (it learned them from the subtitle files
++# of TV broadcasts). A segment that is exactly one of these, or starts like the first group, is
++# dropped. Kept short on purpose: a person may really say "thanks for watching" with more words.
++HALLUCINATION_PREFIXES = (
++    "untertitel im auftrag des zdf",
++    "untertitelung im auftrag des zdf",
++    "untertitel der amara.org-community",
++    "untertitelung aufgrund der amara.org-community",
++    "untertitel von stephanie geiges",
++    "subtitles by the amara.org community",
++)
++HALLUCINATIONS = (
++    "copyright wdr 2021",
++    "swr 2020",
++    "thanks for watching",
++    "thank you for watching",
++    "vielen dank fürs zuschauen",
++    "danke fürs zuschauen",
++)
++
++
++class Unreachable(Exception):
++    """The app did not answer (VM down, network down, proxy down)."""
++
++
++class Released(Exception):
++    """The app took the video back (the attempt timed out); stop working on it."""
++
++
++@dataclass(frozen=True)
++class Config:
++    app_url: str
++    token: str
++    worker: str
++    model: str = "large-v3-turbo"
++    device: str = "cuda"
++    compute_type: str = "int8_float16"
++    model_dir: str = ""
++    beam_size: int = 5
++    work_dir: str = ""
++    poll_seconds: float = 30.0
++    idle_seconds: float = 300.0
++    wait_for_downloads_seconds: float = 1800.0
++    unreachable_seconds: float = 900.0
++    shutdown: bool = True
++    netboot_only: bool = True
++    netboot_markers: tuple[str, ...] = ("nfsroot=", "root=/dev/nfs", "netboot=")
++    busy_command: str = ""
++
++    @classmethod
++    def from_env(cls, env: dict[str, str] | None = None) -> Config:
++        env = dict(os.environ) if env is None else env
++        problems = []
++
++        def get(name: str, default: str = "") -> str:
++            return env.get(name, "").strip() or default
++
++        def number(name: str, default: float, low: float, high: float) -> float:
++            raw = get(name, str(default))
++            try:
++                value = float(raw)
++            except ValueError:
++                problems.append(f"{name} must be a number, got {raw!r}")
++                return default
++            if not low <= value <= high:
++                problems.append(f"{name} must be between {low:g} and {high:g}")
++            return value
++
++        def flag(name: str, default: bool) -> bool:
++            raw = get(name, "1" if default else "0").lower()
++            if raw not in {"0", "1", "true", "false", "yes", "no", "on", "off"}:
++                problems.append(f"{name} must be 0 or 1, got {raw!r}")
++            return raw in {"1", "true", "yes", "on"}
++
++        app_url = get("YTP_APP_URL").rstrip("/")
++        if not re.fullmatch(r"https?://[^/\s]+", app_url):
++            problems.append(
++                "YTP_APP_URL must be the app's address, like http://192.168.178.20:8080"
++            )
++        token = get("TRANSCRIBER_TOKEN")
++        if len(token) < 32:
++            problems.append(
++                "TRANSCRIBER_TOKEN must be the value of TRANSCRIBER_TOKEN in the app's .env"
++            )
++        worker = re.sub(r"[^A-Za-z0-9._-]", "-", get("WORKER_NAME", socket.gethostname()))[:64]
++        markers = tuple(
++            m.strip()
++            for m in get("NETBOOT_MARKERS", "nfsroot=,root=/dev/nfs,netboot=").split(",")
++            if m.strip()
++        )
++        config = cls(
++            app_url=app_url,
++            token=token,
++            worker=worker or "transcriber",
++            model=get("WHISPER_MODEL", "large-v3-turbo"),
++            device=get("WHISPER_DEVICE", "cuda"),
++            compute_type=get("WHISPER_COMPUTE_TYPE", "int8_float16"),
++            model_dir=get("WHISPER_MODEL_DIR"),
++            beam_size=int(number("WHISPER_BEAM_SIZE", 5, 1, 10)),
++            work_dir=get("WORK_DIR"),
++            poll_seconds=number("POLL_SECONDS", 30, 5, 600),
++            idle_seconds=number("IDLE_SHUTDOWN_SECONDS", 300, 0, 86400),
++            wait_for_downloads_seconds=number("WAIT_FOR_DOWNLOADS_SECONDS", 1800, 0, 86400),
++            unreachable_seconds=number("UNREACHABLE_SHUTDOWN_SECONDS", 900, 60, 86400),
++            shutdown=flag("SHUTDOWN_WHEN_IDLE", True),
++            netboot_only=flag("NETBOOT_ONLY", True),
++            netboot_markers=markers,
++            busy_command=get("BUSY_COMMAND"),
++        )
++        if problems:
++            raise SystemExit("ytp-transcriber: invalid settings:\n  " + "\n  ".join(problems))
++        return config
++
++
++# ---------------------------------------------------------------------------------- the app
++
++
++@dataclass(frozen=True)
++class Job:
++    id: int
++    attempt: int
++    language: str | None
++    name: str
++    media_url: str  # absolute
++
++
++class AppClient:
++    """The app's /api/transcriber/* routes (ytp.transcriber_api)."""
++
++    def __init__(self, config: Config, *, timeout: float = 30.0):
++        self.config = config
++        self.timeout = timeout
++
++    def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
++        data = None if body is None else json.dumps(body).encode()
++        request = urllib.request.Request(
++            self.config.app_url + path,
++            data=data,
++            method=method,
++            headers={
++                "X-Transcriber-Token": self.config.token,
++                "Content-Type": "application/json",
++                "User-Agent": "ytp-transcriber",
++            },
++        )
++        try:
++            with urllib.request.urlopen(request, timeout=self.timeout) as response:
++                raw = response.read()
++                return response.status, json.loads(raw) if raw else None
++        except urllib.error.HTTPError as exc:
++            raw = exc.read()
++            try:
++                detail = json.loads(raw).get("detail")
++            except ValueError:
++                detail = raw[:200].decode(errors="replace")
++            return exc.code, {"detail": detail}
++        except (urllib.error.URLError, OSError, ValueError) as exc:
++            raise Unreachable(str(exc)) from exc
++
++    def _expect(self, status: int, answer: Any, *ok: int) -> Any:
++        if status in ok:
++            return answer
++        if status in (502, 503, 504):
++            raise Unreachable(f"the app answered {status}")
++        detail = (answer or {}).get("detail") if isinstance(answer, dict) else answer
++        raise RuntimeError(f"the app answered {status}: {detail}")
++
++    def status(self) -> dict[str, Any]:
++        return self._expect(*self._call("GET", "/api/transcriber/status"), 200)
++
++    def claim(self) -> Job | None:
++        status, answer = self._call(
++            "POST", "/api/transcriber/claim", {"worker": self.config.worker}
++        )
++        if status == 204:
++            return None
++        answer = self._expect(status, answer, 200)
++        return Job(
++            id=int(answer["id"]),
++            attempt=int(answer.get("attempt") or 1),
++            language=answer.get("language"),
++            name=str(answer.get("name") or answer["id"]),
++            media_url=self.config.app_url + answer["media_url"],
++        )
++
++    def heartbeat(self, job: Job, progress: int) -> None:
++        status, answer = self._call(
++            "POST", f"/api/transcriber/jobs/{job.id}/heartbeat", {"progress": progress}
++        )
++        if status == 409:
++            raise Released("the app took this video back")
++        self._expect(status, answer, 200)
++
++    def result(self, job: Job, language: str, srt: str) -> dict[str, Any]:
++        return self._expect(
++            *self._call(
++                "POST", f"/api/transcriber/jobs/{job.id}/result", {"language": language, "srt": srt}
++            ),
++            200,
++        )
++
++    def fail(self, job: Job, error: str) -> None:
++        self._expect(
++            *self._call("POST", f"/api/transcriber/jobs/{job.id}/fail", {"error": error[:2000]}),
++            200,
++            409,
++        )
++
++
++# ---------------------------------------------------------------------------------- SRT
++
++
++@dataclass(frozen=True)
++class Segment:
++    start: float
++    end: float
++    text: str
++
++
++def timestamp(seconds: float) -> str:
++    """SRT time: `HH:MM:SS,mmm`."""
++    millis = max(0, round(seconds * 1000))
++    hours, millis = divmod(millis, 3_600_000)
++    minutes, millis = divmod(millis, 60_000)
++    secs, millis = divmod(millis, 1000)
++    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
++
++
++def is_hallucination(text: str) -> bool:
++    cleaned = " ".join(re.sub(r"[^\w\s.-]", " ", text.lower()).split()).strip(" .")
++    return cleaned in HALLUCINATIONS or any(
++        cleaned == prefix or cleaned.startswith(prefix + " ") for prefix in HALLUCINATION_PREFIXES
++    )
++
++
++def to_srt(segments: Iterable[Segment]) -> str:
++    """Numbered cues; empty and invented lines dropped, overlaps and zero lengths fixed."""
++    cues = []
++    previous_end = 0.0
++    for segment in segments:
++        text = " ".join(segment.text.split())
++        if not text or is_hallucination(text):
++            continue
++        start = max(segment.start, previous_end)
++        end = max(segment.end, start + 0.3)
++        cues.append(f"{len(cues) + 1}\n{timestamp(start)} --> {timestamp(end)}\n{text}\n")
++        previous_end = end
++    return "\n".join(cues)
++
++
++# ---------------------------------------------------------------------------------- the work
++
++
++def extract_audio(media_url: str, target: Path, *, run=subprocess.run) -> None:
++    """The video's sound as 16 kHz mono WAV (what Whisper works on), read over HTTP by ffmpeg."""
++    argv = [
++        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
++        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10",
++        "-i", media_url, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
++        "-c:a", "pcm_s16le", "-y", str(target),
++    ]  # fmt: skip
++    result = run(argv, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT, check=False)
++    if result.returncode != 0:
++        tail = (result.stderr or "").strip().splitlines()[-3:]
++        raise RuntimeError("ffmpeg could not read the sound: " + " | ".join(tail)[:500])
++    if not target.is_file() or target.stat().st_size <= 44:  # a WAV header and nothing else
++        raise RuntimeError("the video has no sound track")
++
++
++class Transcriber(Protocol):
++    def transcribe(
++        self, audio: Path, language: str | None, progress: Callable[[float], None]
++    ) -> tuple[str, list[Segment]]: ...
++
++
++class WhisperTranscriber:
++    """faster-whisper, the model loaded once on first use (it stays in VRAM until shutdown)."""
++
++    def __init__(self, config: Config):
++        self.config = config
++        self._model = None
++
++    def _load(self):
++        if self._model is None:
++            from faster_whisper import WhisperModel
++
++            logger.info(
++                "loading model %s (%s, %s)",
++                self.config.model,
++                self.config.device,
++                self.config.compute_type,
++            )
++            self._model = WhisperModel(
++                self.config.model,
++                device=self.config.device,
++                compute_type=self.config.compute_type,
++                download_root=self.config.model_dir or None,
++            )
++        return self._model
++
++    def transcribe(
++        self, audio: Path, language: str | None, progress: Callable[[float], None]
++    ) -> tuple[str, list[Segment]]:
++        model = self._load()
++        segments, info = model.transcribe(
++            str(audio),
++            language=language or None,
++            beam_size=self.config.beam_size,
++            vad_filter=True,
++            vad_parameters={"min_silence_duration_ms": 500},
++            condition_on_previous_text=False,
++        )
++        duration = float(getattr(info, "duration", 0) or 0)
++        found = []
++        for segment in segments:  # a generator: the work happens while iterating
++            found.append(Segment(segment.start, segment.end, segment.text))
++            if duration > 0:
++                progress(min(segment.end / duration, 1.0))
++        return info.language, found
++
++
++@dataclass
++class Worker:
++    config: Config
++    client: AppClient
++    transcriber: Transcriber
++    clock: Callable[[], float] = time.monotonic
++    sleep: Callable[[float], None] = time.sleep
++    extract: Callable[[str, Path], None] = extract_audio
++    cmdline: Callable[[], str] = field(
++        default=lambda: Path("/proc/cmdline").read_text(encoding="utf-8", errors="replace")
++    )
++    run_command: Callable[..., Any] = subprocess.run
++    _last_busy_reason: str = ""
++
++    # ------------------------------------------------------------------ one video
++
++    def process(self, job: Job) -> None:
++        logger.info("transcribing %s (id %s, attempt %s)", job.name, job.id, job.attempt)
++        started = self.clock()
++        with tempfile.TemporaryDirectory(dir=self.config.work_dir or None, prefix="ytp-") as tmp:
++            audio = Path(tmp) / "audio.wav"
++            try:
++                self.extract(job.media_url, audio)
++                last = {"at": self.clock()}
++
++                def progress(fraction: float) -> None:
++                    if self.clock() - last["at"] >= HEARTBEAT_SECONDS:
++                        last["at"] = self.clock()
++                        self.client.heartbeat(job, int(fraction * 100))
++
++                self.client.heartbeat(job, 0)
++                language, segments = self.transcriber.transcribe(audio, job.language, progress)
++                answer = self._send_result(job, language, to_srt(segments))
++            except Released:
++                logger.warning("the app took %s back; leaving it", job.name)
++                return
++            except Unreachable:
++                raise  # nothing to report it to; the app's lease puts it back in the queue
++            except Exception as exc:
++                reason = _reason(exc)
++                logger.error("transcription of %s failed: %s", job.name, reason)
++                with contextlib.suppress(Unreachable):  # the lease puts it back
++                    self.client.fail(job, reason)
++                return
++        logger.info(
++            "done: %s -> %s (%s, %.0f s)",
++            job.name,
++            answer.get("subtitle") or "no speech, no file",
++            language,
++            self.clock() - started,
++        )
++
++    def _send_result(self, job: Job, language: str, srt: str) -> dict[str, Any]:
++        """The result is minutes of GPU work: a short outage of the app must not lose it."""
++        for attempt in range(1, RESULT_TRIES + 1):
++            try:
++                return self.client.result(job, language, srt)
++            except Unreachable:
++                if attempt == RESULT_TRIES:
++                    raise
++                logger.warning("could not send the result (try %s), again in a moment", attempt)
++                self.sleep(self.config.poll_seconds)
++        raise AssertionError("unreachable")
++
++    # ------------------------------------------------------------------ switching off
++
++    def busy_reason(self) -> str:
++        """Why the PC must stay on although there is no work; "" = it may switch off."""
++        if not self.config.shutdown:
++            return "SHUTDOWN_WHEN_IDLE=0"
++        if self.config.netboot_only:
++            try:
++                cmdline = self.cmdline()
++            except OSError:
++                cmdline = ""
++            if not any(marker in cmdline for marker in self.config.netboot_markers):
++                return "not booted from the network (NETBOOT_ONLY=1)"
++        if KEEP_AWAKE_FILE.exists():
++            return f"{KEEP_AWAKE_FILE} exists"
++        try:
++            who = self.run_command(["who"], capture_output=True, text=True, timeout=10, check=False)
++            if who.stdout.strip():
++                return "someone is logged in"
++        except (OSError, subprocess.SubprocessError):
++            pass
++        if self.config.busy_command:
++            try:
++                result = self.run_command(
++                    shlex.split(self.config.busy_command),
++                    capture_output=True,
++                    timeout=30,
++                    check=False,
++                )
++                if result.returncode == 0:
++                    return "BUSY_COMMAND says busy"
++            except (OSError, subprocess.SubprocessError, ValueError):
++                pass
++        return ""
++
++    def may_switch_off(self) -> bool:
++        reason = self.busy_reason()
++        if reason and reason != self._last_busy_reason:
++            logger.info("idle, but staying on: %s", reason)
++        self._last_busy_reason = reason
++        return not reason
++
++    # ------------------------------------------------------------------ the loop
++
++    def run(self) -> int:
++        """Work until there is nothing left; returns the exit code (77 = power off)."""
++        logger.info("worker %s starts, app %s", self.config.worker, self.config.app_url)
++        last_work = last_contact = self.clock()
++        while True:
++            try:
++                job = self.client.claim()
++                last_contact = self.clock()
++                if job is not None:
++                    self.process(job)
++                    last_work = self.clock()
++                    continue
++                state = self.client.status()
++            except Unreachable as exc:
++                away = self.clock() - last_contact
++                logger.warning("the app is not reachable (%s), for %.0f s", exc, away)
++                if away >= self.config.unreachable_seconds and self.may_switch_off():
++                    logger.info("the app has been away too long: switching off")
++                    return EXIT_POWEROFF
++                self.sleep(self.config.poll_seconds)
++                continue
++            idle = self.clock() - last_work
++            if self.should_stop(state, idle) and self.may_switch_off():
++                logger.info("nothing left to do: switching off")
++                return EXIT_POWEROFF
++            self.sleep(self.config.poll_seconds)
++
++    def should_stop(self, state: dict[str, Any], idle: float) -> bool:
++        """No transcription waiting or running, and either no download that may still bring one,
++        or we have waited long enough for them."""
++        if int(state.get("queued") or 0) or int(state.get("running") or 0):
++            return False
++        if idle < self.config.idle_seconds:
++            return False
++        if int(state.get("pending_downloads") or 0):
++            return idle >= self.config.wait_for_downloads_seconds
++        return True
++
++
++def _reason(exc: Exception) -> str:
++    text = str(exc) or type(exc).__name__
++    if "out of memory" in text.lower():
++        return "the GPU ran out of memory (is another model loaded, e.g. Ollama?): " + text[:300]
++    return text[:500]
++
++
++def main() -> int:
++    logging.basicConfig(
++        level=os.environ.get("LOG_LEVEL", "INFO"), format="%(levelname)s %(message)s"
++    )
++    config = Config.from_env()
++    worker = Worker(config, AppClient(config), WhisperTranscriber(config))
++    return worker.run()
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/scripts/transcriber/pc/ytp-transcriber.service b/scripts/transcriber/pc/ytp-transcriber.service
+new file mode 100644
+index 0000000..4493185
+--- /dev/null
++++ b/scripts/transcriber/pc/ytp-transcriber.service
+@@ -0,0 +1,30 @@
++# The Whisper worker on the transcription PC (docs/transcription.md). Installed by install.sh
++# into the Linux image the PC boots from the network.
++[Unit]
++Description=youtube-premium: Whisper transcription worker
++Documentation=https://github.com/Peroquee/i-will-download-a-car/blob/main/docs/transcription.md
++Wants=network-online.target
++After=network-online.target nvidia-persistenced.service
++
++[Service]
++Type=simple
++User=ytp-transcriber
++Group=ytp-transcriber
++EnvironmentFile=/etc/ytp-transcriber.env
++ExecStart=/opt/ytp-transcriber/run.sh
++# 77 = "nothing left to do": a clean end, not restarted, and the PC is powered off.
++SuccessExitStatus=77
++RestartPreventExitStatus=77
++ExecStopPost=+/opt/ytp-transcriber/poweroff-if-done.sh
++Restart=on-failure
++RestartSec=30
++# The model cache, unless WHISPER_MODEL_DIR points elsewhere (e.g. the server's NVMe over NFS).
++StateDirectory=ytp-transcriber
++Environment=HF_HOME=/var/lib/ytp-transcriber/huggingface
++PrivateTmp=yes
++NoNewPrivileges=yes
++ProtectSystem=full
++ProtectHome=yes
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/scripts/transcriber/systemd/youtube-premium-transcriber-wake.service b/scripts/transcriber/systemd/youtube-premium-transcriber-wake.service
+new file mode 100644
+index 0000000..26212c7
+--- /dev/null
++++ b/scripts/transcriber/systemd/youtube-premium-transcriber-wake.service
+@@ -0,0 +1,19 @@
++# Installed by scripts/transcriber/wake.py install-units; @USER@ and @ROOT@ are filled in.
++[Unit]
++Description=youtube-premium: wake the transcription PC when videos wait for Whisper
++Documentation=file://@ROOT@/docs/transcription.md
++After=network-online.target
++Wants=network-online.target
++
++[Service]
++Type=oneshot
++User=@USER@
++WorkingDirectory=@ROOT@
++ExecStart=/usr/bin/python3 @ROOT@/scripts/transcriber/wake.py run
++TimeoutStartSec=60
++NoNewPrivileges=yes
++PrivateTmp=yes
++ProtectSystem=full
++ProtectKernelTunables=yes
++ProtectControlGroups=yes
++RestrictRealtime=yes
+diff --git a/scripts/transcriber/systemd/youtube-premium-transcriber-wake.timer b/scripts/transcriber/systemd/youtube-premium-transcriber-wake.timer
+new file mode 100644
+index 0000000..f4906c7
+--- /dev/null
++++ b/scripts/transcriber/systemd/youtube-premium-transcriber-wake.timer
+@@ -0,0 +1,11 @@
++# Installed by scripts/transcriber/wake.py install-units.
++[Unit]
++Description=youtube-premium: look every 2 minutes whether the transcription PC is needed
++
++[Timer]
++OnBootSec=3min
++OnUnitActiveSec=2min
++AccuracySec=15s
++
++[Install]
++WantedBy=timers.target
+diff --git a/scripts/transcriber/wake.py b/scripts/transcriber/wake.py
+new file mode 100755
+index 0000000..3d4f79e
+--- /dev/null
++++ b/scripts/transcriber/wake.py
+@@ -0,0 +1,372 @@
++#!/usr/bin/env python3
++"""wake.py: wake the transcription PC over the network when videos wait for Whisper.
++
++A systemd timer on the media VM runs `wake.py run` every 2 minutes (docs/transcription.md). It
++reads the app's database (read only) and sends a Wake-on-LAN "magic packet" to the PC when ALL of
++this is true:
++
++* at least one video is `queued` for transcription;
++* the PC's worker has not asked the app for work in the last `WORKER_FRESH_SECONDS` (it asks
++  every 30 s while it runs, so a PC that is up is never woken again);
++* the last packet was sent more than `WAKE_RETRY_SECONDS` ago (a PC needs a few minutes to boot
++  from the network and start its worker; a PC running Windows ignores the packet, and the next
++  try comes 10 minutes later, which costs nothing);
++* now is inside `TRANSCRIBER_WAKE_HOURS`, if that is set.
++
++The PC then boots from the network (the netboot server answers it with the Linux image that runs
++the worker, see docs/transcription.md), transcribes, and switches itself off when nothing is left.
++Shutting down is the PC's decision, never this script's.
++
++Commands:
++    wake.py run [--dry-run]       what the timer does
++    wake.py status [--json]       the queue, the last contact and packet, what `run` would do
++    wake.py wake                  send a packet now (to test Wake-on-LAN)
++    wake.py install-units --user NAME [--dry-run]   (root) install and start the timer
++    wake.py remove-units [--dry-run]                (root) stop and remove it
++
++Settings (in `.env`, process environment wins): TRANSCRIBER_PC_MAC (required to wake anything),
++TRANSCRIBER_WOL_ADDRESS (the broadcast address, default 255.255.255.255), TRANSCRIBER_WAKE_HOURS
++(like `1-7`; empty = any time). The database is `config/app/app.db`; the time of the last packet
++is kept in `config/transcriber/last-wake`. Standard library only.
++"""
++
++from __future__ import annotations
++
++import argparse
++import ipaddress
++import json
++import os
++import re
++import socket
++import sqlite3
++import subprocess
++import sys
++import time
++from dataclasses import dataclass
++from datetime import UTC, datetime
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT / "scripts" / "install"))
++
++from ytp_install.envfile import parse_env  # noqa: E402
++
++UNIT_NAME = "youtube-premium-transcriber-wake"
++UNIT_DIR = Path("/etc/systemd/system")
++WORKER_STATE_KEY = "transcriber.worker"  # the same key as ytp.transcriptions
++WORKER_FRESH_SECONDS = 180
++WAKE_RETRY_SECONDS = 600
++WOL_PORT = 9
++SAFE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
++_MAC = re.compile(r"[0-9a-f]{2}([:-]?)[0-9a-f]{2}(?:\1[0-9a-f]{2}){4}", re.I)
++_HOURS = re.compile(r"(\d{1,2})-(\d{1,2})")
++
++
++class WakeError(Exception):
++    """Something a person has to fix (a setting, a missing database)."""
++
++
++@dataclass(frozen=True)
++class Config:
++    root: Path
++    mac: str  # normalised aa:bb:cc:dd:ee:ff, or "" (not set)
++    address: str
++    hours: tuple[int, int] | None
++
++    @property
++    def database(self) -> Path:
++        return self.root / "config" / "app" / "app.db"
++
++    @property
++    def stamp(self) -> Path:
++        return self.root / "config" / "transcriber" / "last-wake"
++
++
++def parse_mac(text: str) -> str:
++    """`AA-BB-CC-DD-EE-FF`, `aa:bb:...` or `aabbccddeeff` -> `aa:bb:cc:dd:ee:ff`."""
++    value = text.strip()
++    if not _MAC.fullmatch(value):
++        raise WakeError(
++            f"TRANSCRIBER_PC_MAC is not a MAC address like aa:bb:cc:dd:ee:ff: {value!r}"
++        )
++    digits = re.sub(r"[^0-9a-f]", "", value.lower())
++    return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
++
++
++def parse_hours(text: str) -> tuple[int, int] | None:
++    """`1-7` -> (1, 7): from 01:00 up to (not including) 07:00. `22-6` wraps past midnight."""
++    value = text.strip()
++    if not value:
++        return None
++    match = _HOURS.fullmatch(value)
++    if not match or not all(0 <= int(g) <= 24 for g in match.groups()) or match[1] == match[2]:
++        raise WakeError(f"TRANSCRIBER_WAKE_HOURS must look like 1-7 or 22-6, got {value!r}")
++    return int(match[1]), int(match[2])
++
++
++def within(hours: tuple[int, int] | None, hour: int) -> bool:
++    if hours is None:
++        return True
++    start, end = hours
++    return start <= hour < end if start < end else hour >= start or hour < end
++
++
++def load_config(root: Path, environ: dict[str, str] | None = None) -> Config:
++    environ = dict(os.environ) if environ is None else environ
++    env_file = root / ".env"
++    values = parse_env(env_file.read_text(encoding="utf-8")) if env_file.is_file() else {}
++
++    def setting(name: str, default: str = "") -> str:
++        return (environ.get(name) or values.get(name) or default).strip()
++
++    raw_mac = setting("TRANSCRIBER_PC_MAC")
++    address = setting("TRANSCRIBER_WOL_ADDRESS", "255.255.255.255")
++    try:
++        ipaddress.IPv4Address(address)
++    except ValueError as exc:
++        raise WakeError(
++            f"TRANSCRIBER_WOL_ADDRESS must be an IPv4 address, got {address!r}"
++        ) from exc
++    return Config(
++        root=root,
++        mac=parse_mac(raw_mac) if raw_mac else "",
++        address=address,
++        hours=parse_hours(setting("TRANSCRIBER_WAKE_HOURS")),
++    )
++
++
++# ---------------------------------------------------------------------------------- reading
++
++
++@dataclass(frozen=True)
++class QueueState:
++    queued: int
++    running: int
++    worker_last_seen: datetime | None
++
++
++def parse_time(text: str | None) -> datetime | None:
++    if not text:
++        return None
++    try:
++        return datetime.fromisoformat(text.replace("Z", "+00:00"))
++    except ValueError:
++        return None
++
++
++def read_queue(database: Path) -> QueueState:
++    """The queue as the app's database has it. Read only: this script never writes there."""
++    if not database.is_file():
++        raise WakeError(f"the app's database is not there: {database}")
++    conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=10)
++    try:
++        conn.row_factory = sqlite3.Row
++        try:
++            counts = dict(
++                conn.execute(
++                    "SELECT status, COUNT(*) FROM transcriptions GROUP BY status"
++                ).fetchall()
++            )
++        except sqlite3.OperationalError as exc:
++            if "no such table" in str(exc):
++                raise WakeError(
++                    "the app has no transcription queue yet (update and start it first)"
++                ) from exc
++            raise
++        seen = conn.execute(
++            "SELECT updated_at FROM app_state WHERE key = ?", (WORKER_STATE_KEY,)
++        ).fetchone()
++    finally:
++        conn.close()
++    return QueueState(
++        queued=counts.get("queued", 0),
++        running=counts.get("running", 0),
++        worker_last_seen=parse_time(seen[0]) if seen else None,
++    )
++
++
++def last_wake(cfg: Config) -> datetime | None:
++    try:
++        return parse_time(cfg.stamp.read_text(encoding="utf-8").strip())
++    except OSError:
++        return None
++
++
++def remember_wake(cfg: Config, when: datetime) -> None:
++    cfg.stamp.parent.mkdir(parents=True, exist_ok=True)
++    cfg.stamp.write_text(when.isoformat(timespec="seconds") + "\n", encoding="utf-8")
++
++
++# ---------------------------------------------------------------------------------- deciding
++
++
++def decide(
++    cfg: Config, queue: QueueState, woken: datetime | None, now: datetime
++) -> tuple[bool, str]:
++    """(wake?, why). Pure: everything it needs is passed in, so the tests can walk every case."""
++    if queue.queued == 0:
++        return False, "nothing is waiting for Whisper"
++    if not cfg.mac:
++        return False, f"{queue.queued} waiting, but TRANSCRIBER_PC_MAC is not set"
++    if queue.worker_last_seen is not None:
++        age = (now - queue.worker_last_seen).total_seconds()
++        if age < WORKER_FRESH_SECONDS:
++            return False, f"the PC is up (asked {int(age)} s ago)"
++    if woken is not None:
++        age = (now - woken).total_seconds()
++        if 0 <= age < WAKE_RETRY_SECONDS:
++            return False, f"woken {int(age)} s ago, waiting for it to boot"
++    local_hour = now.astimezone().hour
++    if not within(cfg.hours, local_hour):
++        return (
++            False,
++            f"{queue.queued} waiting, but {local_hour}:00 is outside TRANSCRIBER_WAKE_HOURS",
++        )
++    return True, f"{queue.queued} waiting and the PC is not up"
++
++
++# ---------------------------------------------------------------------------------- waking
++
++
++def magic_packet(mac: str) -> bytes:
++    """6 x 0xFF, then the MAC 16 times: the Wake-on-LAN frame every network card understands."""
++    raw = bytes.fromhex(mac.replace(":", ""))
++    if len(raw) != 6:
++        raise WakeError("a MAC address has 6 bytes")
++    return b"\xff" * 6 + raw * 16
++
++
++def send_packet(mac: str, address: str, port: int = WOL_PORT) -> None:
++    packet = magic_packet(mac)
++    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
++        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
++        # Twice: a single UDP packet on a busy switch can get lost, and a second one is harmless.
++        for _ in range(2):
++            sock.sendto(packet, (address, port))
++            time.sleep(0.2)
++
++
++def run(
++    cfg: Config, *, dry_run: bool = False, now: datetime | None = None, send=send_packet
++) -> str:
++    now = now or datetime.now(UTC)
++    queue = read_queue(cfg.database)
++    wake, why = decide(cfg, queue, last_wake(cfg), now)
++    if not wake:
++        return f"not waking: {why}"
++    if dry_run:
++        return f"would wake {cfg.mac} via {cfg.address}: {why}"
++    send(cfg.mac, cfg.address)
++    remember_wake(cfg, now)
++    return f"woke {cfg.mac} via {cfg.address}: {why}"
++
++
++# ---------------------------------------------------------------------------------- units
++
++
++def render_unit(text: str, user: str, root: Path) -> str:
++    return text.replace("@USER@", user).replace("@ROOT@", str(root))
++
++
++def _systemctl(argv: list[str], dry_run: bool, *, check: bool = True) -> None:
++    if dry_run:
++        print("+ " + " ".join(argv))
++        return
++    result = subprocess.run(argv, check=False)
++    if check and result.returncode != 0:
++        raise WakeError(f"`{' '.join(argv)}` failed")
++
++
++def install_units(
++    root: Path, user: str, *, dry_run: bool = False, unit_dir: Path = UNIT_DIR
++) -> None:
++    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", user):
++        raise WakeError("that is not a plain user name")
++    if not SAFE_PATH.fullmatch(str(root)):
++        raise WakeError("the install folder has characters a unit file cannot hold safely")
++    for name in (f"{UNIT_NAME}.service", f"{UNIT_NAME}.timer"):
++        source = root / "scripts" / "transcriber" / "systemd" / name
++        text = render_unit(source.read_text(encoding="utf-8"), user, root)
++        target = unit_dir / name
++        if dry_run:
++            print(f"+ write {target}")
++            continue
++        target.write_text(text, encoding="utf-8")
++        target.chmod(0o644)
++    _systemctl(["systemctl", "daemon-reload"], dry_run)
++    _systemctl(["systemctl", "enable", "--now", f"{UNIT_NAME}.timer"], dry_run)
++
++
++def remove_units(*, dry_run: bool = False, unit_dir: Path = UNIT_DIR) -> None:
++    _systemctl(["systemctl", "disable", "--now", f"{UNIT_NAME}.timer"], dry_run, check=False)
++    for name in (f"{UNIT_NAME}.service", f"{UNIT_NAME}.timer"):
++        if dry_run:
++            print(f"+ remove {unit_dir / name}")
++        else:
++            (unit_dir / name).unlink(missing_ok=True)
++    _systemctl(["systemctl", "daemon-reload"], dry_run, check=False)
++
++
++# ---------------------------------------------------------------------------------- main
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(prog="wake.py", description=__doc__.split("\n")[0])
++    parser.add_argument("--repo-root", type=Path, default=ROOT, help=argparse.SUPPRESS)
++    sub = parser.add_subparsers(dest="command", required=True)
++    running = sub.add_parser("run")
++    running.add_argument("--dry-run", action="store_true")
++    status = sub.add_parser("status")
++    status.add_argument("--json", action="store_true")
++    sub.add_parser("wake")
++    units = sub.add_parser("install-units")
++    units.add_argument("--user", required=True)
++    units.add_argument("--dry-run", action="store_true")
++    removing = sub.add_parser("remove-units")
++    removing.add_argument("--dry-run", action="store_true")
++    args = parser.parse_args(argv)
++    root: Path = args.repo_root.resolve()
++    try:
++        if args.command == "install-units":
++            install_units(root, args.user, dry_run=args.dry_run)
++            return 0
++        if args.command == "remove-units":
++            remove_units(dry_run=args.dry_run)
++            return 0
++        cfg = load_config(root)
++        if args.command == "run":
++            print(run(cfg, dry_run=args.dry_run))
++        elif args.command == "wake":
++            if not cfg.mac:
++                raise WakeError("TRANSCRIBER_PC_MAC is not set in .env")
++            send_packet(cfg.mac, cfg.address)
++            remember_wake(cfg, datetime.now(UTC))
++            print(f"sent a Wake-on-LAN packet to {cfg.mac} via {cfg.address}")
++        else:
++            queue = read_queue(cfg.database)
++            woken = last_wake(cfg)
++            wake, why = decide(cfg, queue, woken, datetime.now(UTC))
++            report = {
++                "queued": queue.queued,
++                "running": queue.running,
++                "worker_last_seen": queue.worker_last_seen.isoformat()
++                if queue.worker_last_seen
++                else None,
++                "last_wake": woken.isoformat() if woken else None,
++                "mac": cfg.mac or None,
++                "would_wake": wake,
++                "why": why,
++            }
++            if args.json:
++                print(json.dumps(report, indent=2))
++            else:
++                for key, value in report.items():
++                    print(f"{key:17} {value}")
++    except WakeError as exc:
++        print(f"wake.py: {exc}", file=sys.stderr)
++        return 2
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/regression/snapshots/c0-compose-config.json b/tests/regression/snapshots/c0-compose-config.json
+index abb6d09..ae512cb 100644
+--- a/tests/regression/snapshots/c0-compose-config.json
++++ b/tests/regression/snapshots/c0-compose-config.json
+@@ -26,10 +26,13 @@
+       "QBIT_URL": "http://gluetun:8080",
+       "QBIT_USER": "admin",
+       "SUBSCRIPTION_POLL_MINUTES": "60",
++      "TRANSCRIBER_TOKEN": "",
+       "TZ": "Europe/Berlin",
+       "UMASK": "002",
+       "WATCHDOG_STATUS_URL": "http://watchdog:8090",
++      "YOUTUBE_AUTO_SUBTITLES": "0",
+       "YOUTUBE_MAX_HEIGHT": "1080",
++      "YOUTUBE_SUBTITLE_LANGS": "de,en",
+       "YTDLP_PROXY": "http://gluetun:8888"
+     },
+     "healthcheck": null,
+diff --git a/tests/unit/test_auth_policy.py b/tests/unit/test_auth_policy.py
+index 660c15e..dfcad0c 100644
+--- a/tests/unit/test_auth_policy.py
++++ b/tests/unit/test_auth_policy.py
+@@ -77,6 +77,13 @@ def test_the_public_routes_are_the_page_its_files_and_the_login():
+         ("*", "/static"),
+         ("POST", "/api/auth/login"),
+         ("GET", "/api/auth/me"),
++        # the transcription PC: its own secret instead of a login, 404 while it is not set up
++        ("GET", "/api/transcriber/status"),
++        ("POST", "/api/transcriber/claim"),
++        ("GET", "/api/transcriber/jobs/{transcription_id}/media"),
++        ("POST", "/api/transcriber/jobs/{transcription_id}/heartbeat"),
++        ("POST", "/api/transcriber/jobs/{transcription_id}/result"),
++        ("POST", "/api/transcriber/jobs/{transcription_id}/fail"),
+     }
+ 
+ 
+diff --git a/tests/unit/test_env_example.py b/tests/unit/test_env_example.py
+index 5b84e3b..857a417 100644
+--- a/tests/unit/test_env_example.py
++++ b/tests/unit/test_env_example.py
+@@ -30,7 +30,10 @@ def test_every_compose_variable_is_documented(name):
+ 
+ 
+ # Read by host scripts, not by a container, so docker-compose.yml never mentions them.
+-HOST_ONLY = {"AUTODEPLOY_REMOTE", "AUTODEPLOY_BRANCH", "AUTODEPLOY_HEALTH_WAIT"}  # #42
++HOST_ONLY = {
++    "AUTODEPLOY_REMOTE", "AUTODEPLOY_BRANCH", "AUTODEPLOY_HEALTH_WAIT",  # #42
++    "TRANSCRIBER_PC_MAC", "TRANSCRIBER_WOL_ADDRESS", "TRANSCRIBER_WAKE_HOURS",  # wake.py
++}  # fmt: skip
+ 
+ 
+ @pytest.mark.parametrize("name", sorted(set(ENV_EXAMPLE) - HOST_ONLY))
+@@ -171,7 +174,10 @@ def test_git_really_ignores_env_but_tracks_example():
+ 
+ 
+ def test_the_host_only_settings_are_really_read_by_a_host_script():
+-    script = (REPO_ROOT / "scripts" / "ops" / "autodeploy.py").read_text(encoding="utf-8")
++    script = "\n".join(
++        (REPO_ROOT / path).read_text(encoding="utf-8")
++        for path in ("scripts/ops/autodeploy.py", "scripts/transcriber/wake.py")
++    )
+     for name in HOST_ONLY:
+         assert name in ENV_EXAMPLE
+         assert name in script, f"{name} is listed as host-only but no script reads it"
+diff --git a/tests/unit/test_transcriber_api.py b/tests/unit/test_transcriber_api.py
+new file mode 100644
+index 0000000..1c1b025
+--- /dev/null
++++ b/tests/unit/test_transcriber_api.py
+@@ -0,0 +1,162 @@
++"""The transcription PC's HTTP routes (docs/transcription.md): `ytp.transcriber_api`.
++
++The real app with a temporary database and DATA_ROOT; the PC is the test client.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++from starlette.testclient import TestClient
++
++from ytp import transcriptions
++from ytp.config import Settings
++from ytp.main import create_app
++
++TOKEN = "k" * 43
++HEADERS = {"X-Transcriber-Token": TOKEN}
++ENV = {
++    "MEDIA_DIR_MOVIES": "Filme",
++    "MEDIA_DIR_SERIES": "Serien",
++    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
++    "MEDIA_DIR_MUSIC": "Musik",
++    "MEDIA_DIR_PODCASTS": "Podcasts",
++    "MEDIA_DIR_YOUTUBE": "Youtube",
++}
++SRT = "1\n00:00:00,000 --> 00:00:01,500\nHallo.\n"
++
++
++def start(tmp_path: Path, **env: str) -> TestClient:
++    config = tmp_path / "config"
++    config.mkdir(exist_ok=True)
++    data = tmp_path / "data"
++    for name in ENV.values():
++        (data / name).mkdir(parents=True, exist_ok=True)
++    values = {**ENV, "DATA_ROOT": str(data), "CONFIG_DIR": str(config), **env}
++    client = TestClient(create_app(Settings.from_env(values)))
++    client.__enter__()
++    return client
++
++
++@pytest.fixture
++def client(tmp_path):
++    c = start(tmp_path, TRANSCRIBER_TOKEN=TOKEN)
++    yield c
++    c.__exit__(None, None, None)
++
++
++def queue_video(client, name="Clip [aqz-KE-bpKQ].mp4", content=b"0123456789" * 100) -> Path:
++    data = client.app.state.settings.data_root
++    video = data / "Youtube" / "Chan" / name
++    video.parent.mkdir(parents=True, exist_ok=True)
++    video.write_bytes(content)
++    transcriptions.enqueue(client.app.state.db, data, video, language="de")
++    return video
++
++
++def claim(client):
++    return client.post("/api/transcriber/claim", json={"worker": "main-pc"}, headers=HEADERS)
++
++
++def test_without_a_token_in_the_settings_the_routes_do_not_exist(tmp_path):
++    c = start(tmp_path)
++    try:
++        assert c.get("/api/transcriber/status", headers=HEADERS).status_code == 404
++        assert (
++            c.post("/api/transcriber/claim", json={"worker": "x"}, headers=HEADERS).status_code
++            == 404
++        )
++    finally:
++        c.__exit__(None, None, None)
++
++
++@pytest.mark.real_auth
++def test_the_token_is_required_and_no_login_is(client):
++    assert client.get("/api/transcriber/status").status_code == 401
++    assert (
++        client.get("/api/transcriber/status", headers={"X-Transcriber-Token": "x" * 43}).status_code
++        == 401
++    )
++    answer = client.get("/api/transcriber/status", headers=HEADERS)
++    assert answer.status_code == 200
++    assert answer.json() == {
++        "queued": 0,
++        "running": 0,
++        "done": 0,
++        "failed": 0,
++        "pending_downloads": 0,
++        "worker_last_seen": None,
++    }
++
++
++@pytest.mark.real_auth
++def test_claim_stream_and_result_file_the_subtitle(client):
++    video = queue_video(client)
++    answer = claim(client)
++    assert answer.status_code == 200
++    job = answer.json()
++    assert (job["id"], job["attempt"], job["language"]) == (1, 1, "de")
++    assert job["name"] == "Clip [aqz-KE-bpKQ].mp4"
++    assert job["size"] == 1000
++    assert job["media_url"].startswith("/api/transcriber/jobs/1/media?key=")
++    assert claim(client).status_code == 204  # nothing else waiting
++
++    # the media link needs no token, ranges work (ffmpeg seeks in mp4 files)
++    media = client.get(job["media_url"], headers={"Range": "bytes=10-19"})
++    assert media.status_code == 206
++    assert media.content == b"0123456789"
++    assert client.get(job["media_url"][:-3] + "abc").status_code == 404
++
++    beat = client.post("/api/transcriber/jobs/1/heartbeat", json={"progress": 40}, headers=HEADERS)
++    assert beat.status_code == 200
++
++    done = client.post(
++        "/api/transcriber/jobs/1/result", json={"language": "de", "srt": SRT}, headers=HEADERS
++    )
++    assert done.status_code == 200
++    assert done.json() == {"status": "done", "subtitle": "Clip [aqz-KE-bpKQ].de.srt"}
++    assert video.with_name("Clip [aqz-KE-bpKQ].de.srt").read_text(encoding="utf-8") == SRT
++    # the attempt is over: its link and its heartbeat are gone
++    assert client.get(job["media_url"]).status_code == 404
++    late = client.post("/api/transcriber/jobs/1/heartbeat", json={}, headers=HEADERS)
++    assert late.status_code == 409
++
++
++@pytest.mark.real_auth
++def test_bad_results_are_refused(client):
++    queue_video(client)
++    claim(client)
++    not_srt = client.post(
++        "/api/transcriber/jobs/1/result", json={"language": "de", "srt": "hello"}, headers=HEADERS
++    )
++    assert not_srt.status_code == 422
++    bad_lang = client.post(
++        "/api/transcriber/jobs/1/result", json={"language": "x/", "srt": SRT}, headers=HEADERS
++    )
++    assert bad_lang.status_code == 422
++    unknown = client.post(
++        "/api/transcriber/jobs/9/result", json={"language": "de", "srt": SRT}, headers=HEADERS
++    )
++    assert unknown.status_code == 409
++
++
++@pytest.mark.real_auth
++def test_failures_are_retried_then_given_up(client):
++    queue_video(client)
++    for attempt in (1, 2, 3):
++        assert claim(client).json()["attempt"] == attempt
++        answer = client.post(
++            "/api/transcriber/jobs/1/fail", json={"error": "CUDA out of memory"}, headers=HEADERS
++        )
++        assert answer.json()["status"] == ("failed" if attempt == 3 else "queued")
++    assert claim(client).status_code == 204
++    state = client.get("/api/transcriber/status", headers=HEADERS).json()
++    assert state["failed"] == 1
++    assert state["worker_last_seen"]
++
++
++@pytest.mark.real_auth
++def test_a_bad_worker_name_is_a_422(client):
++    answer = client.post("/api/transcriber/claim", json={"worker": "../x"}, headers=HEADERS)
++    assert answer.status_code == 422
+diff --git a/tests/unit/test_transcriber_wake.py b/tests/unit/test_transcriber_wake.py
+new file mode 100644
+index 0000000..190cb41
+--- /dev/null
++++ b/tests/unit/test_transcriber_wake.py
+@@ -0,0 +1,188 @@
++"""scripts/transcriber/wake.py: when the transcription PC is woken, and the packet itself."""
++
++from __future__ import annotations
++
++import importlib.util
++import sys
++from datetime import UTC, datetime, timedelta
++from pathlib import Path
++
++import pytest
++
++ROOT = Path(__file__).resolve().parents[2]
++SCRIPT = ROOT / "scripts" / "transcriber" / "wake.py"
++spec = importlib.util.spec_from_file_location("ytp_transcriber_wake", SCRIPT)
++assert spec is not None
++assert spec.loader is not None
++wake = importlib.util.module_from_spec(spec)
++sys.modules["ytp_transcriber_wake"] = wake
++spec.loader.exec_module(wake)
++
++from ytp import transcriptions  # noqa: E402
++from ytp.db import Database  # noqa: E402
++
++MAC = "aa:bb:cc:dd:ee:ff"
++NOW = datetime(2026, 11, 4, 3, 0, tzinfo=UTC)
++
++
++def cfg(tmp_path, mac=MAC, hours=None):
++    return wake.Config(root=tmp_path, mac=mac, address="192.168.178.255", hours=hours)
++
++
++def queue(queued=1, seen_ago=None):
++    seen = None if seen_ago is None else NOW - timedelta(seconds=seen_ago)
++    return wake.QueueState(queued=queued, running=0, worker_last_seen=seen)
++
++
++# --- settings -------------------------------------------------------------------------------------
++
++
++@pytest.mark.parametrize("text", ["AA:BB:CC:DD:EE:FF", "aa-bb-cc-dd-ee-ff", "aabbccddeeff"])
++def test_mac_addresses_are_normalised(text):
++    assert wake.parse_mac(text) == MAC
++
++
++@pytest.mark.parametrize("text", ["aa:bb:cc:dd:ee", "aa:bb-cc:dd:ee:ff", "zz:bb:cc:dd:ee:ff", "1"])
++def test_bad_mac_addresses_are_refused(text):
++    with pytest.raises(wake.WakeError):
++        wake.parse_mac(text)
++
++
++def test_wake_hours_with_and_without_midnight():
++    assert wake.parse_hours("") is None
++    night = wake.parse_hours("22-6")
++    assert [h for h in range(24) if wake.within(night, h)] == [0, 1, 2, 3, 4, 5, 22, 23]
++    early = wake.parse_hours("1-7")
++    assert [h for h in range(24) if wake.within(early, h)] == [1, 2, 3, 4, 5, 6]
++    for bad in ("1", "7-7", "25-3", "a-b"):
++        with pytest.raises(wake.WakeError):
++            wake.parse_hours(bad)
++
++
++def test_settings_come_from_dotenv_and_the_environment_wins(tmp_path):
++    (tmp_path / ".env").write_text(
++        "TRANSCRIBER_PC_MAC=AA-BB-CC-DD-EE-FF\nTRANSCRIBER_WOL_ADDRESS=192.168.178.255\n"
++        "TRANSCRIBER_WAKE_HOURS=1-7\n"
++    )
++    loaded = wake.load_config(tmp_path, {})
++    assert (loaded.mac, loaded.address, loaded.hours) == (MAC, "192.168.178.255", (1, 7))
++    assert wake.load_config(tmp_path, {"TRANSCRIBER_WAKE_HOURS": "2-3"}).hours == (2, 3)
++    with pytest.raises(wake.WakeError):
++        wake.load_config(tmp_path, {"TRANSCRIBER_WOL_ADDRESS": "pc.lan"})
++
++
++# --- deciding -------------------------------------------------------------------------------------
++
++
++def test_nothing_waiting_never_wakes(tmp_path):
++    assert wake.decide(cfg(tmp_path), queue(queued=0), None, NOW)[0] is False
++
++
++def test_work_waiting_and_the_pc_away_wakes(tmp_path):
++    assert wake.decide(cfg(tmp_path), queue(seen_ago=3600), None, NOW) == (
++        True,
++        "1 waiting and the PC is not up",
++    )
++
++
++def test_a_pc_that_asked_recently_is_not_woken(tmp_path):
++    should, why = wake.decide(cfg(tmp_path), queue(seen_ago=40), None, NOW)
++    assert should is False
++    assert "up" in why
++
++
++def test_a_packet_is_not_repeated_while_the_pc_boots(tmp_path):
++    woken = NOW - timedelta(seconds=120)
++    assert wake.decide(cfg(tmp_path), queue(), woken, NOW)[0] is False
++    later = NOW - timedelta(seconds=wake.WAKE_RETRY_SECONDS + 1)
++    assert wake.decide(cfg(tmp_path), queue(), later, NOW)[0] is True
++
++
++def test_no_mac_means_no_packet(tmp_path):
++    should, why = wake.decide(cfg(tmp_path, mac=""), queue(), None, NOW)
++    assert should is False
++    assert "TRANSCRIBER_PC_MAC" in why
++
++
++def test_outside_the_wake_hours_nothing_is_sent(tmp_path):
++    hour = NOW.astimezone().hour
++    allowed = (hour, (hour + 1) % 24) if hour != 23 else (23, 24)
++    assert wake.decide(cfg(tmp_path, hours=allowed), queue(), None, NOW)[0] is True
++    other = ((hour + 2) % 24, (hour + 3) % 24)
++    assert wake.decide(cfg(tmp_path, hours=other), queue(), None, NOW)[0] is False
++
++
++# --- the packet and a whole run -------------------------------------------------------------------
++
++
++def test_the_magic_packet():
++    packet = wake.magic_packet(MAC)
++    assert len(packet) == 102
++    assert packet[:6] == b"\xff" * 6
++    assert packet[6:] == bytes.fromhex("aabbccddeeff") * 16
++
++
++def make_db(root: Path) -> Database:
++    (root / "config" / "app").mkdir(parents=True)
++    (root / "data" / "Youtube").mkdir(parents=True)
++    return Database.open(root / "config" / "app" / "app.db")
++
++
++def test_a_run_reads_the_apps_database_sends_once_and_remembers_it(tmp_path):
++    db = make_db(tmp_path)
++    video = tmp_path / "data" / "Youtube" / "v.mp4"
++    video.write_bytes(b"v")
++    transcriptions.enqueue(db, tmp_path / "data", video)
++    sent = []
++    config = cfg(tmp_path)
++    message = wake.run(config, now=NOW, send=lambda mac, address: sent.append((mac, address)))
++    assert message.startswith("woke aa:bb:cc:dd:ee:ff")
++    assert sent == [(MAC, "192.168.178.255")]
++    assert wake.last_wake(config) == NOW
++    # two minutes later: the PC is still booting, no second packet
++    assert wake.run(config, now=NOW + timedelta(minutes=2), send=sent.append).startswith("not")
++    assert len(sent) == 1
++    # the PC's worker asks for work: it is up, nothing is sent
++    other = video.with_name("w.mp4")
++    other.write_bytes(b"w")
++    transcriptions.claim(db, tmp_path / "data", "main-pc")
++    transcriptions.enqueue(db, tmp_path / "data", other)
++    state = wake.read_queue(config.database)
++    assert state.queued == 1
++    assert state.running == 1
++    should, why = wake.decide(config, state, None, datetime.now(UTC))
++    assert should is False
++    assert "the PC is up" in why
++
++
++def test_a_dry_run_sends_nothing(tmp_path):
++    db = make_db(tmp_path)
++    video = tmp_path / "data" / "Youtube" / "v.mp4"
++    video.write_bytes(b"v")
++    transcriptions.enqueue(db, tmp_path / "data", video)
++    sent = []
++    assert wake.run(cfg(tmp_path), dry_run=True, now=NOW, send=sent.append).startswith("would")
++    assert sent == []
++    assert wake.last_wake(cfg(tmp_path)) is None
++
++
++def test_a_missing_database_is_a_readable_error(tmp_path):
++    with pytest.raises(wake.WakeError, match="database"):
++        wake.read_queue(tmp_path / "nope.db")
++
++
++def test_the_units_are_rendered_for_the_install_folder(tmp_path, capsys):
++    unit_dir = tmp_path / "units"
++    unit_dir.mkdir()
++    wake.install_units(ROOT, "media", dry_run=True, unit_dir=unit_dir)
++    out = capsys.readouterr().out
++    assert "systemctl enable --now youtube-premium-transcriber-wake.timer" in out
++    service = (
++        ROOT / "scripts/transcriber/systemd/youtube-premium-transcriber-wake.service"
++    ).read_text()
++    rendered = wake.render_unit(service, "media", Path("/srv/ytp"))
++    assert "User=media" in rendered
++    assert "ExecStart=/usr/bin/python3 /srv/ytp/scripts/transcriber/wake.py run" in rendered
++    assert "@" not in rendered.replace("@ROOT@", "")
++    with pytest.raises(wake.WakeError):
++        wake.install_units(ROOT, "root; rm -rf /", dry_run=True, unit_dir=unit_dir)
+diff --git a/tests/unit/test_transcriber_worker.py b/tests/unit/test_transcriber_worker.py
+new file mode 100644
+index 0000000..7871735
+--- /dev/null
++++ b/tests/unit/test_transcriber_worker.py
+@@ -0,0 +1,342 @@
++"""scripts/transcriber/pc/worker.py: SRT output, the work loop and when the PC switches off.
++
++No GPU, no ffmpeg, no app: the app client, Whisper and ffmpeg are fakes; the clock is ours.
++"""
++
++from __future__ import annotations
++
++import importlib.util
++import subprocess
++import sys
++from pathlib import Path
++from types import SimpleNamespace
++
++import pytest
++
++ROOT = Path(__file__).resolve().parents[2]
++SCRIPT = ROOT / "scripts" / "transcriber" / "pc" / "worker.py"
++spec = importlib.util.spec_from_file_location("ytp_transcriber_worker", SCRIPT)
++assert spec is not None
++assert spec.loader is not None
++w = importlib.util.module_from_spec(spec)
++sys.modules["ytp_transcriber_worker"] = w
++spec.loader.exec_module(w)
++
++TOKEN = "t" * 43
++NETBOOT = "BOOT_IMAGE=vmlinuz root=/dev/nfs nfsroot=192.168.178.5:/srv/netboot/ubuntu ip=dhcp"
++
++
++def config(**over):
++    base = {"YTP_APP_URL": "http://192.168.178.20:8080", "TRANSCRIBER_TOKEN": TOKEN}
++    return w.Config.from_env({**base, **over})
++
++
++# --- settings -------------------------------------------------------------------------------------
++
++
++def test_settings_defaults():
++    c = config(WORKER_NAME="main pc!")
++    assert (c.model, c.compute_type, c.device) == ("large-v3-turbo", "int8_float16", "cuda")
++    assert c.worker == "main-pc-"
++    assert c.shutdown
++    assert c.netboot_only
++    assert (c.idle_seconds, c.wait_for_downloads_seconds) == (300, 1800)
++
++
++@pytest.mark.parametrize(
++    "env",
++    [
++        {"YTP_APP_URL": "192.168.178.20"},
++        {"YTP_APP_URL": "http://x/path"},
++        {"TRANSCRIBER_TOKEN": "changeme"},
++        {"IDLE_SHUTDOWN_SECONDS": "soon"},
++        {"POLL_SECONDS": "1"},
++        {"NETBOOT_ONLY": "maybe"},
++    ],
++)
++def test_bad_settings_stop_the_worker_with_a_message(env):
++    with pytest.raises(SystemExit, match="invalid settings"):
++        config(**env)
++
++
++# --- SRT ------------------------------------------------------------------------------------------
++
++
++def test_timestamps():
++    assert w.timestamp(0) == "00:00:00,000"
++    assert w.timestamp(3725.5) == "01:02:05,500"
++    assert w.timestamp(-1) == "00:00:00,000"
++
++
++def test_srt_numbering_overlaps_and_empty_lines():
++    srt = w.to_srt(
++        [
++            w.Segment(0.0, 2.5, "  Hallo   zusammen. "),
++            w.Segment(2.0, 2.0, "Überlappt und ohne Länge"),
++            w.Segment(5.0, 6.0, "   "),
++            w.Segment(7.0, 8.0, "Ende."),
++        ]
++    )
++    assert srt == (
++        "1\n00:00:00,000 --> 00:00:02,500\nHallo zusammen.\n\n"
++        "2\n00:00:02,500 --> 00:00:02,800\nÜberlappt und ohne Länge\n\n"
++        "3\n00:00:07,000 --> 00:00:08,000\nEnde.\n"
++    )
++
++
++@pytest.mark.parametrize(
++    "text",
++    [
++        "Untertitel im Auftrag des ZDF für funk, 2017",
++        "Untertitel der Amara.org-Community",
++        "Thanks for watching!",
++        "Vielen Dank fürs Zuschauen.",
++    ],
++)
++def test_known_whisper_inventions_are_dropped(text):
++    assert w.is_hallucination(text)
++    assert w.to_srt([w.Segment(0, 1, text)]) == ""
++
++
++@pytest.mark.parametrize(
++    "text", ["Thanks for watching and see you next week!", "Das ZDF hat berichtet.", "Danke"]
++)
++def test_real_speech_is_kept(text):
++    assert not w.is_hallucination(text)
++
++
++def test_the_srt_passes_the_apps_own_check():
++    sys.path.insert(0, str(ROOT / "app"))
++    from ytp.transcriptions import normalise_srt
++
++    srt = w.to_srt([w.Segment(0, 1.2, "Eins"), w.Segment(61, 62, "Zwei")])
++    assert normalise_srt(srt) == srt
++
++
++def test_ffmpeg_is_asked_for_16khz_mono_wav_from_the_url(tmp_path):
++    seen = {}
++
++    def run(argv, **kw):
++        seen["argv"] = argv
++        Path(argv[-1]).write_bytes(b"RIFF" + b"\0" * 100)
++        return SimpleNamespace(returncode=0, stderr="")
++
++    w.extract_audio("http://app/api/transcriber/jobs/1/media?key=k", tmp_path / "a.wav", run=run)
++    argv = seen["argv"]
++    assert argv[argv.index("-i") + 1] == "http://app/api/transcriber/jobs/1/media?key=k"
++    assert argv[argv.index("-ar") + 1] == "16000"
++    assert argv[argv.index("-ac") + 1] == "1"
++
++
++def test_ffmpeg_failures_and_silent_videos_are_errors(tmp_path):
++    def broken(argv, **kw):
++        return SimpleNamespace(
++            returncode=1, stderr="line1\nStream map '0:a:0' matches no streams\n"
++        )
++
++    with pytest.raises(RuntimeError, match="matches no streams"):
++        w.extract_audio("http://x", tmp_path / "a.wav", run=broken)
++
++    def header_only(argv, **kw):
++        Path(argv[-1]).write_bytes(b"\0" * 44)
++        return SimpleNamespace(returncode=0, stderr="")
++
++    with pytest.raises(RuntimeError, match="no sound"):
++        w.extract_audio("http://x", tmp_path / "b.wav", run=header_only)
++
++
++# --- the loop -------------------------------------------------------------------------------------
++
++
++class Clock:
++    def __init__(self):
++        self.now = 0.0
++
++    def __call__(self):
++        return self.now
++
++    def sleep(self, seconds):
++        self.now += seconds
++
++
++class FakeApp:
++    """The app's transcriber routes, scripted."""
++
++    def __init__(self, jobs=(), *, pending=0, unreachable=False):
++        self.jobs = list(jobs)
++        self.pending = pending
++        self.unreachable = unreachable
++        self.results, self.failures, self.beats = [], [], []
++
++    def claim(self):
++        if self.unreachable:
++            raise w.Unreachable("connection refused")
++        return self.jobs.pop(0) if self.jobs else None
++
++    def status(self):
++        return {"queued": len(self.jobs), "running": 0, "pending_downloads": self.pending}
++
++    def heartbeat(self, job, progress):
++        self.beats.append((job.id, progress))
++
++    def result(self, job, language, srt):
++        self.results.append((job.id, language, srt))
++        return {"status": "done", "subtitle": "x.de.srt"}
++
++    def fail(self, job, error):
++        self.failures.append((job.id, error))
++
++
++class FakeWhisper:
++    def __init__(self, error: Exception | None = None):
++        self.error = error
++        self.calls = []
++
++    def transcribe(self, audio, language, progress):
++        self.calls.append((audio.name, language))
++        if self.error:
++            raise self.error
++        progress(0.5)
++        return language or "de", [w.Segment(0, 1, "Hallo")]
++
++
++def job(n=1, language="de"):
++    return w.Job(id=n, attempt=1, language=language, name=f"v{n}.mp4", media_url=f"http://app/{n}")
++
++
++def make(app, whisper=None, *, cmdline=NETBOOT, who="", **env):
++    clock = Clock()
++
++    def run_command(argv, **kw):
++        if argv == ["who"]:
++            return SimpleNamespace(stdout=who, returncode=0)
++        return subprocess.run(argv, **kw)
++
++    worker = w.Worker(
++        config(**env),
++        app,
++        whisper or FakeWhisper(),
++        clock=clock,
++        sleep=clock.sleep,
++        extract=lambda url, target: target.write_bytes(b"wav"),
++        cmdline=lambda: cmdline,
++        run_command=run_command,
++    )
++    return worker, clock
++
++
++def test_it_works_through_the_queue_then_switches_off_after_the_idle_time():
++    app = FakeApp([job(1), job(2, None)])
++    worker, clock = make(app)
++    assert worker.run() == w.EXIT_POWEROFF
++    assert [(r[0], r[1]) for r in app.results] == [(1, "de"), (2, "de")]
++    assert app.results[0][2].startswith("1\n00:00:00,000 --> 00:00:01,000\nHallo")
++    assert 300 <= clock.now < 400
++
++
++def test_it_waits_for_downloads_that_may_still_bring_work_but_not_forever():
++    worker, clock = make(FakeApp(pending=2))
++    assert worker.run() == w.EXIT_POWEROFF
++    assert 1800 <= clock.now < 1900
++
++
++def test_a_failed_transcription_is_reported_and_the_next_one_runs():
++    app = FakeApp([job(1)])
++    worker, _ = make(app, FakeWhisper(RuntimeError("CUDA failed with error out of memory")))
++    assert worker.run() == w.EXIT_POWEROFF
++    assert app.results == []
++    assert app.failures[0][0] == 1
++    assert "ran out of memory" in app.failures[0][1]
++
++
++def test_a_released_video_is_left_alone():
++    class Releasing(FakeApp):
++        def heartbeat(self, job, progress):
++            raise w.Released("taken back")
++
++    app = Releasing([job(1)])
++    worker, _ = make(app)
++    worker.run()
++    assert app.results == []
++    assert app.failures == []
++
++
++def test_an_app_that_is_away_for_good_lets_the_pc_switch_off():
++    worker, clock = make(FakeApp(unreachable=True))
++    assert worker.run() == w.EXIT_POWEROFF
++    assert 900 <= clock.now < 1000
++
++
++def test_a_short_outage_does_not_lose_a_finished_result():
++    class Flaky(FakeApp):
++        tries = 0
++
++        def result(self, job, language, srt):
++            self.tries += 1
++            if self.tries < 3:
++                raise w.Unreachable("proxy restarting")
++            return super().result(job, language, srt)
++
++    app = Flaky([job(1)])
++    worker, _ = make(app)
++    worker.run()
++    assert [r[0] for r in app.results] == [1]
++
++
++def test_it_never_switches_off_a_pc_that_was_not_booted_from_the_network():
++    worker, _ = make(FakeApp(), cmdline="BOOT_IMAGE=/vmlinuz root=UUID=1234 ro quiet")
++    assert "not booted from the network" in worker.busy_reason()
++
++
++def test_a_login_keeps_the_pc_on():
++    worker, _ = make(FakeApp(), who="user pts/0 2026-11-04 03:00 (192.168.178.30)\n")
++    assert worker.busy_reason() == "someone is logged in"
++
++
++def test_busy_command_keeps_the_pc_on():
++    worker, _ = make(FakeApp(), BUSY_COMMAND="true")
++    assert worker.busy_reason() == "BUSY_COMMAND says busy"
++    worker, _ = make(FakeApp(), BUSY_COMMAND="false")
++    assert worker.busy_reason() == ""
++
++
++def test_switching_off_can_be_turned_off():
++    worker, _ = make(FakeApp(), SHUTDOWN_WHEN_IDLE="0")
++    assert worker.busy_reason() == "SHUTDOWN_WHEN_IDLE=0"
++
++
++@pytest.mark.parametrize(
++    ("state", "idle", "stop"),
++    [
++        ({"queued": 1}, 9999, False),
++        ({"running": 1}, 9999, False),  # a stale attempt that the lease will hand back
++        ({}, 100, False),
++        ({}, 300, True),
++        ({"pending_downloads": 1}, 600, False),
++        ({"pending_downloads": 1}, 1800, True),
++    ],
++)
++def test_should_stop(state, idle, stop):
++    worker, _ = make(FakeApp())
++    assert worker.should_stop(state, idle) is stop
++
++
++def test_the_unit_powers_off_only_for_exit_code_77():
++    unit = (ROOT / "scripts/transcriber/pc/ytp-transcriber.service").read_text()
++    assert "SuccessExitStatus=77" in unit
++    assert "RestartPreventExitStatus=77" in unit
++    assert "ExecStopPost=+/opt/ytp-transcriber/poweroff-if-done.sh" in unit
++    hook = ROOT / "scripts/transcriber/pc/poweroff-if-done.sh"
++    for status, powers_off in (("77", True), ("0", False), ("TERM", False), ("1", False)):
++        result = subprocess.run(
++            [
++                "bash",
++                "-c",
++                f'systemctl() {{ echo "SYSTEMCTL $*"; }}; export -f systemctl; "{hook}"',
++            ],
++            env={"EXIT_STATUS": status, "PATH": "/usr/bin:/bin"},
++            capture_output=True,
++            text=True,
++            check=True,
++        )
++        assert ("SYSTEMCTL --no-block poweroff" in result.stdout) is powers_off
+diff --git a/tests/unit/test_transcriptions.py b/tests/unit/test_transcriptions.py
+new file mode 100644
+index 0000000..2fe158c
+--- /dev/null
++++ b/tests/unit/test_transcriptions.py
+@@ -0,0 +1,308 @@
++"""The Whisper transcription queue (docs/transcription.md): `ytp.transcriptions`.
++
++A real database and real files in a temporary DATA_ROOT; nothing else.
++"""
++
++from __future__ import annotations
++
++import sqlite3
++from pathlib import Path
++
++import pytest
++
++from ytp import alertlog, jobs, transcriptions
++from ytp.db import Database
++from ytp.transcriptions import MAX_ATTEMPTS, TranscriptionError
++
++SRT = (
++    "1\n00:00:00,000 --> 00:00:02,500\nHallo zusammen.\n\n"
++    "2\n00:00:02,500 --> 00:00:04,000\nWillkommen.\n"
++)
++
++
++class Library:
++    def __init__(self, tmp: Path):
++        self.root = tmp / "data"
++        (self.root / "Youtube" / "Blender").mkdir(parents=True)
++        self.db = Database.open(tmp / "app.db")
++
++    def video(self, name="Big Buck Bunny [aqz-KE-bpKQ].mp4") -> Path:
++        path = self.root / "Youtube" / "Blender" / name
++        path.write_bytes(b"video")
++        return path
++
++    def queued(self, name="Big Buck Bunny [aqz-KE-bpKQ].mp4", language="de"):
++        video = self.video(name)
++        assert transcriptions.enqueue(self.db, self.root, video, language=language)
++        return video
++
++    def claim(self):
++        return transcriptions.claim(self.db, self.root, "main-pc")
++
++    def set_heartbeat(self, row_id: int, sql_offset: str) -> None:
++        with self.db.transaction() as conn:
++            conn.execute(
++                "UPDATE transcriptions SET heartbeat_at = "
++                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) WHERE id = ?",
++                (sql_offset, row_id),
++            )
++
++
++@pytest.fixture
++def lib(tmp_path) -> Library:
++    return Library(tmp_path)
++
++
++# --- queueing -------------------------------------------------------------------------------------
++
++
++def test_a_video_is_queued_once_by_its_path_below_data_root(lib):
++    video = lib.queued()
++    assert transcriptions.enqueue(lib.db, lib.root, video) is True  # still waiting
++    rows = lib.db.query("SELECT * FROM transcriptions")
++    assert len(rows) == 1
++    assert rows[0]["media_path"] == "Youtube/Blender/Big Buck Bunny [aqz-KE-bpKQ].mp4"
++    assert rows[0]["language"] == "de"
++    assert rows[0]["status"] == "queued"
++
++
++def test_a_video_outside_data_root_is_refused(lib, tmp_path):
++    outside = tmp_path / "elsewhere.mp4"
++    outside.write_bytes(b"x")
++    with pytest.raises(ValueError, match="subpath"):
++        transcriptions.enqueue(lib.db, lib.root, outside)
++
++
++def test_a_bad_language_hint_is_dropped(lib):
++    video = lib.video()
++    transcriptions.enqueue(lib.db, lib.root, video, language="German!")
++    assert lib.db.query("SELECT language FROM transcriptions")[0]["language"] is None
++
++
++def test_a_done_video_is_not_queued_again_but_a_failed_one_is(lib):
++    video = lib.queued()
++    row = lib.claim()
++    transcriptions.complete(lib.db, lib.root, row.id, "de", SRT)
++    assert transcriptions.enqueue(lib.db, lib.root, video) is False
++    with lib.db.transaction() as conn:
++        conn.execute("UPDATE transcriptions SET status = 'failed', attempts = 3, error = 'x'")
++    assert transcriptions.enqueue(lib.db, lib.root, video, language="en") is True
++    again = transcriptions.get(lib.db, row.id)
++    assert (again.status, again.attempts, again.error, again.language) == ("queued", 0, None, "en")
++
++
++# --- claiming -------------------------------------------------------------------------------------
++
++
++def test_claim_takes_the_oldest_and_hands_out_a_fresh_key(lib):
++    lib.queued("a.mp4")
++    lib.queued("b.mp4")
++    first = lib.claim()
++    assert first.media_path.endswith("a.mp4")
++    assert (first.status, first.attempts, first.worker) == ("running", 1, "main-pc")
++    assert first.media_key
++    assert len(first.media_key) >= 40
++    second = lib.claim()
++    assert second.media_path.endswith("b.mp4")
++    assert second.media_key != first.media_key
++    assert lib.claim() is None
++
++
++def test_claim_remembers_that_the_pc_asked(lib):
++    assert transcriptions.status(lib.db)["worker_last_seen"] is None
++    lib.claim()
++    assert transcriptions.status(lib.db)["worker_last_seen"]
++
++
++def test_a_video_that_is_gone_fails_at_claim_and_the_next_is_taken(lib):
++    gone = lib.queued("gone.mp4")
++    lib.queued("here.mp4")
++    gone.unlink()
++    row = lib.claim()
++    assert row.media_path.endswith("here.mp4")
++    failed = lib.db.query("SELECT * FROM transcriptions WHERE media_path LIKE '%gone.mp4'")[0]
++    assert failed["status"] == "failed"
++    assert "not in the library" in failed["error"]
++
++
++def test_a_bad_worker_name_is_refused(lib):
++    with pytest.raises(TranscriptionError):
++        transcriptions.claim(lib.db, lib.root, "../../etc")
++
++
++# --- streaming the media --------------------------------------------------------------------------
++
++
++def test_the_media_key_opens_exactly_this_file_while_it_runs(lib):
++    video = lib.queued()
++    row = lib.claim()
++    _, path = transcriptions.media_for(lib.db, lib.root, row.id, row.media_key)
++    assert path == video.resolve()
++    with pytest.raises(TranscriptionError) as wrong:
++        transcriptions.media_for(lib.db, lib.root, row.id, "x" * 43)
++    assert wrong.value.kind == "not_found"
++    transcriptions.complete(lib.db, lib.root, row.id, "de", SRT)
++    with pytest.raises(TranscriptionError):
++        transcriptions.media_for(lib.db, lib.root, row.id, row.media_key)  # not running any more
++
++
++def test_a_stored_path_that_leads_outside_data_root_is_never_served(lib, tmp_path):
++    secret = tmp_path / "secret.txt"
++    secret.write_text("no")
++    with lib.db.transaction() as conn:
++        conn.execute("INSERT INTO transcriptions (media_path) VALUES ('../secret.txt')")
++    assert transcriptions.media_file(lib.root, "../secret.txt") is None
++    assert lib.claim() is None  # failed on the spot, not handed out
++    assert lib.db.query("SELECT status FROM transcriptions")[0]["status"] == "failed"
++
++
++def test_an_absolute_media_path_cannot_be_stored(lib):
++    with pytest.raises(sqlite3.IntegrityError), lib.db.transaction() as conn:
++        conn.execute("INSERT INTO transcriptions (media_path) VALUES ('/etc/passwd')")
++
++
++# --- results --------------------------------------------------------------------------------------
++
++
++def test_the_result_is_filed_next_to_the_video_for_jellyfin(lib):
++    video = lib.queued()
++    row = lib.claim()
++    done = transcriptions.complete(lib.db, lib.root, row.id, "de", "﻿" + SRT.replace("\n", "\r\n"))
++    target = video.with_name("Big Buck Bunny [aqz-KE-bpKQ].de.srt")
++    assert target.read_text(encoding="utf-8") == SRT  # BOM and CRLF normalised
++    assert (done.status, done.result_lang, done.progress, done.media_key) == (
++        "done",
++        "de",
++        100,
++        None,
++    )
++    assert done.result_path == "Youtube/Blender/Big Buck Bunny [aqz-KE-bpKQ].de.srt"
++    assert not list(video.parent.glob(".*.part"))  # no temporary file left behind
++
++
++def test_an_existing_subtitle_is_never_replaced(lib):
++    video = lib.queued()
++    mine = video.with_name("Big Buck Bunny [aqz-KE-bpKQ].de.srt")
++    mine.write_text("my own\n")
++    row = lib.claim()
++    assert transcriptions.complete(lib.db, lib.root, row.id, "de", SRT).status == "done"
++    assert mine.read_text() == "my own\n"
++
++
++def test_no_speech_means_done_without_a_file(lib):
++    video = lib.queued()
++    row = lib.claim()
++    done = transcriptions.complete(lib.db, lib.root, row.id, "en", "  \n")
++    assert done.status == "done"
++    assert done.result_path is None
++    assert not list(video.parent.glob("*.srt"))
++
++
++@pytest.mark.parametrize(
++    ("language", "srt"),
++    [
++        ("de", "this is not a subtitle file"),
++        ("de", "1\n00:00:00 --> 00:00:01\nno milliseconds\n"),
++        ("de", "1\n00:00:00,000 --> 00:00:01,000\nnul\x00\n"),
++        ("deutsch", SRT),
++        ("../", SRT),
++    ],
++)
++def test_a_bad_result_is_refused_and_the_row_keeps_running(lib, language, srt):
++    lib.queued()
++    row = lib.claim()
++    with pytest.raises(TranscriptionError) as refused:
++        transcriptions.complete(lib.db, lib.root, row.id, language, srt)
++    assert refused.value.kind == "invalid"
++    assert transcriptions.get(lib.db, row.id).status == "running"
++
++
++def test_a_result_for_a_row_that_is_not_running_is_a_conflict(lib):
++    lib.queued()
++    with pytest.raises(TranscriptionError) as conflict:
++        transcriptions.complete(lib.db, lib.root, 1, "de", SRT)
++    assert conflict.value.kind == "conflict"
++
++
++def test_a_too_large_result_is_refused(lib):
++    lib.queued()
++    row = lib.claim()
++    huge = SRT + "x" * (transcriptions.MAX_SRT_BYTES + 1)
++    with pytest.raises(TranscriptionError):
++        transcriptions.complete(lib.db, lib.root, row.id, "de", huge)
++
++
++# --- failures, retries and the lease --------------------------------------------------------------
++
++
++def test_a_failure_is_retried_then_given_up_with_an_alert(lib):
++    lib.queued()
++    for attempt in range(1, MAX_ATTEMPTS + 1):
++        row = lib.claim()
++        assert row.attempts == attempt
++        after = transcriptions.fail(lib.db, row.id, "CUDA out of memory")
++        expected = "queued" if attempt < MAX_ATTEMPTS else "failed"
++        assert after.status == expected
++        assert after.error == "CUDA out of memory"
++    assert lib.claim() is None
++    alerts = alertlog.list_alerts(lib.db)
++    assert [a.kind for a in alerts] == ["transcription_failed"]
++    assert "Big Buck Bunny" in alerts[0].title
++
++
++def test_fail_for_a_row_that_is_not_running_is_a_conflict(lib):
++    lib.queued()
++    with pytest.raises(TranscriptionError) as conflict:
++        transcriptions.fail(lib.db, 1, "x")
++    assert conflict.value.kind == "conflict"
++
++
++def test_heartbeats_keep_the_lease_and_record_progress(lib):
++    lib.queued()
++    row = lib.claim()
++    lib.set_heartbeat(row.id, "-500 seconds")
++    assert transcriptions.heartbeat(lib.db, row.id, 140) is True
++    assert transcriptions.release_stale(lib.db) == 0
++    assert transcriptions.get(lib.db, row.id).progress == 100  # clamped
++
++
++def test_a_pc_that_stops_answering_loses_the_video_to_the_queue(lib):
++    lib.queued()
++    row = lib.claim()
++    lib.set_heartbeat(row.id, "-11 minutes")
++    assert transcriptions.release_stale(lib.db) == 1
++    back = transcriptions.get(lib.db, row.id)
++    assert (back.status, back.media_key) == ("queued", None)
++    assert "stopped answering" in back.error
++    assert transcriptions.heartbeat(lib.db, row.id, 50) is False  # the old attempt is over
++
++
++def test_status_counts_the_queue_and_the_downloads_that_may_still_need_whisper(lib):
++    lib.queued("a.mp4")
++    lib.queued("b.mp4")
++    lib.claim()
++    for video_id, meta in [
++        ("vid00000001", '{"type":"youtube","video_id":"vid00000001","channel":"c","title":"t"}'),
++        (
++            "vid00000002@podcast",
++            '{"type":"youtube","video_id":"vid00000002","channel":"c","title":"t","target":"podcast"}',
++        ),
++        (
++            "vid00000003@podcast",
++            '{"type":"youtube","video_id":"vid00000003","channel":"c","title":"t",'
++            '"target":"podcast","audio_only":true}',
++        ),
++        (
++            "vid00000004@music",
++            '{"type":"youtube","video_id":"vid00000004","channel":"c","title":"t",'
++            '"target":"music","album":"a"}',
++        ),
++    ]:
++        jobs.submit_job(lib.db, "youtube", video_id, meta)
++    state = transcriptions.status(lib.db)
++    assert state["queued"] == 1
++    assert state["running"] == 1
++    assert state["done"] == 0
++    assert state["failed"] == 0
++    # the plain video and the podcast kept as video; not the audio-only episode, not the track
++    assert state["pending_downloads"] == 2
+diff --git a/tests/unit/test_web_ui.py b/tests/unit/test_web_ui.py
+index 46b6483..a24cb20 100644
+--- a/tests/unit/test_web_ui.py
++++ b/tests/unit/test_web_ui.py
+@@ -1017,6 +1017,7 @@ ALERT_KINDS = (
+     "job_failed", "feed_error", "disk_low",
+     "update_done", "update_blocked", "update_rolled_back", "update_rolled_back_db",
+     "update_halted", "update_checks", "backlog_paused", "youtube_unavailable",
++    "transcription_failed",
+ )  # fmt: skip
+ 
+ 
+@@ -1067,6 +1068,8 @@ def test_alert_texts_only_use_values_the_monitor_provides():
+         "backlog_paused": {"podcast", "free_gb", "done", "total"},
+         # YouTube gives no channel lists at all (feeds.SERVICE_WIDE, monitor.check_feeds)
+         "youtube_unavailable": {"reason"},
++        # Whisper gave up on a video (ytp.transcriptions._retry_or_fail)
++        "transcription_failed": {"name", "reason", "attempts"},
+     }
+     t = translations()
+     for lang in ("de", "en"):
+diff --git a/tests/unit/test_youtube_subtitles.py b/tests/unit/test_youtube_subtitles.py
+new file mode 100644
+index 0000000..7bca4f4
+--- /dev/null
++++ b/tests/unit/test_youtube_subtitles.py
+@@ -0,0 +1,321 @@
++"""YouTube subtitles and the hand-over to Whisper (docs/transcription.md).
++
++The download is faked like in test_youtube_download.py (no network, no ffmpeg); the subtitle pass,
++the file names, the filing and the transcription queue are real.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from ytp import jobs, transcriptions
++from ytp.clients.jellyfin import LibraryRefresher
++from ytp.config import ConfigError, Settings
++from ytp.db import Database
++from ytp.youtube import VideoRef
++from ytp.youtube_download import (
++    YoutubeDownloader,
++    base_language,
++    choose_subtitles,
++    subtitle_options,
++)
++from ytp.youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker, has_subtitles
++
++ID = "aqz-KE-bpKQ"
++URL = f"https://www.youtube.com/watch?v={ID}"
++TOKEN = "t" * 43
++ENV = {
++    "MEDIA_DIR_MOVIES": "Filme",
++    "MEDIA_DIR_SERIES": "Serien",
++    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
++    "MEDIA_DIR_MUSIC": "Musik",
++    "MEDIA_DIR_PODCASTS": "Podcasts",
++    "MEDIA_DIR_YOUTUBE": "Youtube",
++}
++SRT = "1\n00:00:00,000 --> 00:00:01,000\nHallo\n"
++
++
++def info(subtitles=None, automatic=None, language="de"):
++    return {
++        "id": ID,
++        "title": "Big Buck Bunny",
++        "channel": "Blender",
++        "upload_date": "20140210",
++        "language": language,
++        "subtitles": subtitles or {},
++        "automatic_captions": automatic or {},
++    }
++
++
++def fake_yt(answer: dict, *, sub_error: Exception | None = None, calls: list | None = None):
++    """yt-dlp stand-in: the media pass writes mp4 + jpg, the subtitle pass the requested SRTs."""
++
++    def download(url, options):
++        home = Path(options["paths"]["home"])
++        if calls is not None:
++            calls.append(options)
++        if options.get("skip_download"):
++            if sub_error is not None:
++                raise sub_error
++            for pattern in options["subtitleslangs"]:
++                key = pattern.replace("\\", "")
++                (home / f"{ID}.{key}.srt").write_text(SRT, encoding="utf-8")
++            return dict(answer)
++        for ext in ("mp4", "jpg"):
++            (home / f"{ID}.{ext}").write_bytes(b"data")
++        return dict(answer)
++
++    return download
++
++
++# --- choosing tracks ------------------------------------------------------------------------------
++
++
++def test_base_language():
++    assert base_language("de-DE") == "de"
++    assert base_language("en_GB") == "en"
++    assert base_language("de-orig") == "de"
++    assert base_language("live_chat") is None
++    assert base_language("") is None
++
++
++def test_person_made_subtitles_in_the_wanted_order_one_per_language():
++    answer = info({"en-GB": [], "en": [], "de-DE": [], "fr": [], "live_chat": []})
++    chosen = choose_subtitles(answer, ("de", "en"))
++    assert [(c.key, c.lang, c.automatic) for c in chosen] == [
++        ("de-DE", "de", False),
++        ("en", "en", False),  # the plain one wins over the regional one
++    ]
++
++
++def test_automatic_captions_only_when_asked_and_only_in_the_videos_language():
++    automatic = {"de-orig": [], "de": [], "en": [], "fr": []}  # en, fr: machine translations
++    assert choose_subtitles(info(automatic=automatic), ("de", "en")) == []
++    chosen = choose_subtitles(info(automatic=automatic), ("de", "en"), automatic=True)
++    assert [(c.key, c.lang, c.automatic) for c in chosen] == [("de-orig", "de", True)]
++
++
++def test_a_person_made_subtitle_beats_the_automatic_one():
++    answer = info({"de": []}, {"de-orig": []})
++    chosen = choose_subtitles(answer, ("de",), automatic=True)
++    assert [(c.key, c.automatic) for c in chosen] == [("de", False)]
++
++
++def test_the_subtitle_pass_fetches_nothing_but_the_chosen_tracks(tmp_path):
++    chosen = choose_subtitles(info({"de-DE": []}), ("de",))
++    options = subtitle_options(tmp_path, chosen, proxy="http://gluetun:8888", socket_timeout=15)
++    assert options["skip_download"] is True
++    assert options["writesubtitles"] is True
++    assert options["writeautomaticsub"] is False
++    assert options["subtitleslangs"] == [r"de\-DE"]
++    assert options["allowed_extractors"] == ["youtube"]
++    assert options["noplaylist"] is True
++    assert options["proxy"] == "http://gluetun:8888"
++    assert {"key": "FFmpegSubtitlesConvertor", "format": "srt", "when": "before_dl"} in options[
++        "postprocessors"
++    ]
++
++
++# --- the downloader -------------------------------------------------------------------------------
++
++
++def downloader(answer, **kw) -> YoutubeDownloader:
++    return YoutubeDownloader(
++        download=fake_yt(answer, **kw), min_free_bytes=0, subtitle_langs=("de", "en")
++    )
++
++
++def test_subtitles_come_with_the_video(tmp_path):
++    result = downloader(info({"de": [], "en-US": []})).download(VideoRef(ID), tmp_path / "w")
++    assert [(s.lang, s.path.name) for s in result.subtitles] == [
++        ("de", f"{ID}.de.srt"),
++        ("en", f"{ID}.en-US.srt"),
++    ]
++    assert result.language == "de"
++
++
++def test_no_subtitles_means_no_second_request(tmp_path):
++    calls: list = []
++    result = downloader(info(), calls=calls).download(VideoRef(ID), tmp_path / "w")
++    assert result.subtitles == ()
++    assert len(calls) == 1
++
++
++def test_a_failing_subtitle_pass_never_fails_the_video(tmp_path):
++    result = downloader(info({"de": []}), sub_error=RuntimeError("HTTP 429")).download(
++        VideoRef(ID), tmp_path / "w"
++    )
++    assert result.video.name == f"{ID}.mp4"
++    assert result.subtitles == ()
++
++
++def test_audio_only_never_asks_for_subtitles(tmp_path):
++    calls: list = []
++
++    def download(url, options):
++        calls.append(options)
++        (Path(options["paths"]["home"]) / f"{ID}.m4a").write_bytes(b"a")
++        return info({"de": []})
++
++    loader = YoutubeDownloader(download=download, min_free_bytes=0, subtitle_langs=("de",))
++    assert loader.download(VideoRef(ID), tmp_path / "w", audio_only=True).subtitles == ()
++    assert len(calls) == 1
++
++
++# --- filing and the queue -------------------------------------------------------------------------
++
++
++class World:
++    def __init__(self, tmp: Path, **env: str):
++        self.data = tmp / "data"
++        for name in ENV.values():
++            (self.data / name).mkdir(parents=True)
++        (self.data / "downloads" / "incomplete").mkdir(parents=True)
++        self.settings = Settings.from_env({**ENV, "DATA_ROOT": str(self.data), **env})
++        self.db = Database.open(tmp / "app.db")
++        self.refresher = LibraryRefresher(None)
++
++    def run(self, answer, *, target="video", audio_only=False):
++        meta = YoutubeJobMetadata(
++            video_id=ID,
++            channel="Blender",
++            title="Big Buck Bunny",
++            target=target,
++            audio_only=audio_only,
++        )
++        external = ID if target == "video" else f"{ID}@{target}"
++        job = jobs.submit_job(self.db, JOB_TYPE, external, meta.to_json())[0]
++
++        def download(url, options):
++            if audio_only:
++                (Path(options["paths"]["home"]) / f"{ID}.m4a").write_bytes(b"a")
++                return dict(answer)
++            return fake_yt(answer)(url, options)
++
++        loader = YoutubeDownloader(
++            download=download,
++            min_free_bytes=0,
++            subtitle_langs=self.settings.youtube_subtitle_langs,
++        )
++        worker = YoutubeWorker(self.db, self.settings, loader, self.refresher)
++        assert worker.run_one()
++        return jobs.get_job(self.db, job.id)
++
++    def files(self, library="Youtube"):
++        root = self.data / library
++        return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
++
++    def queue(self):
++        return [
++            (r["media_path"], r["language"], r["status"])
++            for r in self.db.query("SELECT * FROM transcriptions ORDER BY id")
++        ]
++
++
++def test_youtube_subtitles_are_filed_where_jellyfin_looks_and_nothing_is_queued(tmp_path):
++    world = World(tmp_path, TRANSCRIBER_TOKEN=TOKEN)
++    assert world.run(info({"de": [], "en": []})).status == "done"
++    assert world.files() == [
++        "Blender/Big Buck Bunny [aqz-KE-bpKQ].de.srt",
++        "Blender/Big Buck Bunny [aqz-KE-bpKQ].en.srt",
++        "Blender/Big Buck Bunny [aqz-KE-bpKQ].info.json",
++        "Blender/Big Buck Bunny [aqz-KE-bpKQ].jpg",
++        "Blender/Big Buck Bunny [aqz-KE-bpKQ].mp4",
++    ]
++    assert world.queue() == []
++
++
++def test_a_video_without_subtitles_goes_to_whisper(tmp_path):
++    world = World(tmp_path, TRANSCRIBER_TOKEN=TOKEN)
++    assert world.run(info(language="en")).status == "done"
++    assert world.queue() == [("Youtube/Blender/Big Buck Bunny [aqz-KE-bpKQ].mp4", "en", "queued")]
++
++
++def test_without_a_transcriber_token_nothing_is_queued(tmp_path):
++    world = World(tmp_path)
++    assert world.run(info()).status == "done"
++    assert world.queue() == []
++
++
++def test_a_video_filed_again_with_a_subtitle_already_there_is_not_queued(tmp_path):
++    world = World(tmp_path, TRANSCRIBER_TOKEN=TOKEN)
++    folder = world.data / "Youtube" / "Blender"
++    folder.mkdir()
++    (folder / "Big Buck Bunny [aqz-KE-bpKQ].de.srt").write_text(SRT)
++    world.run(info())
++    assert world.queue() == []
++
++
++def test_a_podcast_kept_as_video_gets_subtitles_or_whisper(tmp_path):
++    world = World(tmp_path, TRANSCRIBER_TOKEN=TOKEN)
++    world.run(info({"de": []}), target="podcast")
++    assert world.files("Podcasts") == [
++        "Blender/2014-02-10 - Big Buck Bunny.de.srt",
++        "Blender/2014-02-10 - Big Buck Bunny.jpg",
++        "Blender/2014-02-10 - Big Buck Bunny.mp4",
++    ]
++    assert world.queue() == []
++
++
++def test_an_audio_only_episode_is_never_transcribed(tmp_path):
++    world = World(tmp_path, TRANSCRIBER_TOKEN=TOKEN)
++    assert world.run(info(), target="podcast", audio_only=True).status == "done"
++    assert world.queue() == []
++
++
++def test_subtitles_can_be_switched_off(tmp_path):
++    world = World(tmp_path, YOUTUBE_SUBTITLE_LANGS="")
++    assert world.settings.youtube_subtitle_langs == ()
++    world.run(info({"de": []}))
++    assert not [f for f in world.files() if f.endswith(".srt")]
++
++
++def test_has_subtitles_looks_for_any_language_and_format(tmp_path):
++    video = tmp_path / "Title [id].mp4"
++    video.write_bytes(b"v")
++    assert not has_subtitles(video)
++    (tmp_path / "Title [id] (2).en.srt").write_text("x")  # another video's
++    assert not has_subtitles(video)
++    (tmp_path / "Title [id].fr.ass").write_text("x")
++    assert has_subtitles(video)
++
++
++# --- settings -------------------------------------------------------------------------------------
++
++
++def settings(**env):
++    return Settings.from_env({**ENV, **env})
++
++
++def test_subtitle_and_transcriber_defaults():
++    s = settings()
++    assert s.youtube_subtitle_langs == ("de", "en")
++    assert s.youtube_auto_subtitles is False
++    assert s.transcription_enabled is False
++
++
++def test_subtitle_languages_are_cleaned_and_checked():
++    assert settings(YOUTUBE_SUBTITLE_LANGS=" DE, en ,de,,").youtube_subtitle_langs == ("de", "en")
++    with pytest.raises(ConfigError, match="YOUTUBE_SUBTITLE_LANGS"):
++        settings(YOUTUBE_SUBTITLE_LANGS="de,english")
++    with pytest.raises(ConfigError, match="YOUTUBE_AUTO_SUBTITLES"):
++        settings(YOUTUBE_AUTO_SUBTITLES="maybe")
++    assert settings(YOUTUBE_AUTO_SUBTITLES="1").youtube_auto_subtitles is True
++
++
++def test_the_transcriber_token_is_a_secret_and_must_be_long():
++    s = settings(TRANSCRIBER_TOKEN=TOKEN)
++    assert s.transcription_enabled
++    for text in (repr(s), str(s), str(s.summary())):
++        assert TOKEN not in text
++    assert s.summary()["transcription_enabled"] is True
++    assert settings(TRANSCRIBER_TOKEN="changeme").transcription_enabled is False
++    with pytest.raises(ConfigError, match="TRANSCRIBER_TOKEN"):
++        settings(TRANSCRIBER_TOKEN="short")
++
++
++def test_the_queue_module_and_the_downloader_agree_on_the_subtitle_name():
++    video = Path("/x/Title [id].mp4")
++    assert transcriptions.subtitle_path(video, "de") == Path("/x/Title [id].de.srt")

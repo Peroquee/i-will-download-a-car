@@ -1,0 +1,11 @@
+# Installed by scripts/transcriber/wake.py install-units.
+[Unit]
+Description=youtube-premium: look every 2 minutes whether the transcription PC is needed
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

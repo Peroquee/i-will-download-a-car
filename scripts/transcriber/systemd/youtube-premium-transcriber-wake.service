@@ -1,0 +1,19 @@
+# Installed by scripts/transcriber/wake.py install-units; @USER@ and @ROOT@ are filled in.
+[Unit]
+Description=youtube-premium: wake the transcription PC when videos wait for Whisper
+Documentation=file://@ROOT@/docs/transcription.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/python3 @ROOT@/scripts/transcriber/wake.py run
+TimeoutStartSec=60
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes

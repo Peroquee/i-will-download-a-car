@@ -31,7 +31,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import accounts, alerts_api, dashboard_api, jobs, jobs_api, podcasts_api, subscriptions_api
+from . import (
+    accounts,
+    alerts_api,
+    dashboard_api,
+    jobs,
+    jobs_api,
+    podcasts_api,
+    subscriptions_api,
+    transcriber_api,
+)
 from .apiutil import PROBE_STATUS, hand_to_qbittorrent, problem
 from .clients.qbittorrent import QbitClient
 from .clients.watchdog import WatchdogStatusClient
@@ -259,3 +268,4 @@ def register(app: FastAPI) -> None:
     dashboard_api.register(app)
     subscriptions_api.register(app)
     podcasts_api.register(app)
+    transcriber_api.register(app)

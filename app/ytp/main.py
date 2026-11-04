@@ -92,7 +92,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.youtube_worker = YoutubeWorker(
             app.state.db,
             settings,
-            YoutubeDownloader(proxy=settings.ytdlp_proxy, max_height=settings.youtube_max_height),
+            YoutubeDownloader(
+                proxy=settings.ytdlp_proxy,
+                max_height=settings.youtube_max_height,
+                subtitle_langs=settings.youtube_subtitle_langs,
+                automatic_subtitles=settings.youtube_auto_subtitles,
+            ),
             app.state.jellyfin,
         )
         threading.Thread(

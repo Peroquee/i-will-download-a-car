@@ -26,10 +26,13 @@
       "QBIT_URL": "http://gluetun:8080",
       "QBIT_USER": "admin",
       "SUBSCRIPTION_POLL_MINUTES": "60",
+      "TRANSCRIBER_TOKEN": "",
       "TZ": "Europe/Berlin",
       "UMASK": "002",
       "WATCHDOG_STATUS_URL": "http://watchdog:8090",
+      "YOUTUBE_AUTO_SUBTITLES": "0",
       "YOUTUBE_MAX_HEIGHT": "1080",
+      "YOUTUBE_SUBTITLE_LANGS": "de,en",
       "YTDLP_PROXY": "http://gluetun:8888"
     },
     "healthcheck": null,

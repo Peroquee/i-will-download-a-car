@@ -1017,6 +1017,7 @@ ALERT_KINDS = (
     "job_failed", "feed_error", "disk_low",
     "update_done", "update_blocked", "update_rolled_back", "update_rolled_back_db",
     "update_halted", "update_checks", "backlog_paused", "youtube_unavailable",
+    "transcription_failed",
 )  # fmt: skip
 
 
@@ -1067,6 +1068,8 @@ def test_alert_texts_only_use_values_the_monitor_provides():
         "backlog_paused": {"podcast", "free_gb", "done", "total"},
         # YouTube gives no channel lists at all (feeds.SERVICE_WIDE, monitor.check_feeds)
         "youtube_unavailable": {"reason"},
+        # Whisper gave up on a video (ytp.transcriptions._retry_or_fail)
+        "transcription_failed": {"name", "reason", "attempts"},
     }
     t = translations()
     for lang in ("de", "en"):
