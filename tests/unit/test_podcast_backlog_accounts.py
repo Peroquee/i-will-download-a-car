@@ -25,7 +25,11 @@ def app_client(tmp_path, monkeypatch) -> Iterator:
         fetcher.feeds[FEED] = feed_of(*episodes(12))
         client.app.state.podcast_feeds = PodcastFeedClient(fetcher)
         feeder = client.app.state.backlog_feeder
-        feeder._disk_usage = lambda path: type("U", (), {"free": 500 * GB, "total": 1000 * GB})()
+        roomy = lambda path: type("U", (), {"free": 500 * GB, "total": 1000 * GB})()  # noqa: E731
+        feeder._disk_usage = roomy
+        # The endpoint reads the drive itself (the same way, not through the feeder): fake that too,
+        # or these tests depend on how full the machine they run on happens to be.
+        monkeypatch.setattr("ytp.podcasts_api.shutil.disk_usage", roomy)
         yield client
 
 
