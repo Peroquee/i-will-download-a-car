@@ -22,8 +22,6 @@ from . import accounts, passwords
 from .egress import parse_networks
 
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
-TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
-FALSE_WORDS = frozenset({"0", "false", "no", "off"})
 
 # Media type -> the environment variable naming its library folder (relative to DATA_ROOT).
 # Same variables and meaning as .env.example and scripts/host/create-layout.sh.
@@ -92,18 +90,6 @@ class Settings:
     # i.e. the home network's own global IPv6 prefixes. Semi-secret like HOME_PUBLIC_IP: never in
     # repr/str or a log line, only the count (see `summary`).
     fetch_blocked_networks: tuple = field(default=(), repr=False)
-    # YouTube subtitles to fetch with a video, in this order (docs/transcription.md); empty = none.
-    youtube_subtitle_langs: tuple[str, ...] = ("de", "en")
-    # Also take YouTube's automatic captions (in the video's own language) when no person-made
-    # subtitle exists. Off by default: Whisper does better than YouTube's captions.
-    youtube_auto_subtitles: bool = False
-    # The shared secret of the transcription PC (docs/transcription.md). A secret: never in
-    # repr/str or a log line. Empty = no transcription queue (videos without subtitles stay so).
-    transcriber_token: str = field(default="", repr=False)
-
-    @property
-    def transcription_enabled(self) -> bool:
-        return bool(self.transcriber_token)
 
     @property
     def qbit_configured(self) -> bool:
@@ -139,8 +125,6 @@ class Settings:
             "fetch_blocked_networks": len(self.fetch_blocked_networks),
             "admin_user": self.admin_user,
             "admin_bootstrap": bool(self.admin_password_hash),
-            "youtube_subtitle_langs": list(self.youtube_subtitle_langs),
-            "transcription_enabled": self.transcription_enabled,
         }
 
     @classmethod
@@ -286,36 +270,6 @@ class Settings:
             except ValueError as exc:  # names the entry's position, never its value
                 problems.append(f"{name}: {exc}")
 
-        raw_langs = env.get("YOUTUBE_SUBTITLE_LANGS")  # unset = default, set but empty = none
-        subtitle_langs: list[str] = []
-        for item in ("de,en" if raw_langs is None else raw_langs).split(","):
-            lang = item.strip().lower()
-            if not lang:
-                continue
-            if not re.fullmatch(r"[a-z]{2,3}", lang):
-                problems.append(
-                    "YOUTUBE_SUBTITLE_LANGS must be language codes like de,en (comma-separated), "
-                    f"got {item.strip()!r}"
-                )
-            elif lang not in subtitle_langs:
-                subtitle_langs.append(lang)
-
-        auto_subtitles = False
-        raw_auto = text("YOUTUBE_AUTO_SUBTITLES", "0").lower()
-        if raw_auto in TRUE_WORDS:
-            auto_subtitles = True
-        elif raw_auto not in FALSE_WORDS:
-            problems.append(f"YOUTUBE_AUTO_SUBTITLES must be 0 or 1, got {raw_auto!r}")
-
-        transcriber_token = text("TRANSCRIBER_TOKEN")
-        if transcriber_token == "changeme":
-            transcriber_token = ""  # the template's placeholder: transcription not set up
-        elif transcriber_token and not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", transcriber_token):
-            problems.append(
-                "TRANSCRIBER_TOKEN must be at least 32 characters of A-Z a-z 0-9 _ - "
-                "(make one with: python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-            )
-
         if problems:
             raise ConfigError(problems)
         return cls(
@@ -342,9 +296,6 @@ class Settings:
             admin_user=admin_user,
             admin_password_hash=admin_hash,
             fetch_blocked_networks=tuple(blocked),
-            youtube_subtitle_langs=tuple(subtitle_langs),
-            youtube_auto_subtitles=auto_subtitles,
-            transcriber_token=transcriber_token,
         )
 
 

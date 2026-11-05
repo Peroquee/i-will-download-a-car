@@ -85,17 +85,6 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels (144 to 4320); `0` = no limit. A disk-space knob. |
 | `SUBSCRIPTION_POLL_MINUTES` | `60` | no | How often each subscribed channel is checked (15 to 1440; each channel gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
 
-## Subtitles and Whisper ([transcription.md](transcription.md))
-
-| Variable | Default | Required | Meaning |
-|---|---|---|---|
-| `YOUTUBE_SUBTITLE_LANGS` | `de,en` | no | Subtitles fetched with a YouTube video, in this order (comma-separated language codes), filed as `<video>.<lang>.srt`. **Set but empty** = no subtitles. |
-| `YOUTUBE_AUTO_SUBTITLES` | `0` | no | `1` = also take YouTube's automatic captions (only in the video's own language) when no person-made subtitle exists. `0` leaves those videos to Whisper. |
-| `TRANSCRIBER_TOKEN` | empty | no, **secret** | The shared secret of the transcription PC (at least 32 characters, `secrets.token_urlsafe(32)`). Empty = no Whisper queue and the `/api/transcriber/*` routes answer 404. The same value goes into the PC's `/etc/ytp-transcriber.env`. |
-| `TRANSCRIBER_PC_MAC` | empty | no | The MAC address of the PC's network card for Wake-on-LAN. Read by the host script `scripts/transcriber/wake.py`, not by the containers. Empty = never wake it. |
-| `TRANSCRIBER_WOL_ADDRESS` | `255.255.255.255` | no | Where the Wake-on-LAN packet goes: the broadcast address of the PC's network (e.g. `192.168.178.255`). Host script only. |
-| `TRANSCRIBER_WAKE_HOURS` | empty | no | Hours in which the PC may be woken, `1-7` or `22-6` (start inclusive, end exclusive); empty = any time. Host script only. |
-
 ## Podcasts ([podcasts.md](podcasts.md))
 
 | Variable | Default | Required | Meaning |

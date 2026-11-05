@@ -73,9 +73,6 @@ issue text says `/data/media/youtube/...`; the stack's real library folder is `M
   does not read, and the files are moved (a rename) into the library only when everything is
   complete, the video last. The work folder is deleted on success and on failure; a file that is
   already in the library is never overwritten.
-- **Subtitles:** YouTube's subtitles in `YOUTUBE_SUBTITLE_LANGS` (default `de,en`) are filed next
-  to the video as `<title> [<id>].<lang>.srt`; a video without any goes to the Whisper
-  transcription queue when that is set up. See [transcription.md](transcription.md).
 - **Format:** H.264 video + AAC audio in an mp4 where YouTube has them (plays everywhere, Jellyfin
   direct-plays it), at most `YOUTUBE_MAX_HEIGHT` pixels high (default 1080, `0` = no limit; a
   10-minute video is around 100 to 300 MB at 1080). Merging YouTube's separate video and audio

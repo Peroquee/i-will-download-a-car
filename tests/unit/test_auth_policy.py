@@ -77,13 +77,6 @@ def test_the_public_routes_are_the_page_its_files_and_the_login():
         ("*", "/static"),
         ("POST", "/api/auth/login"),
         ("GET", "/api/auth/me"),
-        # the transcription PC: its own secret instead of a login, 404 while it is not set up
-        ("GET", "/api/transcriber/status"),
-        ("POST", "/api/transcriber/claim"),
-        ("GET", "/api/transcriber/jobs/{transcription_id}/media"),
-        ("POST", "/api/transcriber/jobs/{transcription_id}/heartbeat"),
-        ("POST", "/api/transcriber/jobs/{transcription_id}/result"),
-        ("POST", "/api/transcriber/jobs/{transcription_id}/fail"),
     }
 
 

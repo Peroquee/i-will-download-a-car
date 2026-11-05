@@ -146,9 +146,6 @@ services:
       YTDLP_PROXY: ${YTDLP_PROXY-http://gluetun:8888}
       # Tallest YouTube video to download in pixels (0 = no limit); a disk-space knob (#18).
       YOUTUBE_MAX_HEIGHT: ${YOUTUBE_MAX_HEIGHT:-1080}
-      YOUTUBE_SUBTITLE_LANGS: ${YOUTUBE_SUBTITLE_LANGS-de,en}
-      YOUTUBE_AUTO_SUBTITLES: ${YOUTUBE_AUTO_SUBTITLES:-0}
-      TRANSCRIBER_TOKEN: ${TRANSCRIBER_TOKEN:-}
       # How often subscribed channels are checked for new videos, in minutes; 0 = never (#20).
       SUBSCRIPTION_POLL_MINUTES: ${SUBSCRIPTION_POLL_MINUTES:-60}
       # Podcast feeds and episodes (#34) are fetched through the same proxy (the VPN); set EMPTY in

@@ -86,7 +86,6 @@ docs/testing.md        test levels, markers and rules
 docs/operations.md     backups and restore, updates (pinned versions), log rotation
 scripts/ops/           backup/restore and the yt-dlp update check
 docs/youtube.md        YouTube probe and download, the VPN route, yt-dlp upkeep
-docs/transcription.md  subtitles from YouTube, Whisper on a GPU PC woken over the network
 docs/installer.md      the guided installer: what it does, re-running, updating, the answers file
 install.sh, update.sh  the guided installer and updater (start here)
 AI-HELP.md             paste into an AI chat for step-by-step help (English)
