@@ -35,7 +35,9 @@
       if (next) document.body.setAttribute("data-role", next.role);
       else document.body.removeAttribute("data-role");
       if (state === "out") {
-        $("login-note").textContent = why ? t(why) : "";
+        var note = $("login-note");
+        note.textContent = why ? t(why) : "";
+        note.hidden = !why;
       }
       renderTools();
     }

@@ -491,6 +491,16 @@ def test_the_german_login_texts_exist():
 
 
 @needs_node
+def test_the_empty_sign_in_note_stays_hidden_over_the_name_field():
+    """#49: the banner is red by design; empty, it looked like a broken field above the name."""
+    out = page("/", answers=SIGNED_OUT, steps=[{"read": "#login-note"}])
+    assert out["errors"] == [], out["errors"]
+    note = out["reads"]["#login-note"]
+    assert note["text"] == ""
+    assert note["hidden"] is True
+
+
+@needs_node
 def test_a_session_that_ends_while_the_page_is_open_shows_the_login_again():
     out = page(
         "/",
@@ -499,7 +509,9 @@ def test_a_session_that_ends_while_the_page_is_open_shows_the_login_again():
     )
     assert out["errors"] == [], out["errors"]
     assert out["auth"] == "out"
-    assert out["reads"]["#login-note"]["text"] == "Your session has ended. Please sign in again."
+    note = out["reads"]["#login-note"]
+    assert note["text"] == "Your session has ended. Please sign in again."
+    assert note["hidden"] is False, "a note with a reason is shown"
 
 
 @needs_node
