@@ -26,12 +26,6 @@ submitted and stored in the job's metadata:
 
 The job's `external_id` is the video id for the `video` target (unchanged) and `<id>@<target>` for
 the others, so the same video can be a video AND a podcast episode, but is queued once per target.
-
-**Subtitles and Whisper** (docs/transcription.md): a video (target `video`, or a podcast episode
-kept as video) is filed with the YouTube subtitles the downloader found. One that has none next to
-it afterwards is put into the transcription queue (`ytp.transcriptions`) when the transcription PC
-is set up (`TRANSCRIBER_TOKEN`). The job is `done` either way: the video is watchable, the
-subtitle follows when the PC has done its work.
 """
 
 from __future__ import annotations
@@ -47,7 +41,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from . import jobs, transcriptions
+from . import jobs
 from .audiotags import Tags, embed_tags
 from .clients.jellyfin import LibraryRefresher
 from .config import Settings
@@ -62,7 +56,6 @@ from .youtube_download import (
     DownloadFailed,
     YoutubeDownloader,
     place,
-    place_subtitles,
     upload_date,
 )
 
@@ -122,21 +115,6 @@ class YoutubeJobMetadata(BaseModel):
         if self.target != "music" and self.album is not None:
             raise ValueError("an album is for music only")
         return self
-
-
-SUBTITLE_EXTENSIONS = (".srt", ".ass", ".ssa", ".vtt", ".sub")
-
-
-def has_subtitles(video: Path) -> bool:
-    """Is there an external subtitle for `video` already (`<stem>.<anything>.srt` and the like)?"""
-    prefix = f"{video.stem}."
-    try:
-        return any(
-            entry.name.startswith(prefix) and entry.suffix.lower() in SUBTITLE_EXTENSIONS
-            for entry in video.parent.iterdir()
-        )
-    except OSError:
-        return False
 
 
 def job_external_id(video_id: str, target: str = "video") -> str:
@@ -246,38 +224,19 @@ class YoutubeWorker:
         downloaded: Downloaded,
         library: Path,
     ) -> None:
-        video: Path | None = None  # the filed video, if this job filed one (not audio, not music)
         try:
             if meta.target == "podcast":
-                filed = self._file_podcast(ref, meta, downloaded, library)
-                video = None if downloaded.audio_only else filed
+                self._file_podcast(ref, meta, downloaded, library)
             elif meta.target == "music":
                 self._file_music(ref, meta, downloaded, library)
             else:
-                video = place(downloaded, library, meta.channel, meta.title, ref.video_id)[-1]
+                place(downloaded, library, meta.channel, meta.title, ref.video_id)
         except (DownloadFailed, PodcastError, OSError) as exc:
             self._fail(job, getattr(exc, "message", None) or str(exc))
             return
         if jobs.transition(self.db, job.id, "done", expected=("organizing",)):
             logger.info("job done", extra={"job_id": job.id, "video_id": ref.video_id})
             self.refresher.request_refresh(self.settings.library_dirs[LIBRARY_KEYS[meta.target]])
-            if video is not None:
-                self._queue_transcription(job, video, downloaded)
-
-    def _queue_transcription(self, job: Job, video: Path, downloaded: Downloaded) -> None:
-        """Hand a video without subtitles to Whisper. Never fails the (finished) job."""
-        if not self.settings.transcription_enabled or has_subtitles(video):
-            return
-        try:
-            transcriptions.enqueue(
-                self.db,
-                self.settings.data_root,
-                video,
-                language=downloaded.language,
-                job_id=job.id,
-            )
-        except Exception:
-            logger.exception("could not queue the transcription", extra={"job_id": job.id})
 
     def _file_music(
         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path
@@ -310,7 +269,7 @@ class YoutubeWorker:
 
     def _file_podcast(
         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path
-    ) -> Path:
+    ) -> None:
         """A video as a podcast episode: the same names and folder as an RSS episode (#34).
 
         Audio only: tags (podcast = album, title = episode) and the thumbnail as the cover are
@@ -345,9 +304,6 @@ class YoutubeWorker:
             sidecar = target.with_suffix(".jpg")
             if not sidecar.exists() and not sidecar.is_symlink():
                 shutil.move(str(downloaded.thumbnail), str(sidecar))
-        if not downloaded.audio_only:
-            place_subtitles(downloaded, target)
-        return target
 
     def _fail(self, job: Job, reason: str) -> None:
         jobs.transition(
