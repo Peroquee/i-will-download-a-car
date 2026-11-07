@@ -50,7 +50,7 @@ Sign In As
     Input Text    id:login-user    ${name}
     Input Password    id:login-password    ${password}
     Click Button    id:login-submit
-    Wait Until Element Is Visible    id:form
+    Wait Until Reloaded Page Shows    id:form
     Wait Until Element Is Not Visible    id:js-warning
     Use English
 
@@ -77,7 +77,16 @@ Log Out
     Wait Until Element Is Visible    id:account-logout
     # The click starts a reload, so the driver may lose the node while the navigation runs.
     Run Keyword And Ignore Error    Click Button    id:account-logout
-    Wait Until Element Is Visible    id:login-form
+    Wait Until Reloaded Page Shows    id:login-form
+
+Wait Until Reloaded Page Shows
+    [Arguments]    ${locator}
+    # Signing in and out reloads the page asynchronously. If the reload replaces the
+    # document while Selenium checks a node it already found, ChromeDriver raises
+    # "Node with given id does not belong to the document" instead of reporting the
+    # element as not visible, which aborts SeleniumLibrary's own wait. Retry the
+    # whole check so a reload race does not fail the test.
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Be Visible    ${locator}
 
 Select Mode
     [Arguments]    ${mode}
