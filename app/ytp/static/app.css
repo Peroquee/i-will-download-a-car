@@ -62,18 +62,19 @@ html, body {
 .vpn-down .vpn-link, .vpn-mismatch .vpn-link, .vpn-blind .vpn-link { padding: 14px 16px; }
 .vpn-down .vpn-dot, .vpn-mismatch .vpn-dot, .vpn-blind .vpn-dot { width: 14px; height: 14px; background: #fff; }
 .vpn-down .vpn-detail, .vpn-mismatch .vpn-detail, .vpn-blind .vpn-detail { font-size: 14px; }
-.wrap { display: flex; justify-content: center; padding: 24px 16px 40px; }
-/* The page is flat: no frame, no shadow (#53). On a computer the logo and the navigation are a
-   column on the left, the language at its bottom (#56); on a phone everything stacks. */
-.card {
-  width: 100%;
-  min-width: 0;
-  max-width: 1040px;
+/* On a phone the parts stack; on a computer the sidebar is fixed to the screen's left edge and
+   the content sits to its right (#56, #57). */
+.layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "logo" "nav" "page" "lang";
   gap: 14px;
+  padding: 24px 16px 40px;
 }
+.sidebar { display: contents; }
+.wrap { grid-area: page; padding: 0; }
+/* The page is flat: no frame, no shadow (#53). */
+.card { width: 100%; min-width: 0; max-width: 1040px; }
 .logo {
   grid-area: logo;
   justify-self: start;
@@ -89,7 +90,7 @@ html, body {
 .logo svg { width: 32px; height: 32px; }
 /* Headings use the same font as the text; size and weight set them apart. */
 h1, h2, h3, h4 { font-family: inherit; }
-.page { grid-area: page; min-width: 0; }
+.page { min-width: 0; }
 .page-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 #lang { grid-area: lang; justify-self: start; align-self: end; }
 form { display: grid; gap: 14px; }
@@ -378,12 +379,24 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .nav-item:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--gold-soft); }
 .nav-howto { margin-left: auto; color: var(--gold); }
 @media (min-width: 800px) {
-  .card {
-    grid-template-columns: 190px minmax(0, 1fr);
-    grid-template-rows: auto 1fr auto;
-    grid-template-areas: "logo page" "nav page" "lang page";
-    column-gap: 40px;
+  .layout { display: block; padding: 0; }
+  /* Glued to the top-left corner of the screen, independent of how far the page scrolls (#57). */
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: 210px;
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: var(--bg);
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
   }
+  #lang { align-self: start; margin-top: auto; }
+  #vpn, #update-banner, #alert-strip, .wrap { margin-left: 210px; }
+  .wrap { padding: 24px 32px 40px; }
   .topnav { flex-direction: column; border-bottom: 0; overflow: visible; }
   .nav-item { padding: 0 12px; border-bottom: 0; border-radius: 10px; }
   .nav-item[aria-current="page"] { background: var(--button); border-bottom-color: transparent; }

@@ -28,8 +28,8 @@
     <button type="button" id="alert-strip-ack" class="ghost small" data-i18n="alert.ack_all" hidden></button>
   </div>
 </nav>
-<div class="wrap">
-  <main class="card" aria-label="youtube-premium">
+<div class="layout">
+  <div class="sidebar">
     <div class="logo" aria-hidden="true">
       <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
         <ellipse cx="32" cy="38" rx="16" ry="15" fill="#dba876"/>
@@ -53,8 +53,10 @@
       <button type="button" id="howto-open" class="nav-item nav-howto" aria-haspopup="dialog"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><span data-i18n="howto.button"></span></button>
     </nav>
     <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
-
-    <div class="page">
+  </div>
+  <div class="wrap">
+    <main class="card" aria-label="youtube-premium">
+      <div class="page">
       <p id="js-warning" class="js-warning" role="alert">Die Skripte dieser Seite sind nicht geladen oder veraltet. Bitte die Seite neu laden (Strg+F5). / The scripts of this page did not load or are out of date. Please reload the page (Ctrl+F5).</p>
       <div class="page-head" data-auth-only>
         <button type="button" id="account-open" class="account-chip" aria-haspopup="dialog" data-i18n-label="account.menu" data-auth-only></button>
@@ -362,8 +364,9 @@
       <p id="accounts-load-error" class="error" role="status"></p>
       <ul id="accounts-list" class="job-list"></ul>
     </section>
-    </div>
-  </main>
+      </div>
+    </main>
+  </div>
 </div>
 
 <dialog id="account" class="howto account" aria-labelledby="account-title">
