@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.i18n import translations
+from tests.helpers.node import NODE, needs_node
 from ytp.config import Settings
 from ytp.main import create_app
 from ytp.web import STATIC_DIR, render_page, static_version
@@ -233,16 +234,8 @@ def test_there_is_a_real_navigation_with_its_places_in_order():
     assert HTML.index('id="topnav"') < HTML.index('id="form"')
 
 
-def translations() -> dict[str, dict[str, str]]:
-    match = re.search(
-        r'<script type="application/json" id="i18n">\s*(\{.*?\})\s*</script>', HTML, re.S
-    )
-    assert match
-    return json.loads(match.group(1))
-
-
 def test_the_navigation_reads_eingabe_dashboard_abonnements_anleitung_and_its_english():
-    t = translations()
+    t = translations(HTML)
     assert [t["de"][k] for k in ("nav.input", "nav.dashboard", "nav.subs", "howto.button")] == [
         "Eingabe",
         "Dashboard",
@@ -345,16 +338,13 @@ def test_without_a_watchdog_configured_it_stays_unknown(client):
 
 # --- the pieces in a fake DOM (needs node) ---------------------------------------------------
 
-NODE = shutil.which("node")
-needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed (CI installs it)")
-
 
 def smoke(path: str, hash_: str, dashboard: dict | None = None) -> dict:
     ids = sorted(set(re.findall(r'\bid="([\w-]+)"', HTML)) - {"i18n"})
     scenario = {
         "ids": ids,
         "viewNodes": ["input", "dashboard"],
-        "dictionary": translations()["en"],
+        "dictionary": translations(HTML)["en"],
         "answers": {
             "/api/alerts": {"alerts": [], "unread": 0},
             "/api/dashboard": dashboard

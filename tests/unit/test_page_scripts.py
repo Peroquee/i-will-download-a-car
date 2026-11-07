@@ -16,12 +16,11 @@ import subprocess
 
 import pytest
 
+from tests.helpers.node import NODE, needs_node
 from ytp.web import STATIC_DIR
 
 pytestmark = pytest.mark.unit
 
-NODE = shutil.which("node")
-needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed (CI installs it)")
 HARNESS = STATIC_DIR.parents[2] / "tests" / "helpers" / "page_harness.js"
 VIDEO = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 PLACEHOLDER = "__STATIC_VERSION__"  # the raw file; the server fills it in

@@ -320,7 +320,6 @@
     MAX_PODCAST_BACKFILL: MAX_PODCAST_BACKFILL,
     MAX_CHANNEL_BACKFILL: MAX_CHANNEL_BACKFILL,
     format: format,
-    magnetMetadata: magnetMetadata,
     magnetPayload: magnetPayload,
     youtubePayload: youtubePayload,
     subscribePayload: subscribePayload,
