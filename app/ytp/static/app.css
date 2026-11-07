@@ -9,8 +9,8 @@
   --line: rgba(233, 228, 216, 0.12);
   --bad: #e4806f;
   --good: #7fc58b;
-  --danger-bg: #d98a9c;     /* pastel crimson for delete buttons (#56, #58) */
-  --danger-ink: #3a1410;
+  --danger-bg: #ba1436;     /* crimson for delete buttons (#56, #58) */
+  --danger-ink: #f2e6c9;
   --radius: 4px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
