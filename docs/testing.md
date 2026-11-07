@@ -16,6 +16,13 @@ Cross-cutting markers, combinable with any level:
 
 - `security`: guards a ground rule (VPN-only traffic, LAN-only, no secrets in git). `pytest -m security` must always pass.
 - `tests/system/test_c43_browser.py` is a **real browser** test (headless Chromium in the Playwright container against the app running in the test process; gated by `YTP_NETWORK_TESTS=1` and Docker, not part of the pipeline, run on the VM; `YTP_PLAYWRIGHT_IMAGE` overrides the image; the image has the browsers, so the matching `playwright` package is installed with pip inside the container, `YTP_PLAYWRIGHT_VERSION`). The script it runs is `tests/system/browser/ui_checks.py`.
+- `tests/system/test_c60_ui_robot.py` runs the **Robot Framework + SeleniumLibrary** suites in
+  `tests/system/robot/` against the app running in the pytest process, with real headless
+  Chromium. The `test:ui` job installs Debian chromium/chromedriver and Robot inside the job (no
+  Docker daemon) and runs it on every merge request. Locally: install `requirements-ui.txt`,
+  have `chromium` and `chromedriver` on `PATH`, then
+  `YTP_UI_TESTS=1 pytest tests/system/test_c60_ui_robot.py` or `make test-ui`. Reports land in
+  `reports/robot/`. The Playwright test above stays until the Robot suites prove parity.
 - The browser-side tests in `test_web_ui.py` (about 110, including the dashboard smoke test) need `node`: `test:unit` installs Debian's 18 series; in CI they **fail** if it is missing, locally they skip with a loud reason.
 - Tests that build real git repositories (`test_autodeploy.py`) need `git`: the `test:unit` job installs it (Debian's 2.39 series) and the tests **fail** in CI if it is missing; locally they skip with a loud reason.
 - `compose`, `docker`, `tun`, `network`: required capabilities. Missing ones **skip with a reason** locally and **fail** in CI (`REQUIRE_CAPABILITIES=1`), so a broken runner can't produce a green pipeline.
@@ -55,7 +62,8 @@ folder; it does not touch the running stack or the media volume.
 
 ## Where the tests run
 
-- **Lint, unit and integration** need no Docker daemon and run on the shared docker-executor runner.
+- **Lint, unit, UI and integration** need no Docker daemon and run on the shared docker-executor runner.
+  The `test:ui` job installs chromium/chromedriver with apt; it does not use the host Docker daemon.
 - **Smoke, system and regression** need the real youtube-premium host (Docker daemon, `/dev/net/tun`). They carry the tag `ytp-host` and run only on a dedicated runner on that VM. They are deliberately **not** run on the shared runner: it would need `/var/run/docker.sock` mounted or privileged dind, which gives any job root on a host that also builds other projects.
 - **The `ytp-host` runner does not exist yet** (the VM is not provisioned). Until it does, these three jobs are gated by the CI/CD variable `YTP_HOST_RUNNER`: unless it is `"1"` they are absent from the pipeline. They do not block merge requests and they do not report a pass they did not earn. Run them by hand on the VM with `make smoke-host` / `make test`.
 - **To enable them:** register a runner on the VM with the tag `ytp-host` (docker executor with the host socket mounted, or shell executor; see the header of `.gitlab-ci.yml`), then set `YTP_HOST_RUNNER=1` under Settings > CI/CD > Variables. From then on a missing daemon or tun device fails the job (`REQUIRE_CAPABILITIES=1`).
@@ -66,6 +74,7 @@ folder; it does not touch the running stack or the media volume.
 make venv
 make test-unit          # seconds, no Docker needed
 make test               # everything this machine can do; the rest is skipped with reasons
+make test-ui            # Robot + Selenium UI tests (needs requirements-ui.txt, chromium, chromedriver)
 make smoke-host         # on the media VM: full host checks against the real .env
 ```
 
