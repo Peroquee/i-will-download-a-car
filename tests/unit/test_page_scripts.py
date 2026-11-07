@@ -522,9 +522,9 @@ def test_logout_ends_the_session_on_the_server_and_reloads():
 
 
 @needs_node
-def test_the_account_button_shows_the_name():
+def test_the_account_button_shows_the_initial_and_the_dialog_the_name():
     out = page("/", steps=[{"read": "#account-open"}, {"read": "#account-who"}])
-    assert out["reads"]["#account-open"]["text"] == "boss"
+    assert out["reads"]["#account-open"]["text"] == "B"
     assert out["reads"]["#account-who"]["text"] == "Signed in as boss (Administrator)"
 
 
@@ -673,12 +673,70 @@ def test_the_followers_of_a_subscription_show_for_the_admin_and_only_a_count_for
             "/api/auth/me": {"account": USER_ACCOUNT},
             "/api/subscriptions": {"subscriptions": [channel]},
         },
-        steps=[{"read": "#subs-list"}],
+        steps=[
+            {"read": "#subs-list"},
+            {"read": "#subs-youtube-list"},
+            {"read": "#subs-podcast-group"},
+        ],
     )
     assert user["errors"] == [], user["errors"]
-    assert user["reads"]["#subs-list"]["children"] == 1
+    assert user["reads"]["#subs-youtube-list"]["children"] == 1
+    assert user["reads"]["#subs-podcast-group"]["hidden"] is True
     assert "1 other person(s) follow this too" in user["reads"]["#subs-list"]["text"]
     assert "alice" not in user["reads"]["#subs-list"]["text"]
+
+
+@needs_node
+def test_subscriptions_are_grouped_into_youtube_channels_and_podcasts():
+    channel = {
+        "id": 1,
+        "channel_id": "UCSMOQeBJ2RAnuFungnQOxLg",
+        "channel_name": "Blender",
+        "enabled": True,
+        "backfill": 0,
+        "created_at": "2026-10-01T00:00:00.000Z",
+        "last_checked": None,
+        "last_error": None,
+        "target": "video",
+        "audio_only": False,
+        "following": True,
+        "follower_count": 1,
+    }
+    podcast = {
+        "id": 7,
+        "kind": "podcast",
+        "title": "Serial",
+        "last_checked": None,
+        "last_error": None,
+        "target": "podcast",
+        "audio_only": True,
+        "following": True,
+        "follower_count": 1,
+    }
+    out = page(
+        "/",
+        answers={
+            "/api/subscriptions": {"subscriptions": [channel]},
+            "/api/podcasts": {"podcasts": [podcast]},
+        },
+        steps=[
+            {"read": "#subs-youtube-group"},
+            {"read": "#subs-podcast-group"},
+            {"read": "#subs-youtube-title"},
+            {"read": "#subs-podcast-title"},
+            {"read": "#subs-youtube-list"},
+            {"read": "#subs-podcast-list"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#subs-youtube-group"]["hidden"] is False
+    assert out["reads"]["#subs-podcast-group"]["hidden"] is False
+    assert out["reads"]["#subs-youtube-title"]["text"] == "YouTube channels"
+    assert out["reads"]["#subs-podcast-title"]["text"] == "Podcasts"
+    assert out["reads"]["#subs-youtube-list"]["children"] == 1
+    assert out["reads"]["#subs-podcast-list"]["children"] == 1
+    assert "Blender" in out["reads"]["#subs-youtube-list"]["text"]
+    assert "Serial" in out["reads"]["#subs-podcast-list"]["text"]
 
 
 # --- the input page, the subscriptions view and the downloads line ------------------------------

@@ -429,8 +429,8 @@ only detail from the egress check shown; addresses are never sent to the page.
 
 ## The "How to" guide (issue #33)
 
-A button **"Anleitung" / "How to"** at the top right of the page (next to the language switch)
-opens a guide for the household: five illustrated steps (find a magnet link, copy it, paste it and
+A nav item **"Anleitung" / "How to"** in the main navigation opens a guide for the household:
+five illustrated steps (find a magnet link, copy it, paste it and
 fill in the fields, watch the job list, find the result in Jellyfin), a part on YouTube videos and
 channel subscriptions, and "Where do you find magnet links?" with what such a link looks like and
 where the magnet button usually is, plus a notice that only things you are allowed to download
@@ -451,7 +451,7 @@ the guide must not recommend sources).
 
 ## Subscription view (issue #27)
 
-Below the job list: **Subscribed channels**.
+Below the job list: **Subscribed channels** and **Podcasts**, in two groups (#56).
 
 - **Add:** one field for an `@handle`, a channel link or the link of one of its videos, and "Also
   take older videos" (0 to 15, default 0 = only videos published after subscribing). It calls
@@ -554,9 +554,14 @@ builds a path from.
   to reload with Ctrl+F5, instead of a GET with the pasted link in the address. A red notice on the
   page (`#js-warning`) stays visible until the scripts have run to the end; they hide it.
   `dashboard.js` is optional for the form: an old cached copy does not take the form down.
+* **Layout (#56):** the logo sits at the top left; on a computer the navigation is a list with a
+  small icon per item under it, and the language switch is at the bottom of that column. The
+  signed-in account is a circle with the first letter of the name at the top right. There is no
+  title or page description above the content. On a phone the parts stack, the navigation stays a
+  scrollable row and the language switch moves to the bottom of the page.
 * **Navigation:** *Eingabe | Dashboard | Abonnements | Anleitung* (Input | Dashboard |
-  Subscriptions | How to) as tabs under the title, 44 px high, the current one marked with
-  `aria-current`. *Subscriptions* is the section of the input page (`/#subscriptions`).
+  Subscriptions | How to), 44 px high, the current one marked with `aria-current`.
+  *Subscriptions* is the section of the input page (`/#subscriptions`).
 * **The VPN bar is a link** (the whole bar) to `/dashboard#vpn`: the explanation of the state and
   the history of changes, scrolled into view.
 * **"The watchdog does not answer" in the first minute** after the app started is reported as

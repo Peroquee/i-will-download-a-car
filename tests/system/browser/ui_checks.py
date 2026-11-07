@@ -167,7 +167,7 @@ def the_admin_signs_in_and_the_cookie_is_httponly_and_samesite_strict(ctx):
     page = fresh_page(ctx)
     sign_in(page, ADMIN, ADMIN_PASSWORD)
     expect(page.locator("#login-form")).to_be_hidden()
-    expect(page.locator("#account-open")).to_have_text(ADMIN)
+    expect(page.locator("#account-open")).to_have_text(ADMIN[0].upper())
     (cookie,) = [c for c in page.context.cookies() if c["name"] == "ytp_session"]
     assert cookie["httpOnly"] is True, cookie
     assert cookie["sameSite"] == "Strict", cookie
@@ -378,7 +378,7 @@ def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
         ["Input", "Dashboard", "Subscriptions", "How to"]
     )
     expect(page.locator("#nav-accounts")).to_be_hidden()
-    expect(page.locator("#account-open")).to_have_text(USER)
+    expect(page.locator("#account-open")).to_have_text(USER[0].upper())
     expect(page.locator("#alert-strip")).to_be_hidden()
     expect(page.locator("#jobs-mini-text")).to_have_text("nothing running right now", timeout=15000)
     assert page.request.get(BASE + "/api/jobs").json()["jobs"] == []
@@ -391,7 +391,7 @@ def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
     expect(page).to_have_url(BASE + "/")
     assert page.request.get(BASE + "/api/accounts").status == 403
     assert page.request.get(BASE + "/api/alerts").status == 403
-    expect(page.locator("#account-open")).to_have_text(USER)
+    expect(page.locator("#account-open")).to_have_text(USER[0].upper())
 
 
 @check

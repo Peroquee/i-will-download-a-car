@@ -715,11 +715,13 @@
 
     var meta = document.createElement("div");
     meta.className = "job-meta";
-    var tag = sub.kind === "podcast" ? t("subs.podcast") : t("subs.channel_tag");
-    if (sub.target === "podcast") tag += " \u2192 " + t(sub.audio_only ? "subs.target_audio" : "subs.target_podcast");
-    meta.textContent = tag + " \u00b7 " + (sub.last_checked
+    var metaText = sub.last_checked
       ? t("subs.checked", { when: timeText(sub.last_checked) })
-      : t("subs.never"));
+      : t("subs.never");
+    if (sub.target === "podcast") {
+      metaText = t(sub.audio_only ? "subs.target_audio" : "subs.target_podcast") + " \u00b7 " + metaText;
+    }
+    meta.textContent = metaText;
     li.appendChild(meta);
     var others = (sub.follower_count || 0) - (sub.following ? 1 : 0);
     if (sub.followers && sub.followers.length) {   // an admin sees who follows
@@ -760,7 +762,7 @@
     poll.addEventListener("click", function () { pollSub(sub); });
     var remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "ghost small" + (subsConfirm[rowKey] ? " danger" : "");
+    remove.className = "ghost small danger";
     remove.disabled = !!busy;
     remove.textContent = t(subsConfirm[rowKey] ? "subs.confirm" : "subs.remove");
     remove.addEventListener("click", function () { removeSub(sub); });
@@ -769,7 +771,7 @@
     if (auth && auth.isAdmin() && others > 0) {   // ends it for the others too
       var everyone = document.createElement("button");
       everyone.type = "button";
-      everyone.className = "ghost small" + (subsConfirm[rowKey + ":all"] ? " danger" : "");
+      everyone.className = "ghost small danger";
       everyone.disabled = !!busy;
       everyone.textContent = t(subsConfirm[rowKey + ":all"] ? "subs.confirm_all" : "subs.remove_all");
       everyone.addEventListener("click", function () { removeSub(sub, true); });
@@ -779,12 +781,26 @@
     return li;
   }
 
-  function renderSubs() {
-    var list = $("subs-list");
+  function fillSubs(listId, items) {
+    var list = $(listId);
     list.textContent = "";
+    items.forEach(function (sub) { list.appendChild(subRow(sub)); });
+  }
+
+  function renderSubs() {
     $("subs-load-error").textContent = subsLoadFailed ? t("subs.load_error") : "";
-    if (!subsData) { $("subs-empty").hidden = true; return; }
-    subsData.forEach(function (sub) { list.appendChild(subRow(sub)); });
+    if (!subsData) {
+      $("subs-empty").hidden = true;
+      $("subs-youtube-group").hidden = true;
+      $("subs-podcast-group").hidden = true;
+      return;
+    }
+    var channels = subsData.filter(function (sub) { return sub.kind !== "podcast"; });
+    var podcasts = subsData.filter(function (sub) { return sub.kind === "podcast"; });
+    fillSubs("subs-youtube-list", channels);
+    fillSubs("subs-podcast-list", podcasts);
+    $("subs-youtube-group").hidden = channels.length === 0;
+    $("subs-podcast-group").hidden = podcasts.length === 0;
     $("subs-empty").hidden = subsData.length > 0;
   }
 
