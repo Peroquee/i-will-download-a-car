@@ -25,12 +25,16 @@ to the VPN tab, and an alert link opens the Alerts tab.
 ### Overview
 
 - **Three status cards** side by side, each with a coloured dot and a large state:
-  - **Internet** — currently taken from the egress check: `ok` is *Online*, `mismatch` is
-    *Not safe*, anything else is *Unknown*. Issue #63 adds a separate internet-reachability
-    signal without changing the VPN/watchdog code.
-  - **VPN** — `ok`, `down`, `blind`, `starting` or `unknown` from the watchdog.
-  - **Watchdog** — *Watching*, *Blind*, *Not answering* or *Starting*, with when it last polled;
-    an unreachable watchdog is visibly different from an offline internet line.
+  - **Internet** — the app's own DNS + TCP reachability check (`ok` is *Online*, `offline` is
+    *Offline*, anything else is *Unknown*), with when it was last checked. It runs on the
+    app's normal egress path and is cached for 30 seconds, so it is independent of the VPN and
+    of the watchdog (#63).
+  - **VPN** — `ok`, `down`, `blind`, `starting` or `unknown` from the watchdog; an egress
+    mismatch still shows *Not safe*.
+  - **Watchdog** — whether the watchdog answers and its last poll is fresh: *Watching* (`ok`),
+    *Blind*, *Stale*, *Not answering* (`unreachable`) or *Starting*, with when it last polled.
+    A watchdog that answers "down" is healthy (the VPN card shows the down state), and an
+    unreachable watchdog is visibly different from an offline internet line.
 - **Alerts** summary (admin only): one little dot per severity with the unread count
   (error/warning/notice) and the unread total; it links to the Alerts tab.
 - **Jobs** summary: the job expected to finish first (label and remaining time), the number of

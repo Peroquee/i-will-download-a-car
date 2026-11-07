@@ -38,6 +38,7 @@ from .clients.watchdog import WatchdogStatusClient
 from .db import Database
 from .magnet import InvalidMagnet, infohash_from_magnet
 from .metadata import Metadata, Name, metadata_to_json
+from .netstatus import watchdog_view
 from .youtube import InvalidVideoUrl, ProbeError, YoutubeProbe, parse_video_url
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
 from .youtube_jobs import YoutubeJobMetadata, YoutubeWorker, job_external_id
@@ -231,18 +232,29 @@ async def vpn_status(request: Request) -> JSONResponse:
     `state` is ok, down, blind (the watchdog cannot read the VPN status), starting, or unknown
     (the watchdog does not answer). Always 200: "unknown" is an answer, not an error.
 
+    The dashboard's two independent signals are added next to the unchanged watchdog fields
+    (issue #63):
+
+    * `internet`: {state: ok | offline | unknown, checked_at}, a DNS + TCP check on the app's
+      normal egress path, cached by the checker.
+    * `watchdog`: {state: ok | blind | stale | unreachable | starting, last_poll}, whether the
+      watchdog answers and its last poll is fresh. The VPN's own state is separate (top-level
+      `state`), so a watchdog that answers "down" is still healthy.
+
     In the first `STARTUP_GRACE_SECONDS` after the app started, a watchdog that does not answer
     yet is reported as `starting`: during an install or an update the containers restart one
     after the other, and "the watchdog is not answering" would only alarm (issue #43).
     """
     client: WatchdogStatusClient | None = request.app.state.watchdog_status
     if client is None:
-        return JSONResponse({"state": "unknown", "reason": "not configured"})
-    status = await asyncio.to_thread(client.fetch_status)
-    uptime = time.monotonic() - request.app.state.started_at
-    if status.get("state") == "unknown" and uptime < STARTUP_GRACE_SECONDS:
-        status = {"state": "starting", "reason": "the app has just started"}
-    return JSONResponse(status)
+        status: dict[str, object] = {"state": "unknown", "reason": "not configured"}
+    else:
+        status = await asyncio.to_thread(client.fetch_status)
+        uptime = time.monotonic() - request.app.state.started_at
+        if status.get("state") == "unknown" and uptime < STARTUP_GRACE_SECONDS:
+            status = {"state": "starting", "reason": "the app has just started"}
+    internet = await asyncio.to_thread(request.app.state.internet.refresh)
+    return JSONResponse({**status, "internet": internet, "watchdog": watchdog_view(status)})
 
 
 STARTUP_GRACE_SECONDS = 60

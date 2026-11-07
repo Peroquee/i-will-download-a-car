@@ -248,26 +248,16 @@
           "bad", t("dash.watchdog_unreachable"), "");
         return;
       }
-      // Internet access from the egress check until the backend can answer it separately (#63).
-      var egress = vpnStatus.egress;
-      if (egress === "ok") {
-        var internetDetail = vpnStatus.egress_country
-          ? t("vpn.country", { country: vpnStatus.egress_country })
-          : vpnStatus.egress_checked
-            ? t("dash.checked", { when: ctx.timeText(vpnStatus.egress_checked) || vpnStatus.egress_checked })
-            : "";
-        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
-          "ok", t("dash.internet_ok"), internetDetail);
-      } else if (egress === "mismatch") {
-        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
-          "bad", t("dash.internet_leak"), t("vpn.d.mismatch"));
-      } else {
-        var checked = vpnStatus.egress_checked
-          ? t("dash.checked", { when: ctx.timeText(vpnStatus.egress_checked) || vpnStatus.egress_checked })
-          : "";
-        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
-          "warn", t("dash.internet_unknown"), checked);
-      }
+      // The internet signal is independent of the VPN's egress check (#63).
+      var internet = vpnStatus.internet || {};
+      var internetState = ["ok", "offline", "unknown"].indexOf(internet.state) >= 0
+        ? internet.state : "unknown";
+      var internetDetail = internet.checked_at
+        ? t("dash.checked", { when: ctx.timeText(internet.checked_at) || internet.checked_at })
+        : "";
+      setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
+        internetState === "ok" ? "ok" : internetState === "offline" ? "bad" : "warn",
+        t("dash.internet_" + internetState), internetDetail);
 
       var info = L.vpnView(vpnStatus);
       var vpnTone = info.view === "ok" ? "ok"
@@ -285,26 +275,17 @@
       setStatusCard("status-vpn", "status-vpn-state", "status-vpn-detail",
         vpnTone, t("vpn." + info.view), vpnParts.join(" · "));
 
-      var watchdogTone = "ok";
-      var watchdogState = t("dash.watchdog_ok");
-      var watchdogDetail = vpnStatus.last_poll
-        ? t("dash.checked", { when: ctx.timeText(vpnStatus.last_poll) || vpnStatus.last_poll })
+      // The watchdog card says only whether it answers and polls freshly (#63); its VPN state
+      // is the VPN card above.
+      var dog = vpnStatus.watchdog || {};
+      var dogState = ["ok", "blind", "stale", "unreachable", "starting"].indexOf(dog.state) >= 0
+        ? dog.state : "unreachable";
+      var dogTone = dogState === "ok" ? "ok" : dogState === "starting" ? "warn" : "bad";
+      var dogDetail = dog.last_poll
+        ? t("dash.checked", { when: ctx.timeText(dog.last_poll) || dog.last_poll })
         : "";
-      if (vpnStatus.state === "starting") {
-        watchdogTone = "warn";
-        watchdogState = t("dash.watchdog_starting");
-        watchdogDetail = has("vpn.d.starting") ? t("vpn.d.starting") : "";
-      } else if (!vpnStatus.last_poll || vpnStatus.state === "unknown") {
-        watchdogTone = "bad";
-        watchdogState = t("dash.watchdog_unreachable");
-        watchdogDetail = has("vpn.d.unknown") ? t("vpn.d.unknown") : "";
-      } else if (vpnStatus.state === "blind") {
-        watchdogTone = "bad";
-        watchdogState = t("dash.watchdog_blind");
-        watchdogDetail = has("vpn.d.blind") ? t("vpn.d.blind") : "";
-      }
       setStatusCard("status-watchdog", "status-watchdog-state", "status-watchdog-detail",
-        watchdogTone, watchdogState, watchdogDetail);
+        dogTone, t("dash.watchdog_" + dogState), dogDetail);
     }
 
     function renderJobsSummary() {

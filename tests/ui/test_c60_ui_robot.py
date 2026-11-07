@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -86,13 +87,17 @@ class NoDownload:
         raise RuntimeError("the UI test downloads nothing")
 
 
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 class OkWatchdog:
     def fetch_status(self):
         return {
             "state": "ok",
             "egress": "ok",
             "egress_country": "Switzerland",
-            "last_poll": "2026-11-07T10:00:00Z",
+            "last_poll": _now(),
             "since": "2026-11-07T09:00:00Z",
             "paused": False,
         }
@@ -104,8 +109,18 @@ class DownWatchdog:
             "state": "down",
             "paused": True,
             "reason": "seeded by the UI test",
-            "last_poll": "2026-11-07T10:00:00Z",
+            "last_poll": _now(),
         }
+
+
+class OkInternet:
+    def refresh(self):
+        return {"state": "ok", "checked_at": _now()}
+
+
+class OfflineInternet:
+    def refresh(self):
+        return {"state": "offline", "checked_at": _now()}
 
 
 RSS = b"""<?xml version="1.0"?>
@@ -168,6 +183,7 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
     app.state.channels = ChannelResolver(app.state.youtube)
     app.state.youtube_worker.downloader = NoDownload()
     app.state.watchdog_status = OkWatchdog()
+    app.state.internet = OkInternet()
     app.state.podcast_feeds = PodcastFeedClient(StubFeedFetcher())
     if app.state.podcast_worker is not None:
         app.state.podcast_worker.feeds = app.state.podcast_feeds
@@ -245,6 +261,7 @@ def down_base_url(tmp_path_factory: pytest.TempPathFactory):
     app = create_app(settings)
     server, thread, url = start_server(app)
     app.state.watchdog_status = DownWatchdog()
+    app.state.internet = OfflineInternet()
     try:
         yield url
     finally:

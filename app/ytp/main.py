@@ -29,6 +29,7 @@ from .feeds import FeedClient
 from .jobs_api import TorrentProgress
 from .logging_setup import configure_logging
 from .monitor import MONITOR_JOB_ID, MONITOR_SECONDS, AlertMonitor
+from .netstatus import InternetChecker
 from .organizer import FileOrganizer
 from .podcast_backlog import FEEDER_JOB_ID as BACKLOG_JOB_ID
 from .podcast_backlog import FEEDER_SECONDS as BACKLOG_SECONDS
@@ -253,6 +254,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.backlog_feeder = None
     app.state.monitor = None
     app.state.watchdog_status = None
+    app.state.internet = InternetChecker()  # independent of the watchdog (#63)
     app.state.youtube = None
     app.state.channels = None
     app.state.youtube_worker = None

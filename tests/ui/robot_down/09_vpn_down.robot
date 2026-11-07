@@ -15,3 +15,9 @@ The Vpn Down State Is Unmistakable
     Should Start With    ${title}    ⚠
     ${icon}=    Get Element Attribute    id:favicon    href
     Should Contain    ${icon}    favicon-alert.svg
+
+The Dashboard Shows Offline Internet Beside A Running Watchdog
+    Open Dashboard Page
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:status-internet-state    Offline
+    Element Should Contain    id:status-vpn-state    VPN down
+    Element Should Contain    id:status-watchdog-state    Watching

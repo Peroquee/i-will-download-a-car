@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from datetime import UTC, datetime
 
 import pytest
 from starlette.testclient import TestClient
@@ -29,6 +30,22 @@ ENV = {
 HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 CSS = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
 APP_JS = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+CHECKED_AT = "2026-11-07T12:00:00Z"
+
+
+def now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+class FakeInternet:
+    """A checker answer without a network round trip (the endpoint calls refresh())."""
+
+    def __init__(self, state="ok", checked_at=CHECKED_AT):
+        self.state = state
+        self.checked_at = checked_at
+
+    def refresh(self):
+        return {"state": self.state, "checked_at": self.checked_at}
 
 
 @pytest.fixture
@@ -37,6 +54,7 @@ def client(tmp_path):
     config.mkdir()
     settings = Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config)})
     with TestClient(create_app(settings), base_url="http://nas.lan") as test_client:
+        test_client.app.state.internet = FakeInternet()
         yield test_client
 
 
@@ -323,12 +341,15 @@ def test_a_watchdog_that_does_not_answer_yet_is_starting_in_the_first_minute(cli
     body = client.get("/api/vpn").json()
     assert body["state"] == "starting"
     assert "just started" in body["reason"]
+    assert body["watchdog"]["state"] == "starting"
 
 
 def test_after_the_first_minute_it_is_unknown_again(client):
     client.app.state.watchdog_status = AwayWatchdog()
     client.app.state.started_at -= 61
-    assert client.get("/api/vpn").json()["state"] == "unknown"
+    body = client.get("/api/vpn").json()
+    assert body["state"] == "unknown"
+    assert body["watchdog"]["state"] == "unreachable"
 
 
 def test_a_real_answer_is_never_changed_by_the_grace(client):
@@ -339,12 +360,50 @@ def test_a_real_answer_is_never_changed_by_the_grace(client):
         {"state": "starting", "reason": "from the watchdog"},
     ):
         client.app.state.watchdog_status = Watchdog(status)
-        assert client.get("/api/vpn").json() == status
+        body = client.get("/api/vpn").json()
+        assert {key: body[key] for key in status} == status
+        assert body["internet"] == {"state": "ok", "checked_at": CHECKED_AT}
+
+
+def test_the_api_adds_internet_and_watchdog_without_changing_the_vpn_state(client):
+    last_poll = now()
+    client.app.state.watchdog_status = Watchdog(
+        {"state": "down", "paused": True, "last_poll": last_poll}
+    )
+    body = client.get("/api/vpn").json()
+    assert body["state"] == "down", "the VPN state is unchanged"
+    assert body["paused"] is True
+    assert body["watchdog"] == {"state": "ok", "last_poll": last_poll}, (
+        "a watchdog that answers 'down' is healthy; only its own state is down"
+    )
+    assert body["internet"] == {"state": "ok", "checked_at": CHECKED_AT}
+
+
+def test_an_offline_internet_and_an_unreachable_watchdog_are_distinguishable(client):
+    client.app.state.watchdog_status = AwayWatchdog()
+    client.app.state.internet = FakeInternet("offline")
+    client.app.state.started_at -= 120
+    body = client.get("/api/vpn").json()
+    assert body["state"] == "unknown"
+    assert body["watchdog"]["state"] == "unreachable"
+    assert body["internet"] == {"state": "offline", "checked_at": CHECKED_AT}
+
+
+def test_an_internet_failure_does_not_turn_the_vpn_unknown(client):
+    client.app.state.watchdog_status = Watchdog({"state": "ok", "last_poll": now()})
+    client.app.state.internet = FakeInternet("offline")
+    body = client.get("/api/vpn").json()
+    assert body["state"] == "ok"
+    assert body["watchdog"]["state"] == "ok"
+    assert body["internet"]["state"] == "offline"
 
 
 def test_without_a_watchdog_configured_it_stays_unknown(client):
     client.app.state.watchdog_status = None
-    assert client.get("/api/vpn").json()["state"] == "unknown"
+    body = client.get("/api/vpn").json()
+    assert body["state"] == "unknown"
+    assert body["watchdog"]["state"] == "unreachable"
+    assert body["internet"]["state"] == "ok", "the internet check does not need a watchdog"
 
 
 # --- the pieces in a fake DOM (needs node) ---------------------------------------------------
@@ -372,6 +431,8 @@ def smoke(path: str, hash_: str, dashboard: dict | None = None, vpn: dict | None
                 "egress": "unknown",
                 "paused": True,
                 "last_poll": "2026-11-02T10:00:00Z",
+                "internet": {"state": "unknown", "checked_at": None},
+                "watchdog": {"state": "ok", "last_poll": "2026-11-02T10:00:00Z"},
             },
             "/api/jobs": {"jobs": [], "counts": {}},
         },
