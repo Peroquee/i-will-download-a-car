@@ -484,7 +484,7 @@ multiply it; if qBittorrent cannot be asked the bar is simply missing, never an 
 progress is kept in memory by the download worker (it is gone after a restart, and a download that
 restarts begins again anyway).
 
-**Failures are never silent.** A failed job is outlined in red and shows the reason the app
+**Failures are never silent.** A failed job has a red bar on the left and shows the reason the app
 recorded (qBittorrent unreachable or refusing, yt-dlp's classified message, a missing file, ...;
 the reason texts are English, as the logs are). A red banner above the list says how many jobs have
 failed, with a button "Failed only" for when they have scrolled out of the 50. A failed job has a

@@ -269,6 +269,20 @@ def test_buttons_are_compact_on_a_computer_and_stay_large_on_a_phone():
     assert re.search(r"button\.primary \{[^}]*padding: 6px 12px", block, re.S)
 
 
+def test_the_page_is_flat_and_a_failed_job_is_flagged_not_framed():
+    """Issue #53: no card frame or drop shadow, elements separated by thin lines instead of
+    rounded outlines, and a red left bar instead of a red border around a failed job."""
+    card = re.search(r"\.card \{[^}]*\}", CSS).group(0)
+    assert "border" not in card
+    assert "box-shadow" not in card
+    job = re.search(r"\.job \{[^}]*\}", CSS).group(0)
+    assert "border-bottom: 1px solid var(--line)" in job
+    assert "border-radius: 0" in job
+    failed = re.search(r"\.job-failed \{[^}]*\}", CSS).group(0)
+    assert "border-left: 3px solid var(--bad)" in failed
+    assert "background" not in failed
+
+
 def test_every_input_has_a_label():
     ids = re.findall(r'<(?:input|select)[^>]*\bid="([\w-]+)"', HTML)
     for input_id in ids:
