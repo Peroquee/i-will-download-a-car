@@ -9,7 +9,7 @@
   --line: rgba(233, 228, 216, 0.12);
   --bad: #e4806f;
   --good: #7fc58b;
-  --danger-bg: #e8a49d;     /* pastel red for delete buttons (#56) */
+  --danger-bg: #d98a9c;     /* pastel crimson for delete buttons (#56, #58) */
   --danger-ink: #3a1410;
   --radius: 4px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -168,6 +168,8 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .jobs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .jobs-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .jobs-title { font-size: 17px; font-weight: 600; margin: 0; }
+/* The name of the page, about twice the size of the section headings (#58). */
+.page-title { font-size: 34px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 12px; }
 .banner {
   margin: 12px 0 0;
   padding: 10px 14px;
@@ -273,6 +275,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .ill-check { fill: var(--gold); }
 .ill-tick { fill: none; stroke: #1a1305; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 520px) {
+  .page-title { font-size: 28px; }
   .pair { grid-template-columns: 1fr; }
   .actions { justify-content: stretch; }
   .actions button { flex: 1; }

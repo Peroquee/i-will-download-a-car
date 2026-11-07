@@ -557,9 +557,10 @@ builds a path from.
 * **Layout (#56, #57):** the logo and the navigation are a fixed sidebar glued to the screen's
   top-left corner, with a small icon per item and the language switch at its bottom; the status
   bars and the content sit to its right. The signed-in account is a circle with the first letter
-  of the name at the top right. There is no title or page description above the content. On a
-  phone the sidebar becomes a normal part of the page: logo first, then a scrollable navigation
-  row, the content, and the language switch at the bottom.
+  of the name at the top right. Each page has a large headline with its name (#58); there is no
+  page description above the content. On a phone the sidebar becomes a normal part of the page:
+  logo first, then a scrollable navigation row, the content, and the language switch at the
+  bottom.
 * **Navigation:** *Eingabe | Dashboard | Abonnements | Anleitung* (Input | Dashboard |
   Subscriptions | How to), 44 px high, the current one marked with `aria-current`.
   *Subscriptions* is the section of the input page (`/#subscriptions`).
