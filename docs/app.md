@@ -554,11 +554,12 @@ builds a path from.
   to reload with Ctrl+F5, instead of a GET with the pasted link in the address. A red notice on the
   page (`#js-warning`) stays visible until the scripts have run to the end; they hide it.
   `dashboard.js` is optional for the form: an old cached copy does not take the form down.
-* **Layout (#56):** the logo sits at the top left; on a computer the navigation is a list with a
-  small icon per item under it, and the language switch is at the bottom of that column. The
-  signed-in account is a circle with the first letter of the name at the top right. There is no
-  title or page description above the content. On a phone the parts stack, the navigation stays a
-  scrollable row and the language switch moves to the bottom of the page.
+* **Layout (#56, #57):** the logo and the navigation are a fixed sidebar glued to the screen's
+  top-left corner, with a small icon per item and the language switch at its bottom; the status
+  bars and the content sit to its right. The signed-in account is a circle with the first letter
+  of the name at the top right. There is no title or page description above the content. On a
+  phone the sidebar becomes a normal part of the page: logo first, then a scrollable navigation
+  row, the content, and the language switch at the bottom.
 * **Navigation:** *Eingabe | Dashboard | Abonnements | Anleitung* (Input | Dashboard |
   Subscriptions | How to), 44 px high, the current one marked with `aria-current`.
   *Subscriptions* is the section of the input page (`/#subscriptions`).

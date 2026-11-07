@@ -270,6 +270,22 @@ def test_buttons_are_compact_on_a_computer_and_stay_large_on_a_phone():
     assert re.search(r"button\.primary \{[^}]*padding: 6px 12px", block, re.S)
 
 
+def test_the_sidebar_is_glued_to_the_top_left_of_the_screen():
+    """Issue #57: the logo and the menu must sit at the screen's left edge, not inside a
+    centred container, and stay there while the page scrolls."""
+    assert '<div class="layout">' in HTML
+    assert '<div class="sidebar">' in HTML
+    assert HTML.index('class="sidebar"') < HTML.index('id="topnav"')
+    assert HTML.index('id="lang"') < HTML.index('class="wrap"')
+    desktop = re.search(r"@media \(min-width: 800px\) \{(.*?)\n\}", CSS, re.S)
+    assert desktop, "desktop layout rules"
+    rules = desktop.group(1)
+    sidebar = re.search(r"\.sidebar \{[^}]*\}", rules, re.S).group(0)
+    assert "position: fixed" in sidebar
+    assert "inset: 0 auto 0 0" in sidebar
+    assert "#vpn, #update-banner, #alert-strip, .wrap { margin-left: 210px; }" in rules
+
+
 def test_buttons_keep_their_rounded_shape_while_the_rest_is_flat():
     """Issue #55: the compact buttons should stay as rounded as they were before #53."""
     for selector in (r"button\.primary", r"button\.ghost"):
