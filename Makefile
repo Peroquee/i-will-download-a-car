@@ -3,13 +3,14 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories admin-password proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify install update
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories admin-password proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify install update test-ui
 
 help:
 	@echo "venv              create .venv with test and lint tools"
 	@echo "lint              ruff, yamllint, shellcheck"
 	@echo "test              all levels (skips what this machine can't do)"
 	@echo "test-<level>      unit | integration | smoke | system | regression"
+	@echo "test-ui           Robot Framework + Selenium UI tests (needs requirements-ui.txt, chromium, chromedriver)"
 	@echo "host-check        run scripts/host/check-host.sh against ./.env (on the media VM)"
 	@echo "smoke-host        smoke tests incl. full host checks (on the media VM)"
 	@echo "vpn-config        render config/expressvpn.ovpn for gluetun (resolves the server name to an IP)"
@@ -52,6 +53,9 @@ test: venv
 
 test-unit test-integration test-smoke test-system test-regression: test-%: venv
 	$(PYTEST) tests/$*
+
+test-ui:
+	YTP_UI_TESTS=1 $(PYTEST) tests/ui
 
 host-check:
 	scripts/host/check-host.sh --env-file .env

@@ -21,7 +21,7 @@ from tests.helpers import docker as docker_helpers
 from tests.helpers.compose_cli import compose_cli_available
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LEVELS = ("unit", "integration", "smoke", "system", "regression")
+LEVELS = ("unit", "ui", "integration", "smoke", "system", "regression")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

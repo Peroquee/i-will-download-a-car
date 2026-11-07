@@ -39,6 +39,7 @@ workflow:
 stages:
   - lint
   - unit
+  - ui
   - integration
   - smoke
   - system
@@ -193,6 +194,21 @@ test:unit:
   script:
     - pytest tests/unit $PYTEST_COMMON
     # Add --cov=app and a coverage report here once app/ exists (#8).
+
+test:ui:
+  stage: ui
+  extends: [.python, .reports]
+  needs: [test:unit]
+  timeout: 30m
+  # A real UI without a Docker daemon: Chromium and its driver run in this job, the app runs in
+  # the pytest process (tests/ui/test_c60_ui_robot.py) with stand-ins for YouTube/downloads.
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends chromium chromium-driver fonts-liberation >/dev/null
+    - *venv-test
+    - pip install -q -r requirements-app.txt -r requirements-ui.txt
+  script:
+    - YTP_UI_TESTS=1 pytest tests/ui $PYTEST_COMMON
 
 test:integration:
   stage: integration
