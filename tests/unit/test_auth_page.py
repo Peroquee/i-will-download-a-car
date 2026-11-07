@@ -29,12 +29,20 @@ def test_what_needs_a_sign_in_is_marked_so(element_id):
     assert "data-auth-only" in tag_of(element_id)
 
 
-def test_the_downloads_line_and_help_need_a_sign_in_too():
+def test_the_downloads_line_needs_a_sign_in_too():
     assert re.search(
         r'<a id="jobs-mini" class="jobs-mini" href="/dashboard" data-view="input" data-auth-only',
         HTML,
     )
-    assert re.search(r'<details class="help" data-view="input" data-auth-only', HTML)
+
+
+def test_the_redundant_help_section_is_gone():
+    """Issue #54: the small help details repeated the How to guide."""
+    assert '<details class="help"' not in HTML
+    assert '"help.title"' not in HTML
+    assert '"help.body"' not in HTML
+    assert ".help {" not in CSS
+    assert ".help summary" not in CSS
 
 
 @pytest.mark.parametrize(

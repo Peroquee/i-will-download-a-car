@@ -153,8 +153,6 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .result:empty { display: none; }
 .result.ok { color: var(--good); }
 .result.bad { color: var(--bad); }
-.help { margin-top: 18px; color: var(--muted); font-size: 13px; }
-.help summary { cursor: pointer; }
 .jobs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .jobs-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .jobs-title { font-size: 17px; font-weight: 600; margin: 0; }
