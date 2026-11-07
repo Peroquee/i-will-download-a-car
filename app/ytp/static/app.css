@@ -8,7 +8,7 @@
   --line: rgba(233, 228, 216, 0.1);
   --bad: #e4806f;
   --good: #7fc58b;
-  --radius: 14px;
+  --radius: 4px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -60,15 +60,8 @@ html, body {
 .vpn-down .vpn-dot, .vpn-mismatch .vpn-dot, .vpn-blind .vpn-dot { width: 14px; height: 14px; background: #fff; }
 .vpn-down .vpn-detail, .vpn-mismatch .vpn-detail, .vpn-blind .vpn-detail { font-size: 14px; }
 .wrap { display: flex; justify-content: center; padding: 32px 16px; }
-.card {
-  width: 100%;
-  max-width: 760px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
-  padding: 24px;
-}
+/* The page is flat: no frame, no shadow (#53). Only the content width is kept. */
+.card { width: 100%; max-width: 760px; padding: 8px 0 24px; }
 .header { display: flex; gap: 14px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
 .logo {
   flex: none;
@@ -92,10 +85,10 @@ form { display: grid; gap: 14px; }
 .row { display: block; }
 label.field, legend.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-input[type="text"], select {
+input[type="text"], input[type="password"], select {
   width: 100%;
   padding: 12px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--line);
   background: rgba(233, 228, 216, 0.03);
   color: inherit;
@@ -103,13 +96,14 @@ input[type="text"], select {
   min-height: 44px;
 }
 select option { background: var(--panel); color: var(--ink); }
-input[type="text"]:focus, select:focus, button:focus-visible, .segmented input:focus-visible + label {
+input[type="text"]:focus, input[type="password"]:focus, select:focus, button:focus-visible, .segmented input:focus-visible + label {
   outline: none;
   box-shadow: 0 0 0 3px var(--gold-soft);
   border-color: rgba(201, 162, 39, 0.55);
 }
 input[aria-invalid="true"] { border-color: var(--bad); }
-.panel { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+/* Sections are separated by a line, not framed with a rounded outline (#53). */
+.panel { display: grid; gap: 12px; padding: 14px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 .panel[hidden], .type-fields[hidden] { display: none; }
 .type-fields { display: grid; gap: 12px; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -122,7 +116,7 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 .sub-option { margin: 10px 0 0 30px; }
 input.narrow { max-width: 7em; }
 .muted-box { color: var(--muted); }
-.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented label { padding: 11px 18px; min-height: 44px; cursor: pointer; color: var(--muted); font-size: 14px; display: flex; align-items: center; }
 .segmented input:checked + label { background: var(--gold-soft); color: var(--ink); }
@@ -133,7 +127,7 @@ button.primary {
   color: #1a1305;
   border: 0;
   padding: 10px 20px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-weight: 600;
   cursor: pointer;
 }
@@ -143,32 +137,40 @@ button.ghost {
   border: 1px solid var(--line);
   color: var(--muted);
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+/* On a computer the buttons are compact like GitLab's (#50); the rules above stay for phones,
+   where the large touch targets are wanted. */
+@media (min-width: 521px) {
+  button { font-size: 14px; min-height: 32px; }
+  button.primary { padding: 6px 12px; }
+  button.ghost { padding: 6px 12px; }
+  button.small { padding: 4px 10px; }
+}
 .result { margin: 0; font-size: 14px; min-height: 0; }
 .result:empty { display: none; }
 .result.ok { color: var(--good); }
 .result.bad { color: var(--bad); }
-.help { margin-top: 18px; color: var(--muted); font-size: 13px; }
-.help summary { cursor: pointer; }
 .jobs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .jobs-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .jobs-title { font-size: 17px; font-weight: 600; margin: 0; }
 .banner {
   margin: 12px 0 0;
   padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--bad);
+  border-radius: 0;
+  border: 0;
+  border-left: 3px solid var(--bad);
   background: rgba(228, 128, 111, 0.12);
   color: var(--bad);
   font-size: 14px;
 }
 .banner[hidden] { display: none; }
-.job-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
-.job { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 6px; }
-.job-failed { border-color: var(--bad); background: rgba(228, 128, 111, 0.07); }
+.job-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 0; }
+.job { padding: 10px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; display: grid; gap: 6px; }
+/* A failed job gets a red flag on the left; the red status and the reason already say it (#53). */
+.job-failed { border-left: 3px solid var(--bad); padding-left: 10px; }
 .job-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .job-name { font-size: 15px; overflow-wrap: anywhere; min-width: 0; }
 .job-status { font-size: 12px; color: var(--muted); white-space: nowrap; }
@@ -224,8 +226,8 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .howto p, .howto li { font-size: 15px; line-height: 1.5; }
 .howto-steps { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 22px; }
 .howto-part { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
-.howto-code { display: inline-block; padding: 8px 12px; border-radius: 8px; background: rgba(233, 228, 216, 0.06); overflow-wrap: anywhere; font-size: 14px; }
-.howto-legal { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--gold); background: var(--gold-soft); }
+.howto-code { display: inline-block; padding: 8px 12px; border-radius: var(--radius); background: rgba(233, 228, 216, 0.06); overflow-wrap: anywhere; font-size: 14px; }
+.howto-legal { padding: 10px 14px; border-radius: 0; border: 0; border-left: 3px solid var(--gold); background: var(--gold-soft); }
 .ill { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 0 8px; }
 .ill-win { fill: #0d1620; stroke: rgba(233, 228, 216, 0.25); stroke-width: 1.5; }
 .ill-bar { fill: #1a2735; }
@@ -280,9 +282,9 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   gap: 8px;
   min-width: 0;
   padding: 4px 4px 4px 10px;
-  border: 1px solid var(--line);
+  border: 0;
   border-left: 4px solid var(--gold);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--gold-soft);
 }
 .alert-chip.alert-error, .alert-item.alert-error { border-left-color: var(--bad); }
@@ -302,10 +304,11 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .alert-item {
   display: grid;
   gap: 6px;
-  padding: 12px;
-  border: 1px solid var(--line);
+  padding: 10px 0 12px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
   border-left: 4px solid var(--gold);
-  border-radius: 10px;
+  border-radius: 0;
 }
 .alert-unread { background: var(--gold-soft); }
 .alert-target { outline: 2px solid var(--gold); }
@@ -349,8 +352,9 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .js-warning {
   margin: 0 0 14px;
   padding: 10px 12px;
-  border: 1px solid var(--bad);
-  border-radius: 10px;
+  border: 0;
+  border-left: 3px solid var(--bad);
+  border-radius: 0;
   color: var(--bad);
   font-size: 14px;
 }
@@ -391,21 +395,22 @@ body:not([data-role="admin"]) [data-admin-only] { display: none !important; }
   align-items: center;
   gap: 6px 12px;
   margin-top: 18px;
-  padding: 10px 14px;
+  padding: 10px 0;
   min-height: 44px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
   color: var(--muted);
   font-size: 14px;
   text-decoration: none;
 }
-.jobs-mini:hover { border-color: rgba(201, 162, 39, 0.45); }
+.jobs-mini:hover { border-top-color: rgba(201, 162, 39, 0.45); }
 .jobs-mini:hover .jobs-mini-more { text-decoration: underline; }
 .jobs-mini:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--gold-soft); }
 .jobs-mini-label { color: var(--ink); font-weight: 600; }
 .jobs-mini-text { min-width: 0; overflow-wrap: anywhere; }
 .jobs-mini-busy .jobs-mini-text { color: var(--ink); }
-.jobs-mini-has-failed { border-color: rgba(228, 128, 111, 0.5); }
+.jobs-mini-has-failed { border-left: 3px solid var(--bad); padding-left: 10px; }
 .jobs-mini-error .jobs-mini-text { color: var(--bad); }
 .jobs-mini-bar { flex: 1 1 80px; max-width: 160px; height: 6px; accent-color: var(--gold); }
 .jobs-mini-more { margin-left: auto; color: var(--gold); white-space: nowrap; }
