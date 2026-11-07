@@ -92,7 +92,7 @@ form { display: grid; gap: 14px; }
 .row { display: block; }
 label.field, legend.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-input[type="text"], select {
+input[type="text"], input[type="password"], select {
   width: 100%;
   padding: 12px 14px;
   border-radius: 10px;
@@ -103,7 +103,7 @@ input[type="text"], select {
   min-height: 44px;
 }
 select option { background: var(--panel); color: var(--ink); }
-input[type="text"]:focus, select:focus, button:focus-visible, .segmented input:focus-visible + label {
+input[type="text"]:focus, input[type="password"]:focus, select:focus, button:focus-visible, .segmented input:focus-visible + label {
   outline: none;
   box-shadow: 0 0 0 3px var(--gold-soft);
   border-color: rgba(201, 162, 39, 0.55);

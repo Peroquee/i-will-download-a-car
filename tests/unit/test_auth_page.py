@@ -68,6 +68,17 @@ def test_the_style_sheet_hides_by_state_and_role():
     assert 'body:not([data-role="admin"]) [data-admin-only] { display: none !important; }' in CSS
 
 
+def test_the_password_fields_are_styled_like_the_name_fields():
+    """Issue #48: a password input matched none of the rules, so it was smaller and looked
+    different from the text inputs next to it."""
+    rule = re.search(r'input\[type="text"\][^{]*\{[^}]*\}', CSS)
+    assert rule, "the text inputs are styled"
+    assert 'input[type="password"]' in rule.group(0)
+    focus = re.search(r'input\[type="text"\]:focus[^{]*\{', CSS)
+    assert focus, "the text inputs have a focus style"
+    assert 'input[type="password"]:focus' in focus.group(0)
+
+
 def test_the_password_fields_are_password_fields_with_the_right_autocomplete():
     expected = {
         "login-password": "current-password",
