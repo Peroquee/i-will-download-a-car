@@ -19,14 +19,16 @@ The Navigation Opens Every Page
     Click Element    id:nav-input
     Wait Until Element Is Visible    id:form
 
-The VPN Bar Opens The VPN Section
+The VPN Indicator Opens The VPN Section
     Click Element    id:vpn-indicator
     Wait Until Element Is Visible    id:dashboard
     Location Should Contain    /dashboard
     ${url}=    Get Location
     Should Contain    ${url}    /dashboard#vpn
-    ${text}=    Get Text    id:dash-vpn-explain
+    Wait Until Element Is Visible    id:dash-vpn
+    ${text}=    Get Text    id:dash-vpn-now
     Should Not Be Empty    ${text}
+    Element Attribute Value Should Be    id:dash-tab-vpn    aria-current    page
 
 The How To Guide Opens And Closes
     Click Element    id:howto-open

@@ -29,12 +29,22 @@ class Node {
 const byId = {};
 for (const id of scenario.ids) { const n = new Node("div"); n.id = id; byId[id] = n; }
 const viewNodes = (scenario.viewNodes || []).map((v) => { const n = new Node("div"); n.dataset.view = v; return n; });
+const dashViewIds = { "dash-overview": "overview", "dash-jobs-view": "jobs", "dash-vpn-view": "vpn", "dash-alerts-view": "alerts" };
+const dashViews = [];
+for (const [id, view] of Object.entries(dashViewIds)) {
+  if (byId[id]) { byId[id].dataset.dashView = view; dashViews.push(byId[id]); }
+}
+const dashTabs = [];
+for (const id of scenario.ids) {
+  if (id.startsWith("dash-tab-")) { byId[id].dataset.dashTab = id.slice("dash-tab-".length); dashTabs.push(byId[id]); }
+}
 const document = {
   visibilityState: "visible",
   createElement: (tag) => new Node(tag),
   createTextNode: (text) => { const n = new Node("#text"); n._text = text; return n; },
   getElementById: (id) => { if (byId[id]) return byId[id]; for (const n of Object.values(byId)) { const f = find(n, id); if (f) return f; } return null; },
-  querySelectorAll: () => viewNodes,
+  querySelectorAll: (selector) => selector === "[data-dash-view]" ? dashViews
+    : selector === "[data-dash-tab]" ? dashTabs : viewNodes,
   addEventListener() {},
 };
 function find(node, id) {

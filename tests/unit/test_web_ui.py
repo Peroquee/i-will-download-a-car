@@ -410,6 +410,12 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "login.user",  # "Name"
         "accounts.name",
         "role.admin",  # "Administrator"
+        "dash.vpn",
+        "dash.vpn_tab",
+        "dash.internet",
+        "dash.watchdog",
+        "dash.internet_ok",
+        "dash.watchdog_blind",
     }, same
 
 
@@ -1312,7 +1318,27 @@ DASHBOARD = {
                         {"time": "2026-11-02T07:00:00Z", "condition": "down", "paused": True, "reason": "x"}]},
     "disk": {"free_percent": 25, "free_gb": 500, "total_gb": 2000},
 }  # fmt: skip
-ANSWERS = {"/api/alerts": ALERTS, "/api/dashboard": DASHBOARD}
+VPN_STATUS = {
+    "state": "ok", "egress": "ok", "egress_country": "Switzerland",
+    "last_poll": "2026-11-02T10:00:00Z", "since": "2026-11-02T08:00:00Z", "paused": False,
+}  # fmt: skip
+JOBS = {
+    "jobs": [
+        {"id": 3, "type": "magnet", "kind": "movies", "label": "Old", "status": "failed",
+         "error": "no sources for 7 days", "can_retry": True, "dismissed": False,
+         "created_at": "x", "updated_at": "x"},
+        {"id": 4, "type": "magnet", "kind": "movies", "label": "Fine", "status": "done",
+         "error": None, "can_retry": False, "dismissed": False,
+         "created_at": "x", "updated_at": "x"},
+    ],
+    "counts": {"dismissed": 0},
+}  # fmt: skip
+ANSWERS = {
+    "/api/alerts": ALERTS,
+    "/api/dashboard": DASHBOARD,
+    "/api/vpn": VPN_STATUS,
+    "/api/jobs": JOBS,
+}
 
 
 @needs_node
@@ -1375,6 +1401,62 @@ def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
     assert out["nodes"]["nav-dashboard"]["attrs"].get("aria-current") == "page"
     assert "aria-current" not in out["nodes"]["nav-input"]["attrs"]
     assert out["nodes"]["dash-alerts-ack"]["hidden"] is False
+    assert out["nodes"]["dash-tab-alerts"]["attrs"].get("aria-current") == "page"
+    assert out["nodes"]["status-internet-state"]["text"] == "Online"
+    assert "state-ok" in out["nodes"]["status-internet"]["cls"]
+    assert out["nodes"]["status-vpn-state"]["text"] == "VPN running"
+    assert "state-ok" in out["nodes"]["status-vpn"]["cls"]
+    assert out["nodes"]["status-watchdog-state"]["text"] == "Watching"
+    assert "state-ok" in out["nodes"]["status-watchdog"]["cls"]
+    assert "Big Film" in out["nodes"]["dash-next-job"]["text"]
+    assert "1 h 2 min" in out["nodes"]["dash-next-job"]["text"]
+    assert out["nodes"]["dash-job-count"]["text"] == "2 jobs"
+    assert out["nodes"]["dash-total-eta"]["text"] == "1 h 2 min"
+    assert "2.0 KB/s" in out["nodes"]["dash-total-speed"]["text"]
+    assert "2 unread" in out["nodes"]["dash-alert-counts"]["text"]
+    assert "1Errors" in out["nodes"]["dash-alert-counts"]["text"]
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("hash_", "shown", "tab"),
+    [
+        ("", "dash-overview", "dash-tab-overview"),
+        ("#jobs", "dash-jobs-view", "dash-tab-jobs"),
+        ("#vpn", "dash-vpn-view", "dash-tab-vpn"),
+        ("#alerts", "dash-alerts-view", "dash-tab-alerts"),
+    ],
+)
+def test_the_dashboard_tabs_show_one_view(hash_, shown, tab):
+    out = smoke("/dashboard", hash_, ANSWERS)
+    for node in ("dash-overview", "dash-jobs-view", "dash-vpn-view", "dash-alerts-view"):
+        assert out["nodes"][node]["hidden"] is (node != shown)
+    assert out["nodes"][tab]["attrs"].get("aria-current") == "page"
+
+
+@needs_node
+def test_the_status_cards_distinguish_internet_vpn_and_watchdog():
+    vpn = {"state": "ok", "egress": "mismatch", "last_poll": None}
+    out = smoke("/dashboard", "", {**ANSWERS, "/api/vpn": vpn})
+    assert out["nodes"]["status-internet-state"]["text"] == "Not safe"
+    assert "state-bad" in out["nodes"]["status-internet"]["cls"]
+    assert "not going through the VPN" in out["nodes"]["status-vpn-state"]["text"]
+    assert "state-bad" in out["nodes"]["status-vpn"]["cls"]
+    assert out["nodes"]["status-watchdog-state"]["text"] == "Not answering"
+    assert "state-bad" in out["nodes"]["status-watchdog"]["cls"]
+
+
+@needs_node
+def test_the_alert_summary_counts_unread_alerts_by_severity():
+    out = smoke("/dashboard", "", ANSWERS)
+    chips = out["nodes"]["dash-alert-counts"]["children"]
+    assert ["alert-count error" in chip["cls"] for chip in chips].count(True) == 1
+    assert ["alert-count warning" in chip["cls"] for chip in chips].count(True) == 1
+    text = out["nodes"]["dash-alert-counts"]["text"]
+    assert "1Errors" in text
+    assert "1Warnings" in text
+    assert "0Notices" in text
+    assert "2 unread" in text
 
 
 @needs_node

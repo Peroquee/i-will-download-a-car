@@ -286,6 +286,50 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .alert-strip-tools { display: flex; align-items: center; gap: 12px; }
 .alert-more { color: var(--muted); }
 .dashboard { margin-top: 8px; }
+
+/* The dashboard has tabs for overview, jobs, VPN details and the alert log (#62). */
+.dash-tabs { display: flex; gap: 4px; margin: 4px 0 18px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.dash-tab { flex: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; font-size: 14px; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; }
+.dash-tab:hover { color: var(--ink); }
+.dash-tab[aria-current="page"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--gold); }
+.dash-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--gold-soft); }
+/* Three independent states in one calm rail; no cards, no shadows. */
+.dash-status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 0 20px; }
+.status-card { display: flex; gap: 12px; align-items: flex-start; min-width: 0; padding: 16px; border-left: 1px solid var(--line); }
+.status-card:first-child { border-left: 0; padding-left: 0; }
+.status-dot { flex: none; width: 11px; height: 11px; margin-top: 6px; border-radius: 50%; background: var(--muted); }
+.status-card.state-ok .status-dot { background: var(--good); }
+.status-card.state-warn .status-dot { background: var(--gold); }
+.status-card.state-bad .status-dot { background: var(--danger-bg); }
+.status-body { min-width: 0; }
+.status-label { display: block; font-size: 12px; color: var(--muted); }
+.status-state { display: block; font-size: 21px; line-height: 1.2; font-weight: 650; overflow-wrap: anywhere; }
+.status-detail { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.dash-summary { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+.summary-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.summary-link { font-size: 13px; color: var(--gold); text-decoration: none; }
+.summary-link:hover { text-decoration: underline; }
+.alert-counts { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 10px; min-height: 22px; }
+.alert-count { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+.alert-count strong { font-size: 16px; color: var(--ink); }
+.alert-count .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.alert-count.error .dot { background: var(--bad); }
+.alert-count.warning .dot { background: var(--gold); }
+.alert-count.info .dot { background: var(--good); }
+.summary-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+.summary-stat { min-width: 0; }
+.stat-label { display: block; font-size: 12px; color: var(--muted); }
+.stat-value { display: block; margin-top: 2px; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .dash-status { grid-template-columns: 1fr; }
+  .status-card { border-left: 0; border-top: 1px solid var(--line); padding: 14px 0; }
+  .status-card:first-child { border-top: 0; padding-top: 0; }
+  .summary-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .dash-tab { padding: 0 9px; font-size: 13px; }
+  .status-state { font-size: 19px; }
+}
 .dash-vpn-now { margin: 0 0 6px; font-weight: 600; }
 .dash-vpn-now.vpn-ok { color: var(--good); }
 .dash-vpn-now.vpn-down, .dash-vpn-now.vpn-mismatch, .dash-vpn-now.vpn-blind { color: var(--bad); }

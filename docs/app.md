@@ -570,7 +570,7 @@ builds a path from.
 * **Navigation:** *Eingabe | Dashboard | Abonnements | Anleitung* (Input | Dashboard |
   Subscriptions | How to), 44 px high, the current one marked with `aria-current`.
   *Subscriptions* is the section of the input page (`/#subscriptions`).
-* **The VPN indicator is a link** (the dot, and the problem banner) to `/dashboard#vpn`: the explanation of the state and
+* **The VPN indicator is a link** (the dot, and the problem banner) to `/dashboard#vpn`: the VPN tab with the state and
   the history of changes, scrolled into view.
 * **"The watchdog does not answer" in the first minute** after the app started is reported as
   `starting` by `GET /api/vpn` (during an install or update the containers restart one after the

@@ -237,6 +237,11 @@ def the_dashboard_tab_opens_the_dashboard(ctx):
     expect(page).to_have_url(re.compile(r"/dashboard$"))
     expect(page.locator("#dashboard")).to_be_visible()
     expect(page.locator("#nav-dashboard")).to_have_attribute("aria-current", "page")
+    expect(page.locator("#dash-tab-overview")).to_have_attribute("aria-current", "page")
+    expect(page.locator("#status-internet-state")).not_to_be_empty(timeout=15000)
+    page.click("#dash-tab-jobs")
+    expect(page).to_have_url(re.compile(r"/dashboard#jobs$"))
+    expect(page.locator("#dash-jobs-view")).to_be_visible()
     expect(page.locator("#dash-recent-list li, #dash-active-list li").first).to_be_visible(
         timeout=15000
     )
@@ -248,7 +253,8 @@ def the_vpn_bar_opens_the_vpn_part_from_the_dashboard(ctx):
     page.click("#vpn-indicator")
     expect(page).to_have_url(re.compile(r"/dashboard#vpn$"))
     expect(page.locator("#dash-vpn")).to_be_in_viewport()
-    expect(page.locator("#dash-vpn-explain")).not_to_be_empty()
+    expect(page.locator("#dash-vpn-now")).not_to_be_empty()
+    expect(page.locator("#dash-tab-vpn")).to_have_attribute("aria-current", "page")
 
 
 @check
@@ -392,8 +398,11 @@ def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
     assert page.request.get(BASE + "/api/jobs").json()["jobs"] == []
     page.goto(BASE + "/dashboard")
     expect(page.locator("#dashboard")).to_be_visible()
-    for hidden in ("#alerts", "#dash-disk", "#dash-vpn-list"):
-        expect(page.locator(hidden)).to_be_hidden()
+    expect(page.locator("#dash-tab-alerts")).to_be_hidden()
+    page.click("#dash-tab-vpn")
+    expect(page.locator("#dash-vpn")).to_be_visible()
+    expect(page.locator("#dash-disk")).to_be_hidden()
+    expect(page.locator("#dash-vpn-list")).to_be_hidden()
     expect(page.locator("#dash-error")).to_have_text("")
     page.goto(BASE + "/accounts")
     expect(page).to_have_url(BASE + "/")

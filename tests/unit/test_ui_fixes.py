@@ -350,7 +350,7 @@ def test_without_a_watchdog_configured_it_stays_unknown(client):
 # --- the pieces in a fake DOM (needs node) ---------------------------------------------------
 
 
-def smoke(path: str, hash_: str, dashboard: dict | None = None) -> dict:
+def smoke(path: str, hash_: str, dashboard: dict | None = None, vpn: dict | None = None) -> dict:
     ids = sorted(set(re.findall(r'\bid="([\w-]+)"', HTML)) - {"i18n"})
     scenario = {
         "ids": ids,
@@ -366,6 +366,14 @@ def smoke(path: str, hash_: str, dashboard: dict | None = None) -> dict:
                 "disk": None,
                 "deploy": None,
             },
+            "/api/vpn": vpn
+            or {
+                "state": "down",
+                "egress": "unknown",
+                "paused": True,
+                "last_poll": "2026-11-02T10:00:00Z",
+            },
+            "/api/jobs": {"jobs": [], "counts": {}},
         },
         "click": None,
     }
@@ -388,12 +396,13 @@ def smoke(path: str, hash_: str, dashboard: dict | None = None) -> dict:
 
 
 @needs_node
-def test_opening_dashboard_vpn_brings_the_vpn_part_into_view_and_explains_the_state():
+def test_opening_dashboard_vpn_brings_the_vpn_part_into_view():
     out = smoke("/dashboard", "#vpn")
     section = out["nodes"]["dash-vpn"]
     assert section["scrolled"] is True
     assert "alert-target" in section["cls"]
-    assert out["nodes"]["dash-vpn-explain"]["text"], "an explanation is shown for the state"
+    assert out["nodes"]["dash-vpn-now"]["text"], "the current VPN state is shown"
+    assert out["nodes"]["dash-tab-vpn"]["attrs"].get("aria-current") == "page"
     assert out["nodes"]["nav-dashboard"]["attrs"].get("aria-current") == "page"
 
 
@@ -406,16 +415,18 @@ def test_the_dashboard_without_the_hash_does_not_scroll_to_the_vpn_part():
 
 @needs_node
 @pytest.mark.parametrize(
-    ("state", "contains"),
-    [("ok", "VPN is running"), ("down", "VPN"), ("blind", "watchdog"), ("starting", "watchdog")],
-)
-def test_every_vpn_state_gets_an_explanation(state, contains):
-    dashboard = {
-        "active": [], "recent": [], "disk": None, "deploy": None,
-        "vpn": {"current": {"state": state}, "history": []},
-    }  # fmt: skip
-    out = smoke("/dashboard", "#vpn", dashboard)
-    assert contains.lower() in out["nodes"]["dash-vpn-explain"]["text"].lower()
+    ("state", "tone"),
+    [("ok", "state-ok"), ("down", "state-bad"), ("blind", "state-bad"),
+     ("starting", "state-warn"), ("unknown", "state-warn")],
+)  # fmt: skip
+def test_the_vpn_status_card_uses_the_state_colour(state, tone):
+    vpn = {
+        "state": state,
+        "last_poll": None if state in ("starting", "unknown") else "2026-11-02T10:00:00Z",
+        "egress": "ok",
+    }
+    out = smoke("/dashboard", "", vpn=vpn)
+    assert tone in out["nodes"]["status-vpn"]["cls"]
 
 
 @needs_node

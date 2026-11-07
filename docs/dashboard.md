@@ -1,6 +1,6 @@
 # Dashboard and alerts (issue #38)
 
-Two things on top of the input page: a **strip of alerts** under the VPN bar, and a page,
+Two things on top of the input page: a **strip of alerts** under the problem banner, and a page,
 `/dashboard`, that shows what is going on. Both are the same web page (`index.html`); the script
 shows the view that matches the address. A link in the page header switches between them.
 
@@ -18,16 +18,52 @@ unread. It polls every 5 seconds with the VPN bar (not while the tab is hidden).
 
 ## The dashboard
 
-| Part | What it shows |
-|---|---|
-| Running and waiting | every queued, downloading or organizing job of every kind (torrent, YouTube, podcast) with percent, downloaded of total, speed and remaining time. Refreshed every 3 seconds while the page is open. |
-| Recently finished or failed | the 20 newest, with the reason for a failure and the same **Try again** as the job list (`POST /api/jobs/{id}/retry`). A failed job also has **Dismiss** (*Ausblenden*), and there is **Dismiss all failed** above the list. A dismissed job no longer counts in the red "failed: N" on the input page and leaves this list; **Show dismissed (N)** brings it back, with **Show again** per job. Dismissing is not deleting: the job stays and can still be retried, and a retry clears the dismissal (a job that fails again shows again). It is per account, also for an admin: a user dismisses only their own jobs, an admin any, and nobody else's view changes (`POST/DELETE /api/jobs/{id}/dismiss`, `POST /api/jobs/dismiss-failed`). |
-| VPN and watchdog | the current state and the history of changes (time, state, "torrents paused"). |
-| Storage | free space on the media drive. |
-| Alerts | the whole log (newest first, 50), each with *what happened*, *what the app did* and *what you can do*, in German or English; unread ones are highlighted and can be marked as read. |
+`/dashboard` has four tabs (#62): **Overview**, **Jobs**, **VPN** and **Alerts**. The address
+selects one (`/dashboard#jobs`, `#vpn`, `#alerts`, `#alert-12`); the VPN indicator links straight
+to the VPN tab, and an alert link opens the Alerts tab.
 
-Numbers that are not known yet are left out (a queued job has no speed, a magnet link has no
-size until its file list is loaded). qBittorrent's "infinite" remaining time is left out as well.
+### Overview
+
+- **Three status cards** side by side, each with a coloured dot and a large state:
+  - **Internet** — currently taken from the egress check: `ok` is *Online*, `mismatch` is
+    *Not safe*, anything else is *Unknown*. Issue #63 adds a separate internet-reachability
+    signal without changing the VPN/watchdog code.
+  - **VPN** — `ok`, `down`, `blind`, `starting` or `unknown` from the watchdog.
+  - **Watchdog** — *Watching*, *Blind*, *Not answering* or *Starting*, with when it last polled;
+    an unreachable watchdog is visibly different from an offline internet line.
+- **Alerts** summary (admin only): one little dot per severity with the unread count
+  (error/warning/notice) and the unread total; it links to the Alerts tab.
+- **Jobs** summary: the job expected to finish first (label and remaining time), the number of
+  active jobs, the longest remaining time and the sum of the current speeds; it links to Jobs.
+- The status rail has a fixed shape: a normal page load only changes its colours, never its
+  geometry, so the page does not shift while the VPN answer arrives.
+
+### Jobs
+
+- **Running and waiting:** every queued, downloading or organizing job of every kind (torrent,
+  YouTube, podcast) with percent, downloaded of total, speed and remaining time.
+- **Whole back catalogue** (#45): the podcast runs described below.
+- **Finished downloads:** the 10 newest done/failed jobs by default; **Show 50** expands to the
+  newest 50. A failed job shows its reason and the same **Try again** as the job list
+  (`POST /api/jobs/{id}/retry`). A failed job also has **Dismiss** (*Ausblenden*), and **Dismiss
+  all failed** sits above the list. A dismissed job no longer counts in the red "failed: N" on
+  the input page and leaves this list; **Show dismissed (N)** brings it back, with **Show again**
+  per job. Dismissing is not deleting: the job stays and can still be retried, and a retry clears
+  the dismissal (a job that fails again shows again). It is per account, also for an admin: a
+  user dismisses only their own jobs, an admin any, and nobody else's view changes
+  (`POST/DELETE /api/jobs/{id}/dismiss`, `POST /api/jobs/dismiss-failed`).
+- Numbers that are not known yet are left out (a queued job has no speed, a magnet link has no
+  size until its file list is loaded). qBittorrent's "infinite" remaining time is left out too.
+
+### VPN
+
+The current VPN state, the history of changes (time, state, "torrents paused"), the free space on
+the media drive and the automatic-update status (the last two are the owner's only).
+
+### Alerts
+
+The whole log (newest first, 50), each with *what happened*, *what the app did* and *what you can
+do*, in German or English; unread ones are highlighted and can be marked as read.
 
 ## Where alerts come from
 

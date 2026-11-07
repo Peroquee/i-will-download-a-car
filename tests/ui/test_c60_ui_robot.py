@@ -88,12 +88,24 @@ class NoDownload:
 
 class OkWatchdog:
     def fetch_status(self):
-        return {"state": "ok", "egress": "ok", "egress_country": "Switzerland"}
+        return {
+            "state": "ok",
+            "egress": "ok",
+            "egress_country": "Switzerland",
+            "last_poll": "2026-11-07T10:00:00Z",
+            "since": "2026-11-07T09:00:00Z",
+            "paused": False,
+        }
 
 
 class DownWatchdog:
     def fetch_status(self):
-        return {"state": "down", "paused": True, "reason": "seeded by the UI test"}
+        return {
+            "state": "down",
+            "paused": True,
+            "reason": "seeded by the UI test",
+            "last_poll": "2026-11-07T10:00:00Z",
+        }
 
 
 RSS = b"""<?xml version="1.0"?>
@@ -171,6 +183,14 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
     accounts.follow(db, "channel", channel.id, alice.id)
     podcast, _ = add_podcast_subscription(db, "https://example.org/seed.xml", "Seeded Podcast")
     accounts.follow(db, "podcast", podcast.id, admin.id)
+    for number in range(1, 13):
+        done, _ = job_store.submit_job(
+            db,
+            "youtube",
+            f"seed-done-{number}",
+            json.dumps({"type": "youtube", "channel": "Seeder", "title": f"Done {number}"}),
+        )
+        job_store.transition(db, done.id, "done", expected=("queued",))
     seeded_video, _ = job_store.submit_job(
         db,
         "youtube",

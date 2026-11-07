@@ -16,8 +16,13 @@
     var alertsFailed = false;
     var dashData = null;         // last answer of /api/dashboard
     var dashFailed = false;
+    var vpnStatus = null;        // last answer of /api/vpn, for the overview cards
+    var vpnFailed = false;
+    var jobsData = null;         // last answer of /api/jobs?limit=50, for finished downloads
+    var jobsFailed = false;
     var extraAlert = null;       // an older alert named by the address (#alert-12)
     var showDismissed = false;   // list the failed jobs this account dismissed as well
+    var finishedLimit = 10;      // finished downloads shown before "Show 50"
     var busy = {};               // "ack:12", "ack-all", "retry:7", "dismiss:7" while a request runs
 
     function el(tag, className, text) {
@@ -87,7 +92,10 @@
         alertsFailed = false;
       }).catch(function () { alertsFailed = true; }).then(function () {
         renderStrip();
-        if (view === "dashboard") renderAlertLog();
+        if (view === "dashboard") {
+          renderAlertSummary();
+          renderAlertLog();
+        }
       });
     }
 
@@ -168,17 +176,42 @@
       return button;
     }
 
+    function finishedJobs() {
+      var jobs = jobsData ? jobsData.jobs.filter(function (job) {
+        return job.status === "done" || job.status === "failed";
+      }) : [];
+      if (!showDismissed) {
+        jobs = jobs.filter(function (job) { return !job.dismissed; });
+      }
+      return jobs;
+    }
+
+    function renderFinished() {
+      var list = $("dash-recent-list");
+      list.textContent = "";
+      var jobs = finishedJobs();
+      jobs.slice(0, finishedLimit).forEach(function (job) {
+        list.appendChild(recentRow(job));
+      });
+      $("dash-recent-empty").hidden = jobs.length > 0 || !jobsData;
+      renderRecentTools();
+    }
+
     /* The two buttons above the list: dismiss every failed job, show or hide the dismissed ones. */
     function renderRecentTools() {
-      var failed = dashData.recent.some(function (job) { return job.status === "failed" && !job.dismissed; });
+      var jobs = finishedJobs();
+      var failed = jobs.some(function (job) { return job.status === "failed" && !job.dismissed; });
       var all = $("dash-dismiss-all");
       all.hidden = !failed;
       all.disabled = !!busy["dismiss-all"];
-      var count = dashData.dismissed || 0;
+      var count = jobsData ? jobsData.counts.dismissed || 0 : 0;
       var toggle = $("dash-show-dismissed");
       toggle.hidden = count === 0 && !showDismissed;
       toggle.textContent = t(showDismissed ? "dash.hide_dismissed" : "dash.show_dismissed", { n: count });
       toggle.setAttribute("aria-pressed", showDismissed ? "true" : "false");
+      var limit = $("dash-limit");
+      limit.hidden = jobs.length <= 10;
+      limit.textContent = t(finishedLimit === 10 ? "dash.show_50" : "dash.show_10");
     }
 
     function dismissAll() {
@@ -189,8 +222,129 @@
 
     function toggleDismissed() {
       showDismissed = !showDismissed;
-      refreshDashboard();
+      renderFinished();
     }
+
+    function toggleLimit() {
+      finishedLimit = finishedLimit === 10 ? 50 : 10;
+      renderFinished();
+    }
+
+    /* ------------------------------------------------------------ the overview */
+
+    function setStatusCard(cardId, stateId, detailId, tone, state, detail) {
+      $(cardId).className = "status-card state-" + tone;
+      $(stateId).textContent = state;
+      $(detailId).textContent = detail || "";
+    }
+
+    function renderStatus() {
+      if (vpnFailed || !vpnStatus) {
+        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
+          "warn", t("dash.internet_unknown"), "");
+        setStatusCard("status-vpn", "status-vpn-state", "status-vpn-detail",
+          "warn", t("vpn.unknown"), "");
+        setStatusCard("status-watchdog", "status-watchdog-state", "status-watchdog-detail",
+          "bad", t("dash.watchdog_unreachable"), "");
+        return;
+      }
+      // Internet access from the egress check until the backend can answer it separately (#63).
+      var egress = vpnStatus.egress;
+      if (egress === "ok") {
+        var internetDetail = vpnStatus.egress_country
+          ? t("vpn.country", { country: vpnStatus.egress_country })
+          : vpnStatus.egress_checked
+            ? t("dash.checked", { when: ctx.timeText(vpnStatus.egress_checked) || vpnStatus.egress_checked })
+            : "";
+        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
+          "ok", t("dash.internet_ok"), internetDetail);
+      } else if (egress === "mismatch") {
+        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
+          "bad", t("dash.internet_leak"), t("vpn.d.mismatch"));
+      } else {
+        var checked = vpnStatus.egress_checked
+          ? t("dash.checked", { when: ctx.timeText(vpnStatus.egress_checked) || vpnStatus.egress_checked })
+          : "";
+        setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
+          "warn", t("dash.internet_unknown"), checked);
+      }
+
+      var info = L.vpnView(vpnStatus);
+      var vpnTone = info.view === "ok" ? "ok"
+        : (info.view === "down" || info.view === "mismatch" || info.view === "blind") ? "bad" : "warn";
+      var vpnParts = [];
+      if (["down", "mismatch", "blind", "starting", "unknown"].indexOf(info.view) >= 0 && has("vpn.d." + info.view)) {
+        vpnParts.push(t("vpn.d." + info.view));
+      }
+      if (info.paused) vpnParts.push(t("vpn.paused"));
+      if (info.since && info.view !== "unknown") {
+        var since = ctx.timeText(info.since);
+        if (since) vpnParts.push(t("dash.since", { when: since }));
+      }
+      if (info.country) vpnParts.push(t("vpn.country", { country: info.country }));
+      setStatusCard("status-vpn", "status-vpn-state", "status-vpn-detail",
+        vpnTone, t("vpn." + info.view), vpnParts.join(" · "));
+
+      var watchdogTone = "ok";
+      var watchdogState = t("dash.watchdog_ok");
+      var watchdogDetail = vpnStatus.last_poll
+        ? t("dash.checked", { when: ctx.timeText(vpnStatus.last_poll) || vpnStatus.last_poll })
+        : "";
+      if (vpnStatus.state === "starting") {
+        watchdogTone = "warn";
+        watchdogState = t("dash.watchdog_starting");
+        watchdogDetail = has("vpn.d.starting") ? t("vpn.d.starting") : "";
+      } else if (!vpnStatus.last_poll || vpnStatus.state === "unknown") {
+        watchdogTone = "bad";
+        watchdogState = t("dash.watchdog_unreachable");
+        watchdogDetail = has("vpn.d.unknown") ? t("vpn.d.unknown") : "";
+      } else if (vpnStatus.state === "blind") {
+        watchdogTone = "bad";
+        watchdogState = t("dash.watchdog_blind");
+        watchdogDetail = has("vpn.d.blind") ? t("vpn.d.blind") : "";
+      }
+      setStatusCard("status-watchdog", "status-watchdog-state", "status-watchdog-detail",
+        watchdogTone, watchdogState, watchdogDetail);
+    }
+
+    function renderJobsSummary() {
+      var active = dashData ? dashData.active : [];
+      var downloading = active.filter(function (job) { return job.status === "downloading"; });
+      var timed = downloading.filter(function (job) { return L.formatEta(job.eta) !== null; });
+      var next = timed.slice().sort(function (a, b) { return a.eta - b.eta; })[0];
+      $("dash-next-job").textContent = next
+        ? next.label + " · " + (L.formatEta(next.eta) || "")
+        : t("dash.none");
+      $("dash-job-count").textContent = t("dash.job_count", { n: active.length });
+      var maxEta = timed.reduce(function (max, job) { return job.eta > max ? job.eta : max; }, 0);
+      $("dash-total-eta").textContent = maxEta ? (L.formatEta(maxEta) || "—") : "—";
+      var speed = downloading.reduce(function (sum, job) {
+        return typeof job.speed === "number" ? sum + job.speed : sum;
+      }, 0);
+      $("dash-total-speed").textContent = speed ? (L.formatSpeed(speed, lang()) || "—") : "—";
+    }
+
+    function renderAlertSummary() {
+      var box = $("dash-alert-counts");
+      if (!box) return;
+      box.textContent = "";
+      if (!alertsData) return;
+      var counts = { error: 0, warning: 0, info: 0 };
+      alertsData.alerts.forEach(function (alert) {
+        if (!alert.acknowledged && counts[alert.severity] != null) counts[alert.severity] += 1;
+      });
+      [["error", "dash.errors"], ["warning", "dash.warnings"], ["info", "dash.notices"]].forEach(function (pair) {
+        var chip = el("span", "alert-count " + pair[0]);
+        chip.appendChild(el("span", "dot"));
+        chip.appendChild(el("strong", null, String(counts[pair[0]])));
+        chip.appendChild(el("span", null, t(pair[1])));
+        chip.setAttribute("aria-label", t(pair[1]) + ": " + counts[pair[0]]);
+        box.appendChild(chip);
+      });
+      var total = alertsData.unread || 0;
+      box.appendChild(el("span", "alert-count", total ? t("dash.unread", { n: total }) : t("dash.no_alerts")));
+    }
+
 
     function recentRow(job) {
       var li = el("li", "job" + (job.status === "failed" ? " job-failed" : job.status === "done" ? " job-done" : ""));
@@ -273,8 +427,6 @@
       var text = t("vpn." + info.view);
       if (info.since) text += " · " + t("dash.since", { when: ctx.timeText(info.since) || info.since });
       now.textContent = text;
-      var explain = "vpn.d." + info.view;
-      $("dash-vpn-explain").textContent = info.view === "ok" ? t("dash.vpn_explain_ok") : has(explain) ? t(explain) : "";
       var list = $("dash-vpn-list");
       list.textContent = "";
       var history = vpn.history || [];   // a user's answer carries none
@@ -303,25 +455,31 @@
     }
 
     function renderDashboard() {
-      $("dash-error").textContent = dashFailed ? t("dash.load_error") : "";
-      if (!dashData) return;
+      $("dash-error").textContent = dashFailed || jobsFailed ? t("dash.load_error") : "";
+      renderStatus();
+      renderJobsSummary();
+      renderAlertSummary();
       var active = $("dash-active-list");
       active.textContent = "";
-      dashData.active.forEach(function (job) { active.appendChild(activeRow(job)); });
-      $("dash-active-empty").hidden = dashData.active.length > 0;
-      var recent = $("dash-recent-list");
-      recent.textContent = "";
-      dashData.recent.forEach(function (job) { recent.appendChild(recentRow(job)); });
-      $("dash-recent-empty").hidden = dashData.recent.length > 0;
-      renderRecentTools();
-      renderBacklogs(dashData.backlogs);
-      renderVpn(dashData.vpn);
+      if (dashData) {
+        dashData.active.forEach(function (job) { active.appendChild(activeRow(job)); });
+        renderBacklogs(dashData.backlogs);
+        renderVpn(dashData.vpn);
+        renderDeploy(dashData.deploy);
+        var disk = dashData.disk;
+        $("dash-disk").textContent = disk
+          ? t("dash.disk", { percent: disk.free_percent, free: L.formatBytes(disk.free_gb * 1e9, lang()), total: L.formatBytes(disk.total_gb * 1e9, lang()) })
+          : t("dash.disk_unknown");
+      }
+      $("dash-active-empty").hidden = !dashData || dashData.active.length > 0;
+      if (jobsData) {
+        renderFinished();
+      } else {
+        $("dash-recent-list").textContent = "";
+        $("dash-recent-empty").hidden = true;
+        renderRecentTools();
+      }
       focusVpn();
-      renderDeploy(dashData.deploy);
-      var disk = dashData.disk;
-      $("dash-disk").textContent = disk
-        ? t("dash.disk", { percent: disk.free_percent, free: L.formatBytes(disk.free_gb * 1e9, lang()), total: L.formatBytes(disk.total_gb * 1e9, lang()) })
-        : t("dash.disk_unknown");
     }
 
     function alertItem(alert, target) {
@@ -381,10 +539,19 @@
 
     function refreshDashboard() {
       if (view !== "dashboard") return Promise.resolve();
-      return ctx.getJson("/api/dashboard" + (showDismissed ? "?dismissed=1" : "")).then(function (data) {
+      var dashboard = ctx.getJson("/api/dashboard").then(function (data) {
         dashData = data;
         dashFailed = false;
-      }).catch(function () { dashFailed = true; }).then(renderDashboard);
+      }).catch(function () { dashFailed = true; });
+      var vpn = ctx.getJson("/api/vpn").then(function (data) {
+        vpnStatus = data;
+        vpnFailed = false;
+      }).catch(function () { vpnFailed = true; });
+      var jobs = ctx.getJson("/api/jobs?limit=50").then(function (data) {
+        jobsData = data;
+        jobsFailed = false;
+      }).catch(function () { jobsFailed = true; });
+      return Promise.all([dashboard, vpn, jobs]).then(renderDashboard);
     }
 
     /* ------------------------------------------------------------ the page */
@@ -392,6 +559,28 @@
     function setCurrent(node, on) {
       if (on) node.setAttribute("aria-current", "page");
       else node.removeAttribute("aria-current");
+    }
+
+    /* The dashboard's own tabs: overview, jobs, VPN and alerts (#62). */
+    function currentDashTab() {
+      var hash = root.location.hash || "";
+      if (hash.indexOf("#alert-") === 0 || hash === "#alerts") {
+        return ctx.isAdmin && !ctx.isAdmin() ? "overview" : "alerts";
+      }
+      if (hash === "#jobs") return "jobs";
+      if (hash === "#vpn") return "vpn";
+      return "overview";
+    }
+
+    function applyDashTab() {
+      var tab = currentDashTab();
+      document.querySelectorAll("[data-dash-view]").forEach(function (node) {
+        node.hidden = node.dataset.dashView !== tab;
+      });
+      document.querySelectorAll("[data-dash-tab]").forEach(function (node) {
+        setCurrent(node, node.dataset.dashTab === tab);
+      });
+      return tab;
     }
 
     /* The tab of the page you are on. */
@@ -402,9 +591,11 @@
       setCurrent($("nav-accounts"), view === "accounts");
     }
 
-    /* The VPN bar links to /dashboard#vpn: bring that part into view and frame it. */
+    /* The VPN indicator links to /dashboard#vpn: bring that part into view and frame it once. */
+    var focusedVpn = false;
     function focusVpn() {
-      if (view !== "dashboard" || root.location.hash !== "#vpn") return;
+      if (view !== "dashboard" || root.location.hash !== "#vpn" || focusedVpn) return;
+      focusedVpn = true;
       var section = $("dash-vpn");
       section.classList.add("alert-target");
       section.scrollIntoView({ block: "start" });
@@ -419,6 +610,7 @@
 
     function render() {
       applyView();
+      if (view === "dashboard") applyDashTab();
       renderStrip();
       if (view === "dashboard") {
         renderDashboard();
@@ -431,6 +623,7 @@
       $("dash-alerts-ack").addEventListener("click", acknowledgeAll);
       $("dash-dismiss-all").addEventListener("click", dismissAll);
       $("dash-show-dismissed").addEventListener("click", toggleDismissed);
+      $("dash-limit").addEventListener("click", toggleLimit);
       root.addEventListener("hashchange", function () {
         focused = null;
         /* Input and subscriptions are one address with two hashes: switch without a reload. */
@@ -441,11 +634,14 @@
           if (root.scrollTo) root.scrollTo(0, 0);
         }
         renderNav();
+        applyDashTab();
+        focusedVpn = false;
         $("dash-vpn").classList.remove("alert-target");
         focusVpn();
         renderAlertLog();
       });
       applyView();
+      applyDashTab();
       refreshAlerts();
       if (view !== "dashboard") return;
       focusVpn();
