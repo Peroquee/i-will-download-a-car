@@ -147,6 +147,14 @@ button.ghost {
   cursor: pointer;
 }
 button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+/* On a computer the buttons are compact like GitLab's (#50); the rules above stay for phones,
+   where the large touch targets are wanted. */
+@media (min-width: 521px) {
+  button { font-size: 14px; min-height: 32px; }
+  button.primary { padding: 6px 12px; }
+  button.ghost { padding: 6px 12px; }
+  button.small { padding: 4px 10px; }
+}
 .result { margin: 0; font-size: 14px; min-height: 0; }
 .result:empty { display: none; }
 .result.ok { color: var(--good); }

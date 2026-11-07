@@ -258,6 +258,17 @@ def test_the_page_is_mobile_friendly_and_declares_utf_8():
     assert "min-height: 44px" in CSS, "touch targets"
 
 
+def test_buttons_are_compact_on_a_computer_and_stay_large_on_a_phone():
+    """Issue #50: desktop buttons about 32 px high like GitLab's; the 44 px touch targets stay
+    for phones."""
+    assert re.search(r"\nbutton \{ font: inherit; min-height: 44px; \}", CSS), "phone size"
+    desktop = re.search(r"@media \(min-width: 521px\) \{(.*?)\n\}", CSS, re.S)
+    assert desktop, "desktop button rules"
+    block = desktop.group(1)
+    assert re.search(r"button \{[^}]*min-height: 32px", block, re.S)
+    assert re.search(r"button\.primary \{[^}]*padding: 6px 12px", block, re.S)
+
+
 def test_every_input_has_a_label():
     ids = re.findall(r'<(?:input|select)[^>]*\bid="([\w-]+)"', HTML)
     for input_id in ids:
