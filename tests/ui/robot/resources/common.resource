@@ -74,7 +74,9 @@ Open Input Page
 Log Out
     Click Element    id:account-open
     Wait Until Element Is Visible    id:account
-    Click Button    id:account-logout
+    Wait Until Element Is Visible    id:account-logout
+    # The click starts a reload, so the driver may lose the node while the navigation runs.
+    Run Keyword And Ignore Error    Click Button    id:account-logout
     Wait Until Element Is Visible    id:login-form
 
 Select Mode

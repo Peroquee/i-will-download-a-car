@@ -2,7 +2,7 @@
 
     YTP_UI_TESTS=1 pytest tests/ui/test_c60_ui_robot.py
 
-This is a system test without Docker: the app runs in this process on a free localhost port
+The app runs in this process on a free localhost port
 (with stand-ins for YouTube and downloads, and a fake qBittorrent for the magnet form), and
 Robot drives Debian Chromium through chromedriver. The `test:ui` job installs both; locally
 they must be on PATH.
@@ -41,7 +41,6 @@ from ytp.safefetch import Fetched
 from ytp.youtube import VideoInfo
 
 pytestmark = [
-    pytest.mark.system,
     pytest.mark.slow,
     pytest.mark.real_auth,  # the browser must see the real sign-in, not the test admin
     pytest.mark.skipif(
@@ -92,6 +91,11 @@ class OkWatchdog:
         return {"state": "ok", "egress": "ok", "egress_country": "Switzerland"}
 
 
+class DownWatchdog:
+    def fetch_status(self):
+        return {"state": "down", "paused": True, "reason": "seeded by the UI test"}
+
+
 RSS = b"""<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Seeded Podcast</title>
 <item><title>Episode One</title><guid>one</guid>
@@ -112,6 +116,18 @@ def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def start_server(app):
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 30
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert server.started, "the app did not start"
+    return server, thread, f"http://127.0.0.1:{port}"
 
 
 @pytest.fixture(scope="module")
@@ -135,14 +151,7 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
         }
     )
     app = create_app(settings)
-    port = free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 30
-    while not server.started and time.monotonic() < deadline:
-        time.sleep(0.1)
-    assert server.started, "the app did not start"
+    server, thread, url = start_server(app)
     app.state.youtube = StandInProbe()
     app.state.channels = ChannelResolver(app.state.youtube)
     app.state.youtube_worker.downloader = NoDownload()
@@ -190,11 +199,37 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
     alertlog.record_vpn_event(db, "ok", False, "")
     alertlog.record_vpn_event(db, "down", True, "seed")
     try:
-        yield f"http://127.0.0.1:{port}"
+        yield url
     finally:
         server.should_exit = True
         thread.join(timeout=15)
         qbit.stop()
+
+
+@pytest.fixture(scope="module")
+def down_base_url(tmp_path_factory: pytest.TempPathFactory):
+    root = tmp_path_factory.mktemp("robot-down-app")
+    (root / "config").mkdir()
+    (root / "downloads").mkdir()
+    for name in ("Filme", "Serien", "Hörbücher", "Musik", "Podcasts", "Youtube"):
+        (root / name).mkdir()
+    settings = Settings.from_env(
+        {
+            **ENV,
+            "DATA_ROOT": str(root),
+            "CONFIG_DIR": str(root / "config"),
+            "APP_ADMIN_USER": ADMIN,
+            "APP_ADMIN_PASSWORD_HASH": fast_hash(),
+        }
+    )
+    app = create_app(settings)
+    server, thread, url = start_server(app)
+    app.state.watchdog_status = DownWatchdog()
+    try:
+        yield url
+    finally:
+        server.should_exit = True
+        thread.join(timeout=15)
 
 
 def _browser_tools() -> tuple[str, str]:
@@ -218,17 +253,17 @@ def _browser_tools() -> tuple[str, str]:
 
 
 @pytest.mark.timeout(1200)
-def test_the_robot_ui_suite(base_url):
+def run_robot(base_url, suites, output_dir, junit):
     chrome, driver = _browser_tools()
-    REPORTS.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         "-m",
         "robot",
         "--outputdir",
-        str(REPORTS),
+        str(output_dir),
         "--xunit",
-        str(REPORTS.parent / "junit-ui.xml"),
+        str(junit),
         "--variable",
         f"BASE_URL:{base_url}",
         "--variable",
@@ -239,9 +274,25 @@ def test_the_robot_ui_suite(base_url):
         f"CHROME_BINARY:{chrome}",
         "--variable",
         f"CHROMEDRIVER:{driver}",
-        str(SUITES),
+        str(suites),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=1200, check=False)
     output = result.stdout + "\n" + result.stderr
+    (output_dir / "console.log").write_text(output, encoding="utf-8")
     print(output)
     assert result.returncode == 0, output
+
+
+@pytest.mark.timeout(1200)
+def test_the_robot_ui_suite(base_url):
+    run_robot(base_url, SUITES, REPORTS, REPORTS.parent / "junit-ui.xml")
+
+
+@pytest.mark.timeout(600)
+def test_the_vpn_down_state_in_the_ui(down_base_url):
+    run_robot(
+        down_base_url,
+        Path(__file__).parent / "robot_down" / "09_vpn_down.robot",
+        REPORTS / "vpn-down",
+        REPORTS.parent / "junit-ui-vpn-down.xml",
+    )
