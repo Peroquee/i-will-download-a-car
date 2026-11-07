@@ -112,3 +112,25 @@ Language Differs
     [Arguments]    ${before}
     ${now}=    Get Text    id:nav-input
     Should Not Be Equal    ${now}    ${before}
+
+Open Dashboard Page
+    Click Element    id:nav-dashboard
+    Wait Until Element Is Visible    id:dashboard
+
+Open Subscriptions Page
+    Click Element    id:nav-subs
+    Wait Until Element Is Visible    id:subscriptions
+
+Open Accounts Page
+    Click Element    id:nav-accounts
+    Wait Until Element Is Visible    id:accounts
+
+Subscription Rows Decrease
+    [Arguments]    ${before}
+    ${now}=    Get Element Count    xpath=//li[contains(@class,'job')][contains(.,'Seeded Podcast')]
+    Should Be True    ${now} < ${before}
+
+Alert Buttons Decrease
+    [Arguments]    ${before}
+    ${now}=    Get Element Count    xpath=//li[contains(@class,'alert-item')]//button[normalize-space(.)='Mark as read']
+    Should Be True    ${now} < ${before}

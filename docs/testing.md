@@ -7,6 +7,7 @@ placed anywhere else.
 | Level | Folder | Question it answers | Needs | Runs on |
 |---|---|---|---|---|
 | unit | `tests/unit/` | Does this piece of logic or config do what it says, in isolation? | nothing (stubs, fake dirs) | any runner, every push |
+| ui | `tests/ui/` | Does a real browser see and do what a person would? | Chromium, chromedriver, Robot Framework | shared runner (`test:ui`) |
 | integration | `tests/integration/` | Do two real components agree (our files + Compose CLI; later app + SQLite, app + qBittorrent API)? | the component under test | any runner (`docker compose` CLI only so far) |
 | smoke | `tests/smoke/` | Is this host or stack alive at all? Fast gate before slower tests. | Docker daemon | `ytp-host` runner (gated, see below); `make smoke-host` on the media VM |
 | system | `tests/system/` | Does the real thing behave correctly end to end, black-box? | Docker daemon, `/dev/net/tun` | `ytp-host` runner (gated) |
@@ -16,12 +17,12 @@ Cross-cutting markers, combinable with any level:
 
 - `security`: guards a ground rule (VPN-only traffic, LAN-only, no secrets in git). `pytest -m security` must always pass.
 - `tests/system/test_c43_browser.py` is a **real browser** test (headless Chromium in the Playwright container against the app running in the test process; gated by `YTP_NETWORK_TESTS=1` and Docker, not part of the pipeline, run on the VM; `YTP_PLAYWRIGHT_IMAGE` overrides the image; the image has the browsers, so the matching `playwright` package is installed with pip inside the container, `YTP_PLAYWRIGHT_VERSION`). The script it runs is `tests/system/browser/ui_checks.py`.
-- `tests/system/test_c60_ui_robot.py` runs the **Robot Framework + SeleniumLibrary** suites in
-  `tests/system/robot/` against the app running in the pytest process, with real headless
+- `tests/ui/test_c60_ui_robot.py` runs the **Robot Framework + SeleniumLibrary** suites in
+  `tests/ui/robot/` against the app running in the pytest process, with real headless
   Chromium. The `test:ui` job installs Debian chromium/chromedriver and Robot inside the job (no
   Docker daemon) and runs it on every merge request. Locally: install `requirements-ui.txt`,
   have `chromium` and `chromedriver` on `PATH`, then
-  `YTP_UI_TESTS=1 pytest tests/system/test_c60_ui_robot.py` or `make test-ui`. Reports land in
+  `YTP_UI_TESTS=1 pytest tests/ui` or `make test-ui`. Reports land in
   `reports/robot/`. The Playwright test above stays until the Robot suites prove parity.
 - The browser-side tests in `test_web_ui.py` (about 110, including the dashboard smoke test) need `node`: `test:unit` installs Debian's 18 series; in CI they **fail** if it is missing, locally they skip with a loud reason.
 - Tests that build real git repositories (`test_autodeploy.py`) need `git`: the `test:unit` job installs it (Debian's 2.39 series) and the tests **fail** in CI if it is missing; locally they skip with a loud reason.

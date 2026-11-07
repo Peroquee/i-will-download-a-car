@@ -13,6 +13,7 @@ xfail_strict = true
 markers = [
   # Test level. Assigned automatically from the folder (tests/<level>/), see tests/conftest.py.
   "unit: fast, isolated, no Docker, no network, no root",
+  "ui: a real browser (Robot + Selenium) against the app, no Docker daemon",
   "integration: two real components together (e.g. our files + the docker compose CLI)",
   "smoke: minimal is-it-alive checks, run first on any real host",
   "system: whole behaviour on a real Docker host, black-box",

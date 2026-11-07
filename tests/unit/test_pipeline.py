@@ -27,7 +27,7 @@ JOBS: dict[str, dict[str, Any]] = {
     for name, body in CI.items()
     if name not in RESERVED and not name.startswith(".") and isinstance(body, dict)
 }
-LEVELS = ("unit", "integration", "smoke", "system", "regression")
+LEVELS = ("unit", "ui", "integration", "smoke", "system", "regression")
 
 
 def resolved(job: dict[str, Any]) -> dict[str, Any]:

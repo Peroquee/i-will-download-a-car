@@ -1,0 +1,46 @@
+*** Settings ***
+Resource    resources/common.resource
+Suite Setup       Open The App And Sign In As Admin
+Suite Teardown    Close All Browsers
+Test Setup        Open Dashboard Page
+
+*** Test Cases ***
+The Dashboard Shows Jobs Alerts Vpn And Storage
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:dash-recent-list    Seeder - Seeded Video
+    Element Should Contain    id:dash-recent-list    Seeded Magnet (2000)
+    Element Should Contain    id:dash-alerts-list    The storage is almost full
+    Element Should Contain    id:dash-vpn-list    VPN running
+    Element Should Contain    id:dash-vpn-list    VPN down
+    Element Should Contain    id:dash-disk    Storage:
+    Element Should Not Be Visible    id:dash-deploy
+
+A Failed Magnet Job Can Be Retried
+    ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'Seeded Magnet (2000)')]
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Try again']
+    Click Button    ${row}//button[normalize-space(.)='Try again']
+    Wait Until Keyword Succeeds    20s    0.5s    Element Should Contain    id:dash-active-list    Seeded Magnet (2000)
+    ${recent}=    Get Text    id:dash-recent-list
+    Should Not Contain    ${recent}    Seeded Magnet (2000)
+
+A Failed Job Can Be Dismissed And Restored
+    ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'Seeder - Seeded Video')]
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Dismiss']
+    Click Button    ${row}//button[normalize-space(.)='Dismiss']
+    Wait Until Keyword Succeeds    20s    0.5s    Page Should Not Contain    Seeder - Seeded Video
+    Click Button    id:dash-show-dismissed
+    Wait Until Element Is Visible    ${row}
+    Element Should Contain    ${row}    Show again
+    Click Button    ${row}//button[normalize-space(.)='Show again']
+    Wait Until Keyword Succeeds    20s    0.5s    Element Should Contain    ${row}    Dismiss
+
+An Alert Can Be Marked As Read On The Dashboard
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Be Visible    xpath=(//li[contains(@class,'alert-item')]//button[normalize-space(.)='Mark as read'])[1]
+    ${count}=    Get Element Count    xpath=//li[contains(@class,'alert-item')]//button[normalize-space(.)='Mark as read']
+    Should Be True    ${count} >= 1
+    Click Button    xpath=(//li[contains(@class,'alert-item')]//button[normalize-space(.)='Mark as read'])[1]
+    Wait Until Keyword Succeeds    10s    0.5s    Alert Buttons Decrease    ${count}
+
+The Alert Strip Marks Everything As Read
+    Wait Until Element Is Visible    id:alert-strip-ack
+    Click Button    id:alert-strip-ack
+    Wait Until Element Is Not Visible    id:alert-strip

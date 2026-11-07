@@ -55,7 +55,7 @@ test-unit test-integration test-smoke test-system test-regression: test-%: venv
 	$(PYTEST) tests/$*
 
 test-ui:
-	YTP_UI_TESTS=1 $(PYTEST) tests/system/test_c60_ui_robot.py
+	YTP_UI_TESTS=1 $(PYTEST) tests/ui
 
 host-check:
 	scripts/host/check-host.sh --env-file .env

@@ -1,6 +1,6 @@
 """Robot Framework + SeleniumLibrary against the real app (issue #60).
 
-    YTP_UI_TESTS=1 pytest tests/system/test_c60_ui_robot.py
+    YTP_UI_TESTS=1 pytest tests/ui/test_c60_ui_robot.py
 
 This is a system test without Docker: the app runs in this process on a free localhost port
 (with stand-ins for YouTube and downloads, and a fake qBittorrent for the magnet form), and
@@ -13,6 +13,7 @@ Reports: `reports/robot/output.xml`, `log.html`, `report.html`, `junit.xml` (CI 
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import socket
@@ -29,8 +30,14 @@ from tests.helpers.accounts_app import ADMIN, PASSWORD, fast_hash
 from tests.helpers.fake_qbittorrent import PASSWORD as QBIT_PASSWORD
 from tests.helpers.fake_qbittorrent import USER as QBIT_USER
 from tests.helpers.fake_qbittorrent import FakeQbittorrent
+from ytp import accounts, alertlog, subscriptions
+from ytp import jobs as job_store
+from ytp.channels import ChannelResolver
 from ytp.config import Settings
 from ytp.main import create_app
+from ytp.podcast_subscriptions import add as add_podcast_subscription
+from ytp.podcasts import PodcastFeedClient
+from ytp.safefetch import Fetched
 from ytp.youtube import VideoInfo
 
 pytestmark = [
@@ -59,6 +66,10 @@ ENV = {
 
 
 class StandInProbe:
+    timeout = 1.0
+    socket_timeout = 1.0
+    proxy = None
+
     async def probe(self, ref):
         return VideoInfo(
             video_id=ref.video_id,
@@ -74,6 +85,27 @@ class StandInProbe:
 class NoDownload:
     def download(self, *args, **kwargs):
         raise RuntimeError("the UI test downloads nothing")
+
+
+class OkWatchdog:
+    def fetch_status(self):
+        return {"state": "ok", "egress": "ok", "egress_country": "Switzerland"}
+
+
+RSS = b"""<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Seeded Podcast</title>
+<item><title>Episode One</title><guid>one</guid>
+<pubDate>Tue, 03 Nov 2026 10:00:00 +0000</pubDate>
+<enclosure url="https://example.invalid/one.mp3" type="audio/mpeg" length="12345"/></item>
+<item><title>Episode Two</title><guid>two</guid>
+<pubDate>Mon, 02 Nov 2026 10:00:00 +0000</pubDate>
+<enclosure url="https://example.invalid/two.mp3" type="audio/mpeg" length="23456"/></item>
+</channel></rss>"""
+
+
+class StubFeedFetcher:
+    def fetch_bytes(self, url, *, kind, max_bytes):
+        return Fetched(str(url), "application/rss+xml", RSS, len(RSS))
 
 
 def free_port() -> int:
@@ -112,7 +144,51 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
         time.sleep(0.1)
     assert server.started, "the app did not start"
     app.state.youtube = StandInProbe()
+    app.state.channels = ChannelResolver(app.state.youtube)
     app.state.youtube_worker.downloader = NoDownload()
+    app.state.watchdog_status = OkWatchdog()
+    app.state.podcast_feeds = PodcastFeedClient(StubFeedFetcher())
+    if app.state.podcast_worker is not None:
+        app.state.podcast_worker.feeds = app.state.podcast_feeds
+    if app.state.podcast_poller is not None:
+        app.state.podcast_poller.feeds = app.state.podcast_feeds
+
+    db = app.state.db
+    accounts.create_with_hash(db, "alice", fast_hash(), "user")
+    admin = accounts.find(db, ADMIN)[0]
+    alice = accounts.find(db, "alice")[0]
+    channel, _ = subscriptions.add(db, "UC-SEEDED", "Seeded Channel")
+    accounts.follow(db, "channel", channel.id, admin.id)
+    accounts.follow(db, "channel", channel.id, alice.id)
+    podcast, _ = add_podcast_subscription(db, "https://example.org/seed.xml", "Seeded Podcast")
+    accounts.follow(db, "podcast", podcast.id, admin.id)
+    seeded_video, _ = job_store.submit_job(
+        db,
+        "youtube",
+        "seed-video",
+        json.dumps({"type": "youtube", "channel": "Seeder", "title": "Seeded Video"}),
+    )
+    job_store.mark_failed(db, seeded_video.id, "seeded failure")
+    seeded_magnet, _ = job_store.submit_magnet_job(
+        db, "b" * 40, json.dumps({"type": "movies", "title": "Seeded Magnet", "year": 2000})
+    )
+    job_store.mark_failed(db, seeded_magnet.id, "seeded failure")
+    qbit.torrents.append(
+        {
+            "hash": "b" * 40,
+            "name": "Seeded Magnet",
+            "state": "downloading",
+            "progress": 0.4,
+            "size": 1000,
+            "amount_left": 600,
+            "save_path": str(root / "downloads"),
+        }
+    )
+    for free in (4, 3):
+        alertlog.add(db, "disk_low", "warning", "", "", {"free_percent": free, "free_gb": free})
+    alertlog.add(db, "vpn_down", "error", "Seed VPN down", "The VPN is down.")
+    alertlog.record_vpn_event(db, "ok", False, "")
+    alertlog.record_vpn_event(db, "down", True, "seed")
     try:
         yield f"http://127.0.0.1:{port}"
     finally:
