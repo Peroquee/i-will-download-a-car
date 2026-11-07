@@ -288,10 +288,12 @@ def test_every_page_has_a_headline_with_its_name():
     assert "font-size: 34px" in rule
 
 
-def test_delete_buttons_are_a_pastel_crimson():
-    assert "--danger-bg: #d98a9c" in CSS
+def test_delete_buttons_are_crimson_with_light_text():
+    assert "--danger-bg: #ba1436" in CSS
+    assert "--danger-ink: #f2e6c9" in CSS
     rule = re.search(r"button\.danger \{[^}]*\}", CSS).group(0)
     assert "background: var(--danger-bg)" in rule
+    assert "color: var(--danger-ink)" in rule
 
 
 def test_the_sidebar_is_glued_to_the_top_left_of_the_screen():
