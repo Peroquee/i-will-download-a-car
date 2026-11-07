@@ -19,7 +19,6 @@
     var extraAlert = null;       // an older alert named by the address (#alert-12)
     var showDismissed = false;   // list the failed jobs this account dismissed as well
     var busy = {};               // "ack:12", "ack-all", "retry:7", "dismiss:7" while a request runs
-    var timer = null;
 
     function el(tag, className, text) {
       var node = document.createElement(tag);
@@ -451,7 +450,7 @@
       if (view !== "dashboard") return;
       focusVpn();
       refreshDashboard();
-      timer = root.setInterval(function () {
+      root.setInterval(function () {
         if (document.visibilityState !== "hidden") refreshDashboard();
       }, DASH_POLL_MS);
       document.addEventListener("visibilitychange", function () {
@@ -459,7 +458,7 @@
       });
     }
 
-    return { start: start, render: render, refreshAlerts: refreshAlerts, view: function () { return view; }, stop: function () { if (timer) root.clearInterval(timer); } };
+    return { start: start, render: render, refreshAlerts: refreshAlerts, view: function () { return view; } };
   }
 
   root.Dash = { create: create };

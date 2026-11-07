@@ -6,14 +6,14 @@ the browser-side helpers (run with node when it is installed; skipped otherwise)
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import subprocess
 
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.i18n import translations
+from tests.helpers.node import NODE, needs_node, require_node
 from ytp.config import Settings
 from ytp.main import create_app
 from ytp.metadata import METADATA_TYPES
@@ -327,7 +327,7 @@ def test_the_page_is_flat_and_a_failed_job_is_flagged_not_framed():
     assert "box-shadow" not in card
     job = re.search(r"\.job \{[^}]*\}", CSS).group(0)
     assert "border-bottom: 1px solid var(--line)" in job
-    assert "border-radius: 0" in job
+    assert "border-radius" not in job
     failed = re.search(r"\.job-failed \{[^}]*\}", CSS).group(0)
     assert "border-left: 3px solid var(--bad)" in failed
     assert "background" not in failed
@@ -381,22 +381,14 @@ def test_the_fields_per_type_are_exactly_the_servers_fields():
 # --- i18n ----------------------
 
 
-def translations() -> dict[str, dict[str, str]]:
-    match = re.search(
-        r'<script type="application/json" id="i18n">\s*(\{.*?\})\s*</script>', HTML, re.S
-    )
-    assert match
-    return json.loads(match.group(1))
-
-
 def test_german_and_english_have_exactly_the_same_keys():
-    t = translations()
+    t = translations(HTML)
     assert set(t["de"]) == set(t["en"])
     assert len(t["de"]) > 70
 
 
 def test_no_translation_is_empty_and_german_differs_from_english():
-    t = translations()
+    t = translations(HTML)
     for lang in ("de", "en"):
         assert all(value.strip() for value in t[lang].values()), lang
     same = [k for k in t["de"] if t["de"][k] == t["en"][k]]
@@ -410,7 +402,6 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "yt.title",
         "mode.podcast",
         "type.podcast",
-        "subs.podcast",
         "subs.target_podcast",
         "yt.podcast",
         "yt.album",
@@ -423,7 +414,7 @@ def test_no_translation_is_empty_and_german_differs_from_english():
 
 
 def test_every_key_used_in_the_page_and_the_script_exists():
-    t = translations()["en"]
+    t = translations(HTML)["en"]
     used = set(re.findall(r'data-i18n(?:-placeholder|-label)?="([\w.-]+)"', HTML))
     used |= {k for k in re.findall(r'\bt\("([\w.]+)"', APP_JS) if not k.endswith(".")}
     used |= {
@@ -432,7 +423,7 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
     used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
-    used |= {"subs.polling", "subs.poll", "subs.confirm", "subs.remove", "subs.ok"}
+    used |= {"subs.polling", "subs.poll", "subs.confirm", "subs.remove"}
     missing = {k for k in used if k not in t}
     assert not missing, sorted(missing)
 
@@ -440,7 +431,7 @@ def test_every_key_used_in_the_page_and_the_script_exists():
 def test_every_server_error_and_probe_kind_has_a_text():
     from ytp.api import PROBE_STATUS
 
-    t = translations()
+    t = translations(HTML)
     for lang in ("de", "en"):
         for kind in PROBE_STATUS:
             assert f"kind.{kind}" in t[lang], (lang, kind)
@@ -457,27 +448,12 @@ def test_every_server_error_and_probe_kind_has_a_text():
 
 
 def test_the_page_names_umlauts_correctly():
-    t = translations()["de"]
+    t = translations(HTML)["de"]
     assert t["type.audiobooks"] == "Hörbuch"
     assert "Künstler" in t["field.artist"]
 
 
 # --- the browser helpers, with node ----------------------
-
-NODE = shutil.which("node")
-NODE_MISSING = (
-    "node is NOT installed: the browser-side tests (about 110) are SKIPPED and prove nothing. "
-    "Install it (apt install nodejs)."
-)
-# Locally a missing node skips with the loud reason above. In CI (GitLab sets CI) the tests are
-# NOT skipped: they reach `require_node` and fail, so a pipeline cannot go green without them.
-needs_node = pytest.mark.skipif(NODE is None and not os.environ.get("CI"), reason=NODE_MISSING)
-
-
-def require_node() -> str:
-    if NODE is None:
-        pytest.fail(NODE_MISSING + " The test:unit job installs it in its before_script.")
-    return NODE
 
 
 def run_node(expression: str):
@@ -629,7 +605,7 @@ def test_the_age_of_a_timestamp(iso, expected):
 
 @needs_node
 def test_job_kinds_map_to_known_translations():
-    t = translations()["en"]
+    t = translations(HTML)["en"]
     for kind in ("movies", "series", "audiobooks", "music", "youtube", "podcast"):
         assert run_node(f"L.kindKey({json.dumps(kind)})") in t
     assert run_node("L.kindKey('nonsense')") is None
@@ -814,7 +790,7 @@ def test_the_guide_is_a_dialog_with_a_close_button_and_a_visible_opener():
 def test_every_illustration_has_a_text_alternative_in_both_languages():
     illustrations = re.findall(r"<svg class=\"ill\"[^>]*>", HTML)
     assert len(illustrations) == 6, "five steps and the YouTube part"
-    translations_ = translations()
+    translations_ = translations(HTML)
     for tag in illustrations:
         assert 'role="img"' in tag
         key = re.search(r'data-i18n-label="([\w.]+)"', tag).group(1)
@@ -823,7 +799,7 @@ def test_every_illustration_has_a_text_alternative_in_both_languages():
 
 
 def test_the_guide_covers_the_five_steps_and_youtube_and_magnet_links():
-    t = translations()["en"]
+    t = translations(HTML)["en"]
     for key in ("howto.s1.title", "howto.s2.title", "howto.s3.title", "howto.s4.title",
                 "howto.s5.title", "howto.yt.title", "howto.find.title", "howto.find.legal"):  # fmt: skip
         assert key in t
@@ -850,7 +826,7 @@ def test_the_guide_has_no_list_of_sources():
     for text in (HTML, APP_JS, CSS):
         assert "howto-sources" not in text
         assert "howto.source" not in text
-    t = translations()
+    t = translations(HTML)
     for lang in ("de", "en"):
         assert not [k for k in t[lang] if k.startswith("howto.source") or k == "howto.find.sources"]
 
@@ -860,7 +836,7 @@ def test_the_sources_file_is_not_served(client):
 
 
 def test_the_guide_button_is_called_anleitung_and_how_to():
-    t = translations()
+    t = translations(HTML)
     assert t["de"]["howto.button"] == "Anleitung"
     assert t["en"]["howto.button"] == "How to"
     assert t["de"]["howto.title"] == "Anleitung"
@@ -868,7 +844,7 @@ def test_the_guide_button_is_called_anleitung_and_how_to():
 
 
 def test_the_guide_explains_the_magnet_link_and_the_legal_notice():
-    t = translations()
+    t = translations(HTML)
     assert "magnet:?xt=urn:btih:" in t["en"]["howto.find.looks"]
     assert "magnet symbol" in t["en"]["howto.find.where"]
     assert "allowed to download" in t["en"]["howto.find.legal"]
@@ -1156,7 +1132,7 @@ def test_the_ids_the_dashboard_script_uses_exist_in_the_page():
 
 
 def test_every_key_the_dashboard_uses_exists_in_both_languages():
-    t = translations()
+    t = translations(HTML)
     used = {k for k in re.findall(r'\bt\("([\w.]+)"', DASH_JS) if not k.endswith((".", "_"))}
     used |= {f"dash.backlog_{s}" for s in ("running", "paused", "done", "cancelled")}  # #45
     used |= {f"alert.sev.{s}" for s in ("info", "warning", "error")}
@@ -1187,7 +1163,7 @@ def test_alert_texts_only_use_values_the_monitor_provides():
         # YouTube gives no channel lists at all (feeds.SERVICE_WIDE, monitor.check_feeds)
         "youtube_unavailable": {"reason"},
     }
-    t = translations()
+    t = translations(HTML)
     for lang in ("de", "en"):
         for kind in ALERT_KINDS:
             for part in ("title", "what", "did", "todo"):
@@ -1291,7 +1267,7 @@ def smoke(path, hash_, answers, click=None):
     scenario = {
         "ids": ids,
         "viewNodes": ["input", "dashboard"],
-        "dictionary": translations()["en"],
+        "dictionary": translations(HTML)["en"],
         "answers": answers,
         "click": click,
     }

@@ -115,8 +115,7 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus, button:foc
 }
 input[aria-invalid="true"] { border-color: var(--bad); }
 /* Sections are separated by a line, not framed with a rounded outline (#53). */
-.panel { display: grid; gap: 12px; padding: 14px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
-.panel[hidden], .type-fields[hidden] { display: none; }
+.panel { display: grid; gap: 12px; padding: 14px 0 0; border-top: 1px solid var(--line); }
 .type-fields { display: grid; gap: 12px; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
@@ -127,7 +126,6 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 /* "Older videos" belongs to the "subscribe" tick above it. */
 .sub-option { margin: 10px 0 0 30px; }
 input.narrow { max-width: 7em; }
-.muted-box { color: var(--muted); }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented label { padding: 11px 18px; min-height: 44px; cursor: pointer; color: var(--muted); font-size: 14px; display: flex; align-items: center; }
@@ -173,16 +171,13 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .banner {
   margin: 12px 0 0;
   padding: 10px 14px;
-  border-radius: 0;
-  border: 0;
   border-left: 3px solid var(--bad);
   background: rgba(228, 128, 111, 0.12);
   color: var(--bad);
   font-size: 14px;
 }
-.banner[hidden] { display: none; }
 .job-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 0; }
-.job { padding: 10px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; display: grid; gap: 6px; }
+.job { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
 /* A failed job gets a red flag on the left; the red status and the reason already say it (#53). */
 .job-failed { border-left: 3px solid var(--bad); padding-left: 10px; }
 .job-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
@@ -192,7 +187,6 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .job-failed .job-status { color: var(--bad); font-weight: 600; }
 .job-meta { font-size: 12px; color: var(--muted); }
 .jobs-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
-.jobs-tools[hidden] { display: none; }
 .job-dismissed { opacity: 0.65; }
 .job-error { margin: 0; font-size: 13px; color: var(--bad); overflow-wrap: anywhere; }
 .job progress { width: 100%; height: 8px; accent-color: var(--gold); }
@@ -212,22 +206,8 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .skipped li { overflow-wrap: anywhere; }
 .job-note { margin: 0; font-size: 13px; color: var(--good); }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-/* Delete and remove buttons: a pastel red (#56). */
+/* Delete and remove buttons: crimson (#56, #58). */
 button.danger { background: var(--danger-bg); border-color: var(--danger-bg); color: var(--danger-ink); }
-#subs-empty[hidden] { display: none; }
-.howto-button {
-  font: inherit;
-  min-height: 36px;
-  padding: 4px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--gold);
-  background: var(--gold-soft);
-  color: var(--ink);
-  font-weight: 600;
-  cursor: pointer;
-}
-.howto-button:hover { background: rgba(201, 162, 39, 0.28); }
-.howto-button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--gold-soft); }
 dialog.howto {
   width: min(720px, calc(100% - 24px));
   max-height: calc(100% - 24px);
@@ -246,19 +226,19 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .howto-steps { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 22px; }
 .howto-part { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
 .howto-code { display: inline-block; padding: 8px 12px; border-radius: var(--radius); background: rgba(233, 228, 216, 0.06); overflow-wrap: anywhere; font-size: 14px; }
-.howto-legal { padding: 10px 14px; border-radius: 0; border: 0; border-left: 3px solid var(--gold); background: var(--gold-soft); }
+.howto-legal { padding: 10px 14px; border-left: 3px solid var(--gold); background: var(--gold-soft); }
 .ill { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 0 8px; }
 .ill-win { fill: #0d1620; stroke: rgba(233, 228, 216, 0.25); stroke-width: 1.5; }
 .ill-bar { fill: #1a2735; }
 .ill-line { fill: rgba(233, 228, 216, 0.22); }
 .ill-btn { fill: rgba(233, 228, 216, 0.12); stroke: rgba(233, 228, 216, 0.3); }
 .ill-hi { fill: rgba(201, 162, 39, 0.2); stroke: var(--gold); stroke-width: 2; }
-.ill-magnet { fill: #c9a227; }
-.ill-red { fill: #e4806f; }
-.ill-text, .ill-text-on, .ill-small, .ill-mono, .ill-bad { fill: #e9e4d8; font: 12px system-ui, sans-serif; }
+.ill-magnet { fill: var(--gold); }
+.ill-red { fill: var(--bad); }
+.ill-text, .ill-text-on, .ill-small, .ill-mono, .ill-bad { fill: var(--ink); font: 12px system-ui, sans-serif; }
 .ill-small { font-size: 10px; fill: #b4bcc8; }
 .ill-mono { font-family: ui-monospace, monospace; font-size: 11px; }
-.ill-bad { fill: #e4806f; font-weight: 600; }
+.ill-bad { fill: var(--bad); font-weight: 600; }
 .ill-menu { fill: #16222e; stroke: rgba(233, 228, 216, 0.3); }
 .ill-pick { fill: var(--gold); }
 .ill-text-on { fill: #1a1305; font-weight: 600; }
@@ -266,7 +246,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .ill-field { fill: rgba(233, 228, 216, 0.05); stroke: rgba(233, 228, 216, 0.3); }
 .ill-primary { fill: var(--gold); }
 .ill-row { fill: rgba(233, 228, 216, 0.05); stroke: rgba(233, 228, 216, 0.18); }
-.ill-rowbad { stroke: #e4806f; fill: rgba(228, 128, 111, 0.1); }
+.ill-rowbad { stroke: var(--bad); fill: rgba(228, 128, 111, 0.1); }
 .ill-track { fill: rgba(233, 228, 216, 0.14); }
 .ill-fill { fill: var(--gold); }
 .ill-tile { fill: #1a2735; stroke: rgba(233, 228, 216, 0.2); }
@@ -274,13 +254,6 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .ill-play { fill: var(--gold); }
 .ill-check { fill: var(--gold); }
 .ill-tick { fill: none; stroke: #1a1305; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-@media (max-width: 520px) {
-  .page-title { font-size: 28px; }
-  .pair { grid-template-columns: 1fr; }
-  .actions { justify-content: stretch; }
-  .actions button { flex: 1; }
-  .logo { width: 44px; height: 44px; }
-}
 
 /* The alert strip under the VPN bar and the dashboard (#38). */
 .alert-strip {
@@ -301,9 +274,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   gap: 8px;
   min-width: 0;
   padding: 4px 4px 4px 10px;
-  border: 0;
   border-left: 4px solid var(--gold);
-  border-radius: 0;
   background: var(--gold-soft);
 }
 .alert-chip.alert-error, .alert-item.alert-error { border-left-color: var(--bad); }
@@ -324,20 +295,14 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   display: grid;
   gap: 6px;
   padding: 10px 0 12px 12px;
-  border: 0;
   border-bottom: 1px solid var(--line);
   border-left: 4px solid var(--gold);
-  border-radius: 0;
 }
 .alert-unread { background: var(--gold-soft); }
 .alert-target { outline: 2px solid var(--gold); }
 .alert-title { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
 .alert-part { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 .alert-item button { justify-self: start; }
-@media (max-width: 520px) {
-  .alert-strip { padding: 8px 12px; }
-  .alert-chip { width: 100%; }
-}
 
 /* The main navigation (#43): real tabs. On a phone they stay a row; on a computer they are a
    list under the logo, each item with a small icon (#56). */
@@ -409,9 +374,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .js-warning {
   margin: 0 0 14px;
   padding: 10px 12px;
-  border: 0;
   border-left: 3px solid var(--bad);
-  border-radius: 0;
   color: var(--bad);
   font-size: 14px;
 }
@@ -425,9 +388,6 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   font-size: 14px;
   background: var(--gold-soft);
   border-bottom: 1px solid var(--gold);
-}
-@media (max-width: 520px) {
-  .nav-item { padding: 0 10px; font-size: 14px; }
 }
 
 /* The answer of the YouTube lookup sits under the address field; a failure is red, and the
@@ -470,9 +430,7 @@ body:not([data-auth="in"]) .page-head { display: none; }
   margin-top: 18px;
   padding: 10px 0;
   min-height: 44px;
-  border: 0;
   border-top: 1px solid var(--line);
-  border-radius: 0;
   color: var(--muted);
   font-size: 14px;
   text-decoration: none;
@@ -487,3 +445,15 @@ body:not([data-auth="in"]) .page-head { display: none; }
 .jobs-mini-error .jobs-mini-text { color: var(--bad); }
 .jobs-mini-bar { flex: 1 1 80px; max-width: 160px; height: 6px; accent-color: var(--gold); }
 .jobs-mini-more { margin-left: auto; color: var(--gold); white-space: nowrap; }
+
+/* Phones: the parts stack, the navigation scrolls and everything stays touchable. */
+@media (max-width: 520px) {
+  .page-title { font-size: 28px; }
+  .pair { grid-template-columns: 1fr; }
+  .actions { justify-content: stretch; }
+  .actions button { flex: 1; }
+  .logo { width: 44px; height: 44px; }
+  .alert-strip { padding: 8px 12px; }
+  .alert-chip { width: 100%; }
+  .nav-item { padding: 0 10px; font-size: 14px; }
+}

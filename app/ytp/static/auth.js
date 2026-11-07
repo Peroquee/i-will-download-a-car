@@ -84,7 +84,6 @@
 
     function isIn() { return state === "in"; }
     function isAdmin() { return !!account && account.role === "admin"; }
-    function current() { return account; }
 
     function focusLogin() { if ($("login-user")) $("login-user").focus(); }
 
@@ -366,7 +365,7 @@
 
     return {
       wire: wire, check: check, start: start, render: render, expired: expired,
-      isIn: isIn, isAdmin: isAdmin, current: current,
+      isIn: isIn, isAdmin: isAdmin,
     };
   }
 
