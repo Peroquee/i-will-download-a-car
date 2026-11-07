@@ -30,6 +30,7 @@ ENV = {
 HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 CSS = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
 APP_JS = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+AUTH_JS = (STATIC_DIR / "auth.js").read_text(encoding="utf-8")
 LOGIC_JS = (STATIC_DIR / "logic.js").read_text(encoding="utf-8")
 MAGNET = "magnet:?xt=urn:btih:" + "a" * 40
 
@@ -684,16 +685,60 @@ def test_the_subscribe_checkbox_is_enabled_and_explains_what_it_does():
     assert "/api/subscriptions" in APP_JS
 
 
+def test_the_logo_and_the_navigation_are_a_sidebar_and_the_page_descriptions_are_gone():
+    """Issue #56: logo top left, the navigation under it, the language at the bottom, and no
+    descriptions above the pages."""
+    assert 'id="title"' not in HTML
+    assert 'class="subtitle"' not in HTML
+    assert 'data-i18n="subs.how_to_add"' not in HTML
+    assert HTML.index('class="logo"') < HTML.index('id="topnav"')
+    assert HTML.index('id="topnav"') < HTML.index('id="lang"')
+    assert HTML.index('id="lang"') < HTML.index('class="page"')
+    assert re.search(r'<main class="card" aria-label="youtube-premium">', HTML)
+
+
+def test_every_navigation_item_has_a_decorative_icon():
+    nav = re.search(r'<nav id="topnav".*?</nav>', HTML, re.S).group(0)
+    assert nav.count('class="nav-icon"') == 5
+    for icon in re.findall(r'<svg class="nav-icon"[^>]*>', nav):
+        assert 'aria-hidden="true"' in icon
+
+
+def test_the_account_is_a_circle_with_the_first_letter_of_the_name():
+    rule = re.search(r"\.account-chip \{[^}]*\}", CSS).group(0)
+    assert "border-radius: 50%" in rule
+    assert "width: 40px" in rule
+    assert "account.username.charAt(0).toUpperCase()" in AUTH_JS
+
+
+def test_the_colours_and_the_rounding_follow_the_new_palette():
+    """Issue #56: a lighter background, buttons a little lighter than it, former yellow buttons
+    almost white, delete buttons pastel red, and inputs rounded like buttons."""
+    assert "--bg: #17232f" in CSS
+    inputs = re.search(r'input\[type="text"\], input\[type="password"\], select \{[^}]*\}', CSS)
+    assert inputs
+    assert "border-radius: 10px" in inputs.group(0)
+    primary = re.search(r"button\.primary \{[^}]*\}", CSS).group(0)
+    assert "background: #ece7dc" in primary
+    ghost = re.search(r"button\.ghost \{[^}]*\}", CSS).group(0)
+    assert "background: var(--button)" in ghost
+    danger = re.search(r"button\.danger \{[^}]*\}", CSS).group(0)
+    assert "background: var(--danger-bg)" in danger
+
+
 def test_the_subscriptions_are_a_view_for_managing_them_without_a_form():
     """Subscribing happens with the main form ("subscribe to the channel"); the subscriptions view
     only lists them, with "check now" and "remove"."""
-    view = re.search(r'<section id="subscriptions"[^>]*>(.*?)</section>', HTML, re.S)
-    assert view
-    assert 'data-view="subscriptions"' in view.group(0)
-    assert "<form" not in view.group(1)
-    assert "<input" not in view.group(1)
-    for element_id in ("subs-list", "subs-empty", "subs-result", "subs-load-error"):
-        assert f'id="{element_id}"' in view.group(1)
+    start = HTML.index('<section id="subscriptions"')
+    view = HTML[start : HTML.index('<section id="dashboard"', start)]
+    assert 'data-view="subscriptions"' in view
+    assert "<form" not in view
+    assert "<input" not in view
+    for element_id in (
+        "subs-list", "subs-empty", "subs-result", "subs-load-error",
+        "subs-youtube-group", "subs-youtube-list", "subs-podcast-group", "subs-podcast-list",
+    ):  # fmt: skip
+        assert f'id="{element_id}"' in view
     for gone in (
         "subs-form",
         "subs-channel",

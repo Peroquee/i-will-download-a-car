@@ -29,35 +29,36 @@
   </div>
 </nav>
 <div class="wrap">
-  <main class="card" aria-labelledby="title">
-    <p id="js-warning" class="js-warning" role="alert">Die Skripte dieser Seite sind nicht geladen oder veraltet. Bitte die Seite neu laden (Strg+F5). / The scripts of this page did not load or are out of date. Please reload the page (Ctrl+F5).</p>
-    <header class="header">
-      <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-          <ellipse cx="32" cy="38" rx="16" ry="15" fill="#dba876"/>
-          <path d="M14 30 C14 15 22 9 32 9 C42 9 50 15 50 30 C50 21 42 19 32 19 C22 19 14 21 14 30 Z" fill="#a4372f"/>
-          <path d="M45 19 L58 12 L53 25 Z" fill="#a4372f"/>
-          <circle cx="25" cy="16" r="1.4" fill="#f2e6c9"/>
-          <circle cx="32" cy="13.5" r="1.4" fill="#f2e6c9"/>
-          <circle cx="39" cy="16" r="1.4" fill="#f2e6c9"/>
-          <path d="M11 31 L53 35" stroke="#171310" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-          <ellipse cx="25.5" cy="34.5" rx="5.5" ry="4.5" fill="#171310"/>
-          <circle cx="41" cy="35" r="2.3" fill="#171310"/>
-          <path d="M35.5 31.5 Q41 29.5 45 32" stroke="#171310" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-          <path d="M22 45 C26 41 29.5 46.5 32 44.5 C34.5 46.5 38 41 42 45 C39.5 49.5 34.5 47 32 48 C29.5 47 24.5 49.5 22 45 Z" fill="#2a1c10"/>
-        </svg>
+  <main class="card" aria-label="youtube-premium">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="32" cy="38" rx="16" ry="15" fill="#dba876"/>
+        <path d="M14 30 C14 15 22 9 32 9 C42 9 50 15 50 30 C50 21 42 19 32 19 C22 19 14 21 14 30 Z" fill="#a4372f"/>
+        <path d="M45 19 L58 12 L53 25 Z" fill="#a4372f"/>
+        <circle cx="25" cy="16" r="1.4" fill="#f2e6c9"/>
+        <circle cx="32" cy="13.5" r="1.4" fill="#f2e6c9"/>
+        <circle cx="39" cy="16" r="1.4" fill="#f2e6c9"/>
+        <path d="M11 31 L53 35" stroke="#171310" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+        <ellipse cx="25.5" cy="34.5" rx="5.5" ry="4.5" fill="#171310"/>
+        <circle cx="41" cy="35" r="2.3" fill="#171310"/>
+        <path d="M35.5 31.5 Q41 29.5 45 32" stroke="#171310" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+        <path d="M22 45 C26 41 29.5 46.5 32 44.5 C34.5 46.5 38 41 42 45 C39.5 49.5 34.5 47 32 48 C29.5 47 24.5 49.5 22 45 Z" fill="#2a1c10"/>
+      </svg>
+    </div>
+    <nav id="topnav" class="topnav" aria-label="Main" data-i18n-label="nav.label" data-auth-only>
+      <a id="nav-input" class="nav-item" href="/"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span data-i18n="nav.input"></span></a>
+      <a id="nav-dashboard" class="nav-item" href="/dashboard"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="nav.dashboard"></span></a>
+      <a id="nav-subs" class="nav-item" href="/#subscriptions"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg><span data-i18n="nav.subs"></span></a>
+      <a id="nav-accounts" class="nav-item" href="/accounts" data-admin-only><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3.1-5.5 7-5.5s7 2 7 5.5"/></svg><span data-i18n="nav.accounts"></span></a>
+      <button type="button" id="howto-open" class="nav-item nav-howto" aria-haspopup="dialog"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><span data-i18n="howto.button"></span></button>
+    </nav>
+    <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
+
+    <div class="page">
+      <p id="js-warning" class="js-warning" role="alert">Die Skripte dieser Seite sind nicht geladen oder veraltet. Bitte die Seite neu laden (Strg+F5). / The scripts of this page did not load or are out of date. Please reload the page (Ctrl+F5).</p>
+      <div class="page-head" data-auth-only>
+        <button type="button" id="account-open" class="account-chip" aria-haspopup="dialog" data-i18n-label="account.menu" data-auth-only></button>
       </div>
-      <div class="titles">
-        <h1 id="title" class="title">youtube-premium</h1>
-        <p class="subtitle" data-view="input" data-i18n="subtitle"></p>
-        <p class="subtitle" data-view="dashboard" data-i18n="dash.subtitle" hidden></p>
-        <p class="subtitle" data-view="subscriptions" data-i18n="subs.subtitle" hidden></p>
-      </div>
-      <div class="tools">
-        <button type="button" id="account-open" class="ghost small account-chip" aria-haspopup="dialog" data-i18n-label="account.menu" data-auth-only></button>
-        <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
-      </div>
-    </header>
 
     <section id="login" class="panel login" aria-labelledby="login-title" data-guest-only>
       <h2 id="login-title" class="jobs-title" data-i18n="login.title"></h2>
@@ -80,14 +81,6 @@
         <p class="note" data-i18n="login.help"></p>
       </form>
     </section>
-
-    <nav id="topnav" class="topnav" aria-label="Main" data-i18n-label="nav.label" data-auth-only>
-      <a id="nav-input" class="nav-item" href="/" data-i18n="nav.input"></a>
-      <a id="nav-dashboard" class="nav-item" href="/dashboard" data-i18n="nav.dashboard"></a>
-      <a id="nav-subs" class="nav-item" href="/#subscriptions" data-i18n="nav.subs"></a>
-      <a id="nav-accounts" class="nav-item" href="/accounts" data-i18n="nav.accounts" data-admin-only></a>
-      <button type="button" id="howto-open" class="nav-item nav-howto" aria-haspopup="dialog" data-i18n="howto.button"></button>
-    </nav>
 
     <form id="form" data-view="input" data-auth-only method="post" action="/reload-needed" autocomplete="off" novalidate>
       <div class="row">
@@ -283,10 +276,18 @@
 
     <section id="subscriptions" class="subs" data-view="subscriptions" data-auth-only aria-labelledby="subs-title" hidden>
       <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
-      <p class="note" data-i18n="subs.how_to_add"></p>
       <p id="subs-result" class="result" role="status" aria-live="polite"></p>
       <p id="subs-load-error" class="error" role="status"></p>
-      <ul id="subs-list" class="job-list"></ul>
+      <div id="subs-list" class="subs-groups">
+        <section id="subs-youtube-group" class="subs-group" aria-labelledby="subs-youtube-title" hidden>
+          <h3 id="subs-youtube-title" class="subs-group-title" data-i18n="subs.group_youtube"></h3>
+          <ul id="subs-youtube-list" class="job-list"></ul>
+        </section>
+        <section id="subs-podcast-group" class="subs-group" aria-labelledby="subs-podcast-title" hidden>
+          <h3 id="subs-podcast-title" class="subs-group-title" data-i18n="subs.group_podcasts"></h3>
+          <ul id="subs-podcast-list" class="job-list"></ul>
+        </section>
+      </div>
       <p id="subs-empty" class="note" data-i18n="subs.empty" hidden></p>
     </section>
 
@@ -361,7 +362,7 @@
       <p id="accounts-load-error" class="error" role="status"></p>
       <ul id="accounts-list" class="job-list"></ul>
     </section>
-
+    </div>
   </main>
 </div>
 
@@ -479,7 +480,6 @@
 <script type="application/json" id="i18n">
 {
   "de": {
-    "subtitle": "Einen YouTube-Link, Magnet-Link oder Podcast-Feed einfügen und ablegen lassen",
     "link.label": "Link",
     "link.placeholder": "YouTube-Link, Podcast-Feed oder magnet:?xt=…",
     "link.note": "Der Link wird automatisch erkannt. Mit „Typ“ kann man das ändern.",
@@ -656,6 +656,8 @@
     "sub.failed": "Das Abonnieren hat nicht geklappt.",
     "err.channel_invalid": "Das ist keine Kanal-Adresse.",
     "subs.title": "Abonnements",
+    "subs.group_youtube": "YouTube-Kanäle",
+    "subs.group_podcasts": "Podcast-Abos",
     "subs.backfill": "Ältere Videos mitnehmen",
     "subs.backfill_note": "0 = nur Videos, die nach dem Abonnieren erscheinen. Höchstens 15 (so viele zeigt YouTube).",
     "subs.empty": "Noch nichts abonniert.",
@@ -666,7 +668,6 @@
     "subs.skip.premiere": "Premiere",
     "subs.skip.short": "Short (Kurzvideo)",
     "subs.skipped_more": "und {n} weitere",
-    "dash.subtitle": "Was gerade läuft, was schiefging und wie es dem VPN geht",
     "dash.active": "Läuft und wartet",
     "dash.active_empty": "Gerade läuft und wartet nichts.",
     "dash.recent": "Zuletzt fertig oder fehlgeschlagen",
@@ -891,8 +892,6 @@
     "howto.ill.titleyear": "Titel, Jahr",
     "howto.ill.new": "neu",
     "err.int_out_of_range_20": "Eine Zahl von 0 bis 20.",
-    "subs.subtitle": "Die Kanäle und Podcasts, denen du folgst",
-    "subs.how_to_add": "Neue Abonnements legst du auf der Eingabeseite an: einen YouTube-Link einfügen und „Kanal abonnieren“ ankreuzen, oder einen Podcast-Feed einfügen und „Podcast abonnieren“ ankreuzen.",
     "mini.label": "Aufträge",
     "mini.none": "gerade läuft nichts",
     "mini.running": "läuft: {n}",
@@ -902,7 +901,6 @@
     "mini.open": "Zum Dashboard ›"
   },
   "en": {
-    "subtitle": "Paste a YouTube link, a magnet link or a podcast feed and have it filed",
     "link.label": "Link",
     "link.placeholder": "YouTube link, podcast feed or magnet:?xt=…",
     "link.note": "The link type is detected automatically. Use \"Type\" to change it.",
@@ -1079,6 +1077,8 @@
     "sub.failed": "Subscribing did not work.",
     "err.channel_invalid": "This is not a channel address.",
     "subs.title": "Subscriptions",
+    "subs.group_youtube": "YouTube channels",
+    "subs.group_podcasts": "Podcasts",
     "subs.backfill": "Also take older videos",
     "subs.backfill_note": "0 = only videos published after subscribing. At most 15 (that is all YouTube shows).",
     "subs.empty": "Nothing subscribed yet.",
@@ -1089,7 +1089,6 @@
     "subs.skip.premiere": "premiere",
     "subs.skip.short": "Short",
     "subs.skipped_more": "and {n} more",
-    "dash.subtitle": "What is running, what went wrong and how the VPN is doing",
     "dash.active": "Running and waiting",
     "dash.active_empty": "Nothing is running or waiting right now.",
     "dash.recent": "Recently finished or failed",
@@ -1314,8 +1313,6 @@
     "howto.ill.titleyear": "Title, year",
     "howto.ill.new": "new",
     "err.int_out_of_range_20": "A number from 0 to 20.",
-    "subs.subtitle": "The channels and podcasts you follow",
-    "subs.how_to_add": "New subscriptions are made on the input page: paste a YouTube link and tick \"Subscribe to the channel\", or paste a podcast feed and tick \"Subscribe to the podcast\".",
     "mini.label": "Jobs",
     "mini.none": "nothing running right now",
     "mini.running": "running: {n}",

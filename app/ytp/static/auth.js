@@ -125,7 +125,10 @@
     function renderTools() {
       var button = $("account-open");
       if (!button) return;
-      button.textContent = account ? account.username : "";
+      button.textContent = account ? account.username.charAt(0).toUpperCase() : "";
+      button.setAttribute("aria-label", account
+        ? t("account.menu") + ": " + account.username
+        : t("account.menu"));
       if (account) {
         $("account-who").textContent = t("account.signed_in", {
           name: account.username, role: t("role." + account.role),
@@ -290,7 +293,7 @@
         actions.appendChild(button(row.disabled ? "accounts.enable" : "accounts.disable", "",
           function () { change(row.id, { disabled: !row.disabled }); }));
         actions.appendChild(button(confirmDelete[row.id] ? "accounts.confirm" : "accounts.delete",
-          confirmDelete[row.id] ? "danger" : "", function () { removeAccount(row); }));
+          "danger", function () { removeAccount(row); }));
       }
       li.appendChild(actions);
       return li;

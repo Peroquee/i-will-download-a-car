@@ -257,10 +257,12 @@ def test_the_navigation_reads_eingabe_dashboard_abonnements_anleitung_and_its_en
     ]
 
 
-def test_the_guide_button_is_no_longer_next_to_the_language_switch_and_there_is_no_old_link():
-    header_tools = re.search(r'<div class="tools">(.*?)</div>', HTML, re.S)
-    assert header_tools
-    assert "howto-open" not in header_tools.group(1)
+def test_the_guide_is_a_nav_item_and_the_language_switch_sits_at_the_bottom():
+    assert 'id="howto-open"' in nav_html()
+    assert 'id="lang"' not in nav_html(), "the language is not one of the tabs"
+    assert HTML.index('id="topnav"') < HTML.index('id="lang"'), (
+        "the language is below the navigation"
+    )
     assert 'id="nav-link"' not in HTML
 
 

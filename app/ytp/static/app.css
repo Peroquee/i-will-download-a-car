@@ -1,13 +1,16 @@
 :root {
-  --bg: #0b1420;
-  --panel: #101a24;
+  --bg: #17232f;            /* less dark than before (#56) */
+  --panel: #1d2b39;
+  --button: #243444;        /* a little lighter than the background (#56) */
   --ink: #e9e4d8;
-  --muted: #8b95a3;
+  --muted: #9aa6b4;
   --gold: #c9a227;
   --gold-soft: rgba(201, 162, 39, 0.16);
-  --line: rgba(233, 228, 216, 0.1);
+  --line: rgba(233, 228, 216, 0.12);
   --bad: #e4806f;
   --good: #7fc58b;
+  --danger-bg: #e8a49d;     /* pastel red for delete buttons (#56) */
+  --danger-ink: #3a1410;
   --radius: 4px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
@@ -25,7 +28,7 @@ html, body {
   top: 0;
   z-index: 10;
   font-size: 13px;
-  background: #16222e;
+  background: #1b2936;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
 }
@@ -59,28 +62,36 @@ html, body {
 .vpn-down .vpn-link, .vpn-mismatch .vpn-link, .vpn-blind .vpn-link { padding: 14px 16px; }
 .vpn-down .vpn-dot, .vpn-mismatch .vpn-dot, .vpn-blind .vpn-dot { width: 14px; height: 14px; background: #fff; }
 .vpn-down .vpn-detail, .vpn-mismatch .vpn-detail, .vpn-blind .vpn-detail { font-size: 14px; }
-.wrap { display: flex; justify-content: center; padding: 32px 16px; }
-/* The page is flat: no frame, no shadow (#53). Only the content width is kept. */
-.card { width: 100%; max-width: 760px; padding: 8px 0 24px; }
-.header { display: flex; gap: 14px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+.wrap { display: flex; justify-content: center; padding: 24px 16px 40px; }
+/* The page is flat: no frame, no shadow (#53). On a computer the logo and the navigation are a
+   column on the left, the language at its bottom (#56); on a phone everything stacks. */
+.card {
+  width: 100%;
+  min-width: 0;
+  max-width: 1040px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "logo" "nav" "page" "lang";
+  gap: 14px;
+}
 .logo {
-  flex: none;
+  grid-area: logo;
+  justify-self: start;
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #182531, #0c141c 75%);
+  background: radial-gradient(circle at 35% 30%, #22313f, #101a24 75%);
   border: 1px solid rgba(201, 162, 39, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .logo svg { width: 32px; height: 32px; }
-.titles { flex: 1 1 200px; min-width: 0; }
 /* Headings use the same font as the text; size and weight set them apart. */
 h1, h2, h3, h4 { font-family: inherit; }
-.title { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
-.subtitle { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
-.tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.page { grid-area: page; min-width: 0; }
+.page-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+#lang { grid-area: lang; justify-self: start; align-self: end; }
 form { display: grid; gap: 14px; }
 .row { display: block; }
 label.field, legend.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
@@ -88,9 +99,9 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 input[type="text"], input[type="password"], select {
   width: 100%;
   padding: 12px 14px;
-  border-radius: var(--radius);
+  border-radius: 10px; /* the same rounding as the buttons (#56) */
   border: 1px solid var(--line);
-  background: rgba(233, 228, 216, 0.03);
+  background: rgba(233, 228, 216, 0.04);
   color: inherit;
   font-size: 16px; /* 16px keeps phones from zooming in on focus */
   min-height: 44px;
@@ -116,14 +127,14 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 .sub-option { margin: 10px 0 0 30px; }
 input.narrow { max-width: 7em; }
 .muted-box { color: var(--muted); }
-.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented label { padding: 11px 18px; min-height: 44px; cursor: pointer; color: var(--muted); font-size: 14px; display: flex; align-items: center; }
 .segmented input:checked + label { background: var(--gold-soft); color: var(--ink); }
 .actions { display: flex; gap: 10px; justify-content: flex-end; }
 button { font: inherit; min-height: 44px; }
 button.primary {
-  background: var(--gold);
+  background: #ece7dc; /* the former yellow buttons are almost white (#56) */
   color: #1a1305;
   border: 0;
   padding: 10px 20px;
@@ -133,9 +144,9 @@ button.primary {
 }
 button.primary:disabled { opacity: 0.55; cursor: wait; }
 button.ghost {
-  background: transparent;
+  background: var(--button); /* a little lighter than the background (#56) */
   border: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--ink);
   padding: 10px 14px;
   border-radius: 10px; /* see button.primary (#55) */
   cursor: pointer;
@@ -188,13 +199,18 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .subs { display: grid; gap: 10px; }
 .subs .job-list { margin-top: 2px; }
 .subs form { margin-top: 2px; }
+/* YouTube channels and podcasts are separate groups (#56). */
+.subs-groups { display: grid; gap: 16px; }
+.subs-group-title { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.subs-group .job-list { margin-top: 0; }
 .skipped { font-size: 13px; color: var(--muted); }
 .skipped summary { cursor: pointer; }
 .skipped ul { margin: 6px 0 6px 18px; padding: 0; }
 .skipped li { overflow-wrap: anywhere; }
 .job-note { margin: 0; font-size: 13px; color: var(--good); }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-button.danger { border-color: var(--bad); color: var(--bad); }
+/* Delete and remove buttons: a pastel red (#56). */
+button.danger { background: var(--danger-bg); border-color: var(--danger-bg); color: var(--danger-ink); }
 #subs-empty[hidden] { display: none; }
 .howto-button {
   font: inherit;
@@ -256,7 +272,6 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .ill-check { fill: var(--gold); }
 .ill-tick { fill: none; stroke: #1a1305; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 520px) {
-  .card { padding: 16px; }
   .pair { grid-template-columns: 1fr; }
   .actions { justify-content: stretch; }
   .actions button { flex: 1; }
@@ -272,7 +287,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   gap: 8px 16px;
   padding: 8px 16px;
   font-size: 13px;
-  background: #121c27;
+  background: #1a2835;
   border-bottom: 1px solid var(--line);
 }
 .alert-strip-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; min-width: 0; }
@@ -320,19 +335,33 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   .alert-chip { width: 100%; }
 }
 
-/* The main navigation (#43): real tabs, not a button next to the language switch. */
+/* The main navigation (#43): real tabs. On a phone they stay a row; on a computer they are a
+   list under the logo, each item with a small icon (#56). */
 .topnav {
+  grid-area: nav;
   display: flex;
   gap: 4px;
-  margin: 0 0 18px;
+  min-width: 0;
+  margin: 0;
   padding: 0;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+}
+.nav-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .nav-item {
   flex: none;
   display: inline-flex;
   align-items: center;
+  gap: 10px;
   min-height: 44px;
   padding: 0 14px;
   font: inherit;
@@ -348,6 +377,18 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .nav-item[aria-current="page"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--gold); }
 .nav-item:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--gold-soft); }
 .nav-howto { margin-left: auto; color: var(--gold); }
+@media (min-width: 800px) {
+  .card {
+    grid-template-columns: 190px minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "logo page" "nav page" "lang page";
+    column-gap: 40px;
+  }
+  .topnav { flex-direction: column; border-bottom: 0; overflow: visible; }
+  .nav-item { padding: 0 12px; border-bottom: 0; border-radius: 10px; }
+  .nav-item[aria-current="page"] { background: var(--button); border-bottom-color: transparent; }
+  .nav-howto { margin-left: 0; margin-top: 8px; }
+}
 /* Shown until the scripts have started; they hide it. If it stays, the scripts did not load. */
 .js-warning {
   margin: 0 0 14px;
@@ -383,7 +424,23 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 body:not([data-auth="in"]) [data-auth-only] { display: none !important; }
 body:not([data-auth="out"]) [data-guest-only] { display: none !important; }
 body:not([data-role="admin"]) [data-admin-only] { display: none !important; }
-.account-chip { max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:not([data-auth="in"]) .page-head { display: none; }
+/* The signed-in account as a circle with the first letter of the name (#56). */
+.account-chip {
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--button);
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .login { max-width: 26em; margin: 1.5rem auto; }
 .account { max-width: 28em; }
 .account h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }
