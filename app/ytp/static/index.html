@@ -61,9 +61,10 @@
       <div class="page-head" data-auth-only>
         <button type="button" id="account-open" class="account-chip" aria-haspopup="dialog" data-i18n-label="account.menu" data-auth-only></button>
       </div>
+      <h1 id="input-title" class="page-title" data-view="input" data-i18n="nav.input" data-auth-only></h1>
 
     <section id="login" class="panel login" aria-labelledby="login-title" data-guest-only>
-      <h2 id="login-title" class="jobs-title" data-i18n="login.title"></h2>
+      <h1 id="login-title" class="page-title" data-i18n="login.title"></h1>
       <p id="login-note" class="banner" role="alert" hidden></p>
       <p id="login-setup" class="banner" role="alert" hidden></p>
       <form id="login-form" method="post" action="/reload-needed" autocomplete="on" novalidate>
@@ -277,7 +278,7 @@
     </a>
 
     <section id="subscriptions" class="subs" data-view="subscriptions" data-auth-only aria-labelledby="subs-title" hidden>
-      <h2 id="subs-title" class="jobs-title" data-i18n="subs.title"></h2>
+      <h1 id="subs-title" class="page-title" data-i18n="subs.title"></h1>
       <p id="subs-result" class="result" role="status" aria-live="polite"></p>
       <p id="subs-load-error" class="error" role="status"></p>
       <div id="subs-list" class="subs-groups">
@@ -294,6 +295,7 @@
     </section>
 
     <section id="dashboard" class="dashboard" data-view="dashboard" data-auth-only hidden>
+      <h1 id="dashboard-title" class="page-title" data-i18n="nav.dashboard"></h1>
       <p id="dash-error" class="error" role="status"></p>
 
       <section class="jobs" aria-labelledby="dash-active-title">
@@ -339,7 +341,7 @@
     </section>
 
     <section id="accounts" class="subs" data-view="accounts" data-auth-only data-admin-only aria-labelledby="accounts-title" hidden>
-      <h2 id="accounts-title" class="jobs-title" data-i18n="accounts.title"></h2>
+      <h1 id="accounts-title" class="page-title" data-i18n="accounts.title"></h1>
       <form id="accounts-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
         <div class="row">
           <label class="field" for="accounts-name" data-i18n="accounts.name"></label>

@@ -270,6 +270,30 @@ def test_buttons_are_compact_on_a_computer_and_stay_large_on_a_phone():
     assert re.search(r"button\.primary \{[^}]*padding: 6px 12px", block, re.S)
 
 
+def test_every_page_has_a_headline_with_its_name():
+    """Issue #58: page headlines, about twice the size of a section title."""
+    expected = {
+        "login-title": "login.title",
+        "input-title": "nav.input",
+        "dashboard-title": "nav.dashboard",
+        "subs-title": "subs.title",
+        "accounts-title": "accounts.title",
+    }
+    for element_id, key in expected.items():
+        tag = re.search(rf'<h1 id="{element_id}"[^>]*>', HTML)
+        assert tag, f"{element_id} is not an h1"
+        assert 'class="page-title"' in tag.group(0)
+        assert f'data-i18n="{key}"' in tag.group(0)
+    rule = re.search(r"\.page-title \{[^}]*\}", CSS).group(0)
+    assert "font-size: 34px" in rule
+
+
+def test_delete_buttons_are_a_pastel_crimson():
+    assert "--danger-bg: #d98a9c" in CSS
+    rule = re.search(r"button\.danger \{[^}]*\}", CSS).group(0)
+    assert "background: var(--danger-bg)" in rule
+
+
 def test_the_sidebar_is_glued_to_the_top_left_of_the_screen():
     """Issue #57: the logo and the menu must sit at the screen's left edge, not inside a
     centred container, and stay there while the page scrolls."""
