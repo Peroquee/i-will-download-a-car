@@ -172,7 +172,9 @@ bridge network (no published port; `WATCHDOG_STATUS_PORT=0` turns it off). It re
 no secrets, no addresses, so it needs no login. The app does not share a volume with the watchdog
 and the watchdog does not use the app's database: the app only LOOKS, through
 `GET /api/vpn` (for any logged-in account), which answers `state: unknown` when the watchdog does
-not answer. `/health` does not depend on it.
+not answer. That answer is extended with the dashboard's independent `internet` and `watchdog`
+objects (#63); the watchdog's own `state` and fields stay unchanged. `/health` does not depend on
+it.
 
 | `state` | badge |
 |---|---|

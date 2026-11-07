@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -86,14 +87,40 @@ class NoDownload:
         raise RuntimeError("the UI test downloads nothing")
 
 
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 class OkWatchdog:
     def fetch_status(self):
-        return {"state": "ok", "egress": "ok", "egress_country": "Switzerland"}
+        return {
+            "state": "ok",
+            "egress": "ok",
+            "egress_country": "Switzerland",
+            "last_poll": _now(),
+            "since": "2026-11-07T09:00:00Z",
+            "paused": False,
+        }
 
 
 class DownWatchdog:
     def fetch_status(self):
-        return {"state": "down", "paused": True, "reason": "seeded by the UI test"}
+        return {
+            "state": "down",
+            "paused": True,
+            "reason": "seeded by the UI test",
+            "last_poll": _now(),
+        }
+
+
+class OkInternet:
+    def refresh(self):
+        return {"state": "ok", "checked_at": _now()}
+
+
+class OfflineInternet:
+    def refresh(self):
+        return {"state": "offline", "checked_at": _now()}
 
 
 RSS = b"""<?xml version="1.0"?>
@@ -156,6 +183,7 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
     app.state.channels = ChannelResolver(app.state.youtube)
     app.state.youtube_worker.downloader = NoDownload()
     app.state.watchdog_status = OkWatchdog()
+    app.state.internet = OkInternet()
     app.state.podcast_feeds = PodcastFeedClient(StubFeedFetcher())
     if app.state.podcast_worker is not None:
         app.state.podcast_worker.feeds = app.state.podcast_feeds
@@ -171,6 +199,14 @@ def base_url(tmp_path_factory: pytest.TempPathFactory):
     accounts.follow(db, "channel", channel.id, alice.id)
     podcast, _ = add_podcast_subscription(db, "https://example.org/seed.xml", "Seeded Podcast")
     accounts.follow(db, "podcast", podcast.id, admin.id)
+    for number in range(1, 13):
+        done, _ = job_store.submit_job(
+            db,
+            "youtube",
+            f"seed-done-{number}",
+            json.dumps({"type": "youtube", "channel": "Seeder", "title": f"Done {number}"}),
+        )
+        job_store.transition(db, done.id, "done", expected=("queued",))
     seeded_video, _ = job_store.submit_job(
         db,
         "youtube",
@@ -225,6 +261,7 @@ def down_base_url(tmp_path_factory: pytest.TempPathFactory):
     app = create_app(settings)
     server, thread, url = start_server(app)
     app.state.watchdog_status = DownWatchdog()
+    app.state.internet = OfflineInternet()
     try:
         yield url
     finally:

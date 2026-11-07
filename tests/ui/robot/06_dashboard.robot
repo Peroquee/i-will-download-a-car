@@ -5,16 +5,32 @@ Suite Teardown    Close All Browsers
 Test Setup        Open Dashboard Page
 
 *** Test Cases ***
-The Dashboard Shows Jobs Alerts Vpn And Storage
+The Overview Shows The Three States And The Alert Summary
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:status-internet-state    Online
+    Element Should Contain    id:status-vpn-state    VPN running
+    Element Should Contain    id:status-watchdog-state    Watching
+    Element Should Contain    id:dash-alert-counts    Errors
+    Element Should Contain    id:dash-alert-counts    unread
+    Element Should Not Be Visible    id:dash-vpn
+
+The Jobs Tab Shows Active And Finished Downloads
+    Click Element    id:dash-tab-jobs
+    Wait Until Element Is Visible    id:dash-jobs-view
     Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:dash-recent-list    Seeder - Seeded Video
     Element Should Contain    id:dash-recent-list    Seeded Magnet (2000)
-    Element Should Contain    id:dash-alerts-list    The storage is almost full
-    Element Should Contain    id:dash-vpn-list    VPN running
-    Element Should Contain    id:dash-vpn-list    VPN down
-    Element Should Contain    id:dash-disk    Storage:
-    Element Should Not Be Visible    id:dash-deploy
+
+Finished Downloads Start At Ten And Expand To Fifty
+    Click Element    id:dash-tab-jobs
+    Wait Until Element Is Visible    id:dash-jobs-view
+    Wait Until Keyword Succeeds    15s    0.5s    Finished Rows Equal    10
+    Click Button    id:dash-limit
+    Wait Until Keyword Succeeds    15s    0.5s    Finished Rows At Least    12
+    Click Button    id:dash-limit
+    Wait Until Keyword Succeeds    15s    0.5s    Finished Rows Equal    10
 
 A Failed Magnet Job Can Be Retried
+    Click Element    id:dash-tab-jobs
+    Wait Until Element Is Visible    id:dash-jobs-view
     ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'Seeded Magnet (2000)')]
     Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Try again']
     Click Button    ${row}//button[normalize-space(.)='Try again']
@@ -23,6 +39,8 @@ A Failed Magnet Job Can Be Retried
     Should Not Contain    ${recent}    Seeded Magnet (2000)
 
 A Failed Job Can Be Dismissed And Restored
+    Click Element    id:dash-tab-jobs
+    Wait Until Element Is Visible    id:dash-jobs-view
     ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'Seeder - Seeded Video')]
     Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Dismiss']
     Click Button    ${row}//button[normalize-space(.)='Dismiss']
@@ -33,7 +51,9 @@ A Failed Job Can Be Dismissed And Restored
     Click Button    ${row}//button[normalize-space(.)='Show again']
     Wait Until Keyword Succeeds    20s    0.5s    Element Should Contain    ${row}    Dismiss
 
-An Alert Can Be Marked As Read On The Dashboard
+An Alert Can Be Marked As Read On The Alert Tab
+    Click Element    id:dash-tab-alerts
+    Wait Until Element Is Visible    id:dash-alerts-view
     Wait Until Keyword Succeeds    15s    0.5s    Element Should Be Visible    xpath=(//li[contains(@class,'alert-item')]//button[normalize-space(.)='Mark as read'])[1]
     ${count}=    Get Element Count    xpath=//li[contains(@class,'alert-item')]//button[normalize-space(.)='Mark as read']
     Should Be True    ${count} >= 1
@@ -44,3 +64,23 @@ The Alert Strip Marks Everything As Read
     Wait Until Element Is Visible    id:alert-strip-ack
     Click Button    id:alert-strip-ack
     Wait Until Element Is Not Visible    id:alert-strip
+
+The Vpn Tab Shows The State Storage And History
+    Click Element    id:dash-tab-vpn
+    Wait Until Element Is Visible    id:dash-vpn
+    Element Should Contain    id:dash-vpn-now    VPN running
+    Element Should Contain    id:dash-vpn-list    VPN running
+    Element Should Contain    id:dash-disk    Storage:
+    Element Should Not Be Visible    id:dash-deploy
+
+
+*** Keywords ***
+Finished Rows Equal
+    [Arguments]    ${expected}
+    ${rows}=    Get Element Count    xpath=//*[@id='dash-recent-list']/li
+    Should Be Equal As Integers    ${rows}    ${expected}
+
+Finished Rows At Least
+    [Arguments]    ${expected}
+    ${rows}=    Get Element Count    xpath=//*[@id='dash-recent-list']/li
+    Should Be True    ${rows} >= ${expected}

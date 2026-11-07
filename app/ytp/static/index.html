@@ -299,48 +299,112 @@
 
     <section id="dashboard" class="dashboard" data-view="dashboard" data-auth-only hidden>
       <h1 id="dashboard-title" class="page-title" data-i18n="nav.dashboard"></h1>
+      <nav id="dash-tabs" class="dash-tabs" aria-label="Dashboard sections" data-i18n-label="dash.tabs_label">
+        <a id="dash-tab-overview" class="dash-tab" href="/dashboard#overview" data-dash-tab="overview" aria-current="page" data-i18n="dash.overview"></a>
+        <a id="dash-tab-jobs" class="dash-tab" href="/dashboard#jobs" data-dash-tab="jobs" data-i18n="dash.jobs"></a>
+        <a id="dash-tab-vpn" class="dash-tab" href="/dashboard#vpn" data-dash-tab="vpn" data-i18n="dash.vpn_tab"></a>
+        <a id="dash-tab-alerts" class="dash-tab" href="/dashboard#alerts" data-dash-tab="alerts" data-i18n="dash.alerts" data-admin-only></a>
+      </nav>
       <p id="dash-error" class="error" role="status"></p>
 
-      <section class="jobs" aria-labelledby="dash-active-title">
-        <h2 id="dash-active-title" class="jobs-title" data-i18n="dash.active"></h2>
-        <ul id="dash-active-list" class="job-list"></ul>
-        <p id="dash-active-empty" class="note" data-i18n="dash.active_empty" hidden></p>
-      </section>
+      <div id="dash-overview" class="dash-view" data-dash-view="overview">
+        <section id="dash-status" class="dash-status" aria-label="System status" data-i18n-label="dash.status_label">
+          <article id="status-internet" class="status-card">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-body">
+              <span class="status-label" data-i18n="dash.internet"></span>
+              <strong id="status-internet-state" class="status-state">&mdash;</strong>
+              <span id="status-internet-detail" class="status-detail"></span>
+            </div>
+          </article>
+          <article id="status-vpn" class="status-card">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-body">
+              <span class="status-label" data-i18n="dash.vpn"></span>
+              <strong id="status-vpn-state" class="status-state">&mdash;</strong>
+              <span id="status-vpn-detail" class="status-detail"></span>
+            </div>
+          </article>
+          <article id="status-watchdog" class="status-card">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-body">
+              <span class="status-label" data-i18n="dash.watchdog"></span>
+              <strong id="status-watchdog-state" class="status-state">&mdash;</strong>
+              <span id="status-watchdog-detail" class="status-detail"></span>
+            </div>
+          </article>
+        </section>
 
-      <section id="dash-backlog-box" class="jobs" aria-labelledby="dash-backlog-title" hidden>
-        <h2 id="dash-backlog-title" class="jobs-title" data-i18n="dash.backlog"></h2>
-        <ul id="dash-backlog-list" class="job-list"></ul>
-      </section>
+        <section id="dash-alert-summary" class="dash-summary" data-admin-only aria-labelledby="dash-alert-summary-title">
+          <div class="summary-head">
+            <h2 id="dash-alert-summary-title" class="jobs-title" data-i18n="dash.alerts"></h2>
+            <a class="summary-link" href="/dashboard#alerts" data-i18n="dash.open_alerts"></a>
+          </div>
+          <div id="dash-alert-counts" class="alert-counts"></div>
+        </section>
 
-      <section class="jobs" aria-labelledby="dash-recent-title">
-        <h2 id="dash-recent-title" class="jobs-title" data-i18n="dash.recent"></h2>
-        <div class="jobs-tools">
-          <button type="button" id="dash-dismiss-all" class="ghost small" data-i18n="dash.dismiss_all" hidden></button>
-          <button type="button" id="dash-show-dismissed" class="ghost small" aria-pressed="false" hidden></button>
-        </div>
-        <ul id="dash-recent-list" class="job-list"></ul>
-        <p id="dash-recent-empty" class="note" data-i18n="dash.recent_empty" hidden></p>
-      </section>
+        <section id="dash-jobs-summary" class="dash-summary" aria-labelledby="dash-jobs-summary-title">
+          <div class="summary-head">
+            <h2 id="dash-jobs-summary-title" class="jobs-title" data-i18n="dash.jobs"></h2>
+            <a class="summary-link" href="/dashboard#jobs" data-i18n="dash.open_jobs"></a>
+          </div>
+          <div class="summary-stats">
+            <div class="summary-stat"><span class="stat-label" data-i18n="dash.next"></span><strong id="dash-next-job" class="stat-value">&mdash;</strong></div>
+            <div class="summary-stat"><span class="stat-label" data-i18n="dash.jobs"></span><strong id="dash-job-count" class="stat-value">&mdash;</strong></div>
+            <div class="summary-stat"><span class="stat-label" data-i18n="dash.remaining"></span><strong id="dash-total-eta" class="stat-value">&mdash;</strong></div>
+            <div class="summary-stat"><span class="stat-label" data-i18n="dash.speed"></span><strong id="dash-total-speed" class="stat-value">&mdash;</strong></div>
+          </div>
+        </section>
+      </div>
 
-      <section id="dash-vpn" class="jobs" aria-labelledby="dash-vpn-title">
-        <h2 id="dash-vpn-title" class="jobs-title" data-i18n="dash.vpn"></h2>
-        <p id="dash-vpn-now" class="dash-vpn-now"></p>
-        <p id="dash-vpn-explain" class="note"></p>
-        <p id="dash-disk" class="note" data-admin-only></p>
-        <p id="dash-deploy" class="note" data-admin-only hidden></p>
-        <ul id="dash-vpn-list" class="dash-events" data-admin-only></ul>
-        <p id="dash-vpn-empty" class="note" data-i18n="dash.vpn_empty" data-admin-only hidden></p>
-      </section>
+      <div id="dash-jobs-view" class="dash-view" data-dash-view="jobs" hidden>
+        <section class="jobs" aria-labelledby="dash-active-title">
+          <h2 id="dash-active-title" class="jobs-title" data-i18n="dash.active"></h2>
+          <ul id="dash-active-list" class="job-list"></ul>
+          <p id="dash-active-empty" class="note" data-i18n="dash.active_empty" hidden></p>
+        </section>
 
-      <section id="alerts" class="jobs" data-admin-only aria-labelledby="dash-alerts-title">
-        <div class="jobs-head">
-          <h2 id="dash-alerts-title" class="jobs-title" data-i18n="dash.alerts"></h2>
-          <button type="button" id="dash-alerts-ack" class="ghost small" data-i18n="alert.ack_all" hidden></button>
-        </div>
-        <p id="dash-alerts-error" class="error" role="status"></p>
-        <ul id="dash-alerts-list" class="job-list"></ul>
-        <p id="dash-alerts-empty" class="note" data-i18n="alert.empty" hidden></p>
-      </section>
+        <section id="dash-backlog-box" class="jobs" aria-labelledby="dash-backlog-title" hidden>
+          <h2 id="dash-backlog-title" class="jobs-title" data-i18n="dash.backlog"></h2>
+          <ul id="dash-backlog-list" class="job-list"></ul>
+        </section>
+
+        <section class="jobs" aria-labelledby="dash-recent-title">
+          <div class="jobs-head">
+            <h2 id="dash-recent-title" class="jobs-title" data-i18n="dash.recent"></h2>
+            <button type="button" id="dash-limit" class="ghost small" data-i18n="dash.show_50" hidden></button>
+          </div>
+          <div class="jobs-tools">
+            <button type="button" id="dash-dismiss-all" class="ghost small" data-i18n="dash.dismiss_all" hidden></button>
+            <button type="button" id="dash-show-dismissed" class="ghost small" aria-pressed="false" hidden></button>
+          </div>
+          <ul id="dash-recent-list" class="job-list"></ul>
+          <p id="dash-recent-empty" class="note" data-i18n="dash.recent_empty" hidden></p>
+        </section>
+      </div>
+
+      <div id="dash-vpn-view" class="dash-view" data-dash-view="vpn" hidden>
+        <section id="dash-vpn" class="jobs" aria-labelledby="dash-vpn-title">
+          <h2 id="dash-vpn-title" class="jobs-title" data-i18n="dash.vpn"></h2>
+          <p id="dash-vpn-now" class="dash-vpn-now"></p>
+          <p id="dash-disk" class="note" data-admin-only></p>
+          <p id="dash-deploy" class="note" data-admin-only hidden></p>
+          <ul id="dash-vpn-list" class="dash-events" data-admin-only></ul>
+          <p id="dash-vpn-empty" class="note" data-i18n="dash.vpn_empty" data-admin-only hidden></p>
+        </section>
+      </div>
+
+      <div id="dash-alerts-view" class="dash-view" data-dash-view="alerts" hidden>
+        <section id="alerts" class="jobs" data-admin-only aria-labelledby="dash-alerts-title">
+          <div class="jobs-head">
+            <h2 id="dash-alerts-title" class="jobs-title" data-i18n="dash.alerts"></h2>
+            <button type="button" id="dash-alerts-ack" class="ghost small" data-i18n="alert.ack_all" hidden></button>
+          </div>
+          <p id="dash-alerts-error" class="error" role="status"></p>
+          <ul id="dash-alerts-list" class="job-list"></ul>
+          <p id="dash-alerts-empty" class="note" data-i18n="alert.empty" hidden></p>
+        </section>
+      </div>
     </section>
 
     <section id="accounts" class="subs" data-view="accounts" data-auth-only data-admin-only aria-labelledby="accounts-title" hidden>
@@ -676,12 +740,42 @@
     "subs.skipped_more": "und {n} weitere",
     "dash.active": "Läuft und wartet",
     "dash.active_empty": "Gerade läuft und wartet nichts.",
+    "dash.overview": "Übersicht",
+    "dash.jobs": "Aufträge",
+    "dash.vpn_tab": "VPN",
+    "dash.tabs_label": "Dashboard-Bereiche",
+    "dash.status_label": "Systemstatus",
+    "dash.internet": "Internet",
+    "dash.watchdog": "Watchdog",
+    "dash.internet_ok": "Online",
+    "dash.internet_offline": "Kein Internet",
+    "dash.internet_unknown": "Unbekannt",
+    "dash.watchdog_ok": "Überwacht",
+    "dash.watchdog_blind": "Blind",
+    "dash.watchdog_stale": "Veraltet",
+    "dash.watchdog_unreachable": "Antwortet nicht",
+    "dash.watchdog_starting": "Startet",
+    "dash.checked": "geprüft {when}",
+    "dash.next": "Als Nächstes fertig",
+    "dash.none": "Nichts läuft",
+    "dash.job_count": "{n} Aufträge",
+    "dash.remaining": "Verbleibend",
+    "dash.speed": "Tempo",
+    "dash.open_jobs": "Aufträge öffnen",
+    "dash.open_alerts": "Meldungen öffnen",
+    "dash.show_50": "50 anzeigen",
+    "dash.show_10": "10 anzeigen",
+    "dash.unread": "{n} ungelesen",
+    "dash.no_alerts": "Keine Meldungen",
+    "dash.errors": "Fehler",
+    "dash.warnings": "Warnungen",
+    "dash.notices": "Hinweise",
     "dash.recent": "Zuletzt fertig oder fehlgeschlagen",
     "dash.recent_empty": "Noch nichts abgeschlossen.",
     "dash.dismiss_all": "Alle fehlgeschlagenen ausblenden",
     "dash.show_dismissed": "Ausgeblendete anzeigen ({n})",
     "dash.hide_dismissed": "Ausgeblendete verbergen",
-    "dash.vpn": "VPN und Wächter",
+    "dash.vpn": "VPN",
     "dash.vpn_empty": "Noch keine Wechsel aufgezeichnet.",
     "dash.since": "seit {when}",
     "dash.paused": "Torrents angehalten",
@@ -852,7 +946,6 @@
     "vpn.details": "Details ›",
     "reload.new_version": "Die App wurde aktualisiert. Bitte die Seite neu laden.",
     "reload.button": "Neu laden",
-    "dash.vpn_explain_ok": "Das VPN läuft: alle Downloads gehen durch den Tunnel, und der Wächter prüft laufend, ob das so bleibt. Unten steht, wann sich der Zustand geändert hat.",
     "subs.never": "noch nie geprüft",
     "subs.checked": "geprüft {when}",
     "subs.poll": "Jetzt prüfen",
@@ -1094,12 +1187,42 @@
     "subs.skipped_more": "and {n} more",
     "dash.active": "Running and waiting",
     "dash.active_empty": "Nothing is running or waiting right now.",
+    "dash.overview": "Overview",
+    "dash.jobs": "Jobs",
+    "dash.vpn_tab": "VPN",
+    "dash.tabs_label": "Dashboard sections",
+    "dash.status_label": "System status",
+    "dash.internet": "Internet",
+    "dash.watchdog": "Watchdog",
+    "dash.internet_ok": "Online",
+    "dash.internet_offline": "Offline",
+    "dash.internet_unknown": "Unknown",
+    "dash.watchdog_ok": "Watching",
+    "dash.watchdog_blind": "Blind",
+    "dash.watchdog_stale": "Stale",
+    "dash.watchdog_unreachable": "Not answering",
+    "dash.watchdog_starting": "Starting",
+    "dash.checked": "checked {when}",
+    "dash.next": "Next to finish",
+    "dash.none": "Nothing running",
+    "dash.job_count": "{n} jobs",
+    "dash.remaining": "Remaining",
+    "dash.speed": "Speed",
+    "dash.open_jobs": "Open jobs",
+    "dash.open_alerts": "Open messages",
+    "dash.show_50": "Show 50",
+    "dash.show_10": "Show 10",
+    "dash.unread": "{n} unread",
+    "dash.no_alerts": "No messages",
+    "dash.errors": "Errors",
+    "dash.warnings": "Warnings",
+    "dash.notices": "Notices",
     "dash.recent": "Recently finished or failed",
     "dash.recent_empty": "Nothing has finished yet.",
     "dash.dismiss_all": "Dismiss all failed",
     "dash.show_dismissed": "Show dismissed ({n})",
     "dash.hide_dismissed": "Hide dismissed",
-    "dash.vpn": "VPN and watchdog",
+    "dash.vpn": "VPN",
     "dash.vpn_empty": "No changes recorded yet.",
     "dash.since": "since {when}",
     "dash.paused": "torrents paused",
@@ -1270,7 +1393,6 @@
     "vpn.details": "Details ›",
     "reload.new_version": "The app was updated. Please reload the page.",
     "reload.button": "Reload",
-    "dash.vpn_explain_ok": "The VPN is running: all downloads go through the tunnel, and the watchdog keeps checking that this stays so. Below you see when the state changed.",
     "subs.never": "never checked",
     "subs.checked": "checked {when}",
     "subs.poll": "Check now",

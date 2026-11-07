@@ -493,6 +493,13 @@ def test_an_unreadable_status_is_unknown(body):
     assert got["state"] == "unknown"
 
 
+class FakeInternet:
+    """The status endpoint must not do a real DNS + TCP check in the unit suite."""
+
+    def refresh(self):
+        return {"state": "ok", "checked_at": "2026-11-07T12:00:00Z"}
+
+
 def make_app(tmp_path: Path, status_url: str) -> TestClient:
     config = tmp_path / "config"
     config.mkdir(exist_ok=True)
@@ -502,7 +509,9 @@ def make_app(tmp_path: Path, status_url: str) -> TestClient:
         "CONFIG_DIR": str(config),
         "WATCHDOG_STATUS_URL": status_url,
     }
-    return TestClient(create_app(Settings.from_env(values)))
+    client = TestClient(create_app(Settings.from_env(values)))
+    client.app.state.internet = FakeInternet()
+    return client
 
 
 def test_api_vpn_shows_the_watchdogs_state(tmp_path, gluetun, qbit_server, target):

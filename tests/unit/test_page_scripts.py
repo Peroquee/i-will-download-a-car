@@ -1087,7 +1087,7 @@ def dashboard_with(runs, *steps):
         "/api/dashboard": {**ANSWERS["/api/dashboard"], "backlogs": runs},
         "DELETE /api/podcasts/backlog/7": {"ok": True},
     }
-    return page("/dashboard", answers=answers, steps=[*steps])
+    return page("/dashboard", hash_="#jobs", answers=answers, steps=[*steps])
 
 
 @needs_node
@@ -1149,12 +1149,13 @@ DONE_JOB = {**FAILED_JOB, "id": 8, "status": "done", "error": None, "can_retry":
 
 def dashboard_jobs(recent, dismissed=0, *steps, language="en-US"):
     answers = {
-        "/api/dashboard": {**ANSWERS["/api/dashboard"], "recent": recent, "dismissed": dismissed},
+        "/api/dashboard": {**ANSWERS["/api/dashboard"], "dismissed": dismissed},
+        "/api/jobs": {"jobs": recent, "counts": {"dismissed": dismissed}},
         "POST /api/jobs/7/dismiss": {"id": 7, "dismissed": True},
         "DELETE /api/jobs/7/dismiss": {"id": 7, "dismissed": False},
         "POST /api/jobs/dismiss-failed": {"dismissed": 1},
     }
-    return page("/dashboard", language=language, answers=answers, steps=[*steps])
+    return page("/dashboard", hash_="#jobs", language=language, answers=answers, steps=[*steps])
 
 
 @needs_node
@@ -1163,7 +1164,7 @@ def test_a_failed_job_can_be_dismissed_from_the_dashboard():
     assert out["errors"] == [], out["errors"]
     assert ["POST", "/api/jobs/7/dismiss"] in out["fetched"]
     # The list is fetched again afterwards, so the row goes away.
-    assert out["fetched"].count(["GET", "/api/dashboard"]) >= 2
+    assert out["fetched"].count(["GET", "/api/jobs?limit=50"]) >= 2
 
 
 @needs_node
@@ -1204,16 +1205,43 @@ def test_the_show_dismissed_toggle_appears_only_when_there_are_dismissed_jobs():
 
 
 @needs_node
-def test_the_toggle_asks_for_the_dismissed_jobs_and_a_dismissed_job_can_be_shown_again():
+def test_the_show_dismissed_toggle_reveals_the_dismissed_job_and_it_can_be_shown_again():
     shown = {**FAILED_JOB, "dismissed": True}
-    out = dashboard_jobs([DONE_JOB], 1, {"click": "#dash-show-dismissed"})
+    out = dashboard_jobs(
+        [shown],
+        1,
+        {"click": "#dash-show-dismissed"},
+        {"read": "#dash-recent-list"},
+        {"read": "#dash-dismiss-all"},
+        {"click": "#dash-recent-list .dismiss"},
+    )
     assert out["errors"] == [], out["errors"]
-    assert ["GET", "/api/dashboard?dismissed=1"] in out["fetched"]
-    out = dashboard_jobs([shown], 1, {"read": "#dash-recent-list"}, {"read": "#dash-dismiss-all"})
     assert "Show again" in out["reads"]["#dash-recent-list"]["text"]
     assert out["reads"]["#dash-dismiss-all"]["hidden"] is True  # nothing left to dismiss
-    out = dashboard_jobs([shown], 1, {"click": "#dash-recent-list .dismiss"})
     assert ["DELETE", "/api/jobs/7/dismiss"] in out["fetched"]
+
+
+@needs_node
+def test_finished_downloads_show_ten_by_default_and_up_to_fifty():
+    jobs = [
+        {"id": i, "type": "magnet", "kind": "movies", "label": f"Finished {i}",
+         "status": "done", "error": None, "can_retry": False, "dismissed": False,
+         "created_at": "x", "updated_at": "x"}
+        for i in range(1, 16)
+    ]  # fmt: skip
+    default = dashboard_jobs(jobs, 0, {"read": "#dash-recent-list"}, {"read": "#dash-limit"})
+    assert default["errors"] == [], default["errors"]
+    assert default["reads"]["#dash-recent-list"]["children"] == 10
+    assert default["reads"]["#dash-limit"]["text"] == "Show 50"
+    expanded = dashboard_jobs(
+        jobs, 0, {"click": "#dash-limit"}, {"read": "#dash-recent-list"}, {"read": "#dash-limit"}
+    )
+    assert expanded["reads"]["#dash-recent-list"]["children"] == 15
+    assert expanded["reads"]["#dash-limit"]["text"] == "Show 10"
+    collapsed = dashboard_jobs(
+        jobs, 0, {"click": "#dash-limit"}, {"click": "#dash-limit"}, {"read": "#dash-recent-list"}
+    )
+    assert collapsed["reads"]["#dash-recent-list"]["children"] == 10
 
 
 @needs_node

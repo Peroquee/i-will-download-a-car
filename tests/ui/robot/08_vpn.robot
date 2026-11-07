@@ -14,12 +14,12 @@ The Vpn Indicator Shows The Running State
     Should Be True    ${size}[0] >= 32
     Should Be True    ${size}[1] >= 32
 
-The Vpn Part Explains The State
+The Vpn Tab Shows The Current State
     Click Element    id:vpn-indicator
     Wait Until Element Is Visible    id:dashboard
+    Wait Until Element Is Visible    id:dash-vpn
     Element Should Contain    id:dash-vpn-now    VPN running
-    ${text}=    Get Text    id:dash-vpn-explain
-    Should Not Be Empty    ${text}
+    Element Attribute Value Should Be    id:dash-tab-vpn    aria-current    page
 
 *** Keywords ***
 The Vpn Indicator Is Ok
