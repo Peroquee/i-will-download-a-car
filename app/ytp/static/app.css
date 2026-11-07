@@ -23,45 +23,45 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 [hidden] { display: none !important; }
-.vpn-bar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  font-size: 13px;
-  background: #1b2936;
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
-}
-/* The whole bar is one link to the explanation and history on the dashboard (#43). */
-.vpn-link {
-  display: flex;
-  gap: 10px;
+/* VPN status: a fixed-size dot beside the language switch; the top banner appears only for a
+   real problem, so a normal page load never moves (#61). */
+.vpn-indicator {
+  display: inline-flex;
   align-items: center;
-  padding: 8px 16px;
-  min-height: 44px;
-  color: inherit;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   text-decoration: none;
 }
-.vpn-link:hover .vpn-more { text-decoration: underline; }
-.vpn-link:focus-visible { outline: 3px solid var(--gold); outline-offset: -3px; }
-.vpn-more { margin-left: auto; flex: none; opacity: 0.85; white-space: nowrap; }
-.vpn-main { display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 2px; min-width: 0; }
-.vpn-detail { overflow-wrap: anywhere; }
-.vpn-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #66707d; }
-.vpn-ok { color: var(--good); }
-.vpn-ok .vpn-dot { background: var(--good); }
-.vpn-starting .vpn-dot, .vpn-stale .vpn-dot, .vpn-unknown .vpn-dot { background: var(--gold); }
-.vpn-starting, .vpn-stale, .vpn-unknown { color: var(--gold); }
-/* Down, leaking or blind: a solid red band that cannot be mistaken for the calm states. */
-.vpn-down, .vpn-mismatch, .vpn-blind {
+.vpn-indicator:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--gold-soft); }
+.vpn-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--good); }
+.vpn-indicator:not(.vpn-ok) .vpn-dot { background: var(--danger-bg); }
+/* Down, leaking or blind: the unmissable banner at the top, with the text and details. */
+.vpn-banner {
+  position: sticky;
+  top: 0;
+  z-index: 15;
   font-size: 16px;
   background: #a4372f;
   color: #fff;
   border-bottom: 3px solid #f2e6c9;
 }
-.vpn-down .vpn-link, .vpn-mismatch .vpn-link, .vpn-blind .vpn-link { padding: 14px 16px; }
-.vpn-down .vpn-dot, .vpn-mismatch .vpn-dot, .vpn-blind .vpn-dot { width: 14px; height: 14px; background: #fff; }
-.vpn-down .vpn-detail, .vpn-mismatch .vpn-detail, .vpn-blind .vpn-detail { font-size: 14px; }
+.vpn-banner .vpn-link {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 16px;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+.vpn-banner .vpn-link:hover .vpn-more { text-decoration: underline; }
+.vpn-banner .vpn-link:focus-visible { outline: 3px solid var(--gold); outline-offset: -3px; }
+.vpn-banner .vpn-main { display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 2px; min-width: 0; }
+.vpn-banner .vpn-detail { font-size: 14px; overflow-wrap: anywhere; }
+.vpn-banner .vpn-more { margin-left: auto; flex: none; opacity: 0.85; white-space: nowrap; }
+.vpn-banner .vpn-dot { width: 14px; height: 14px; background: #fff; }
 /* On a phone the parts stack; on a computer the sidebar is fixed to the screen's left edge and
    the content sits to its right (#56, #57). */
 .layout {
@@ -92,7 +92,7 @@ html, body {
 h1, h2, h3, h4 { font-family: inherit; }
 .page { min-width: 0; }
 .page-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
-#lang { grid-area: lang; justify-self: start; align-self: end; }
+.sidebar-foot { grid-area: lang; display: flex; align-items: center; gap: 12px; justify-self: start; align-self: end; }
 form { display: grid; gap: 14px; }
 .row { display: block; }
 label.field, legend.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
@@ -362,7 +362,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
     border-right: 1px solid var(--line);
     overflow-y: auto;
   }
-  #lang { align-self: start; margin-top: auto; }
+  .sidebar-foot { align-self: stretch; margin-top: auto; }
   #vpn, #update-banner, #alert-strip, .wrap { margin-left: 210px; }
   .wrap { padding: 24px 32px 40px; }
   .topnav { flex-direction: column; border-bottom: 0; overflow: visible; }
@@ -456,4 +456,5 @@ body:not([data-auth="in"]) .page-head { display: none; }
   .alert-strip { padding: 8px 12px; }
   .alert-chip { width: 100%; }
   .nav-item { padding: 0 10px; font-size: 14px; }
+  .vpn-indicator { width: 44px; height: 44px; }
 }
