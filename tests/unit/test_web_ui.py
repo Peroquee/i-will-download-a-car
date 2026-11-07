@@ -269,6 +269,13 @@ def test_buttons_are_compact_on_a_computer_and_stay_large_on_a_phone():
     assert re.search(r"button\.primary \{[^}]*padding: 6px 12px", block, re.S)
 
 
+def test_buttons_keep_their_rounded_shape_while_the_rest_is_flat():
+    """Issue #55: the compact buttons should stay as rounded as they were before #53."""
+    for selector in (r"button\.primary", r"button\.ghost"):
+        rule = re.search(selector + r" \{[^}]*\}", CSS).group(0)
+        assert "border-radius: 10px" in rule, selector
+
+
 def test_the_page_is_flat_and_a_failed_job_is_flagged_not_framed():
     """Issue #53: no card frame or drop shadow, elements separated by thin lines instead of
     rounded outlines, and a red left bar instead of a red border around a failed job."""
