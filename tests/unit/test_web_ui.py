@@ -687,12 +687,12 @@ def test_the_vpn_view_passes_on_only_safe_details():
     )
 
 
-def test_the_vpn_bar_is_part_of_the_page_before_the_content_and_marks_alerts():
+def test_the_vpn_indicator_and_problem_banner_are_part_of_the_page():
     assert HTML.index('id="vpn"') < HTML.index('class="wrap"')
     assert 'id="vpn-detail"' in HTML
     assert "position: sticky" in CSS
-    for view in ("down", "mismatch", "blind"):
-        assert f".vpn-{view}" in CSS
+    assert ".vpn-indicator:not(.vpn-ok) .vpn-dot" in CSS
+    assert ".vpn-banner .vpn-link" in CSS
     assert "favicon-alert.svg" in APP_JS
     assert "visibilityState" in APP_JS
 

@@ -379,7 +379,7 @@ scripts and styles.
 - **German and English** (text in `index.html`, chosen from the browser language, switch at the top
   right, remembered in the browser). Umlauts work everywhere (UTF-8).
 - **Mobile:** one column under 520 px, 44 px touch targets, 16 px inputs (phones do not zoom in).
-- The **VPN bar** (issue #28) sticks to the top of the page, so it is always in view; see below.
+- The **VPN indicator** (issue #28, #61) is a fixed dot at the bottom of the sidebar; a real problem adds a sticky banner, see below.
 
 **Same-origin protection (the note on !20):** the JSON endpoints are state-changing, and the
 browser holds the session cookie, so a page on another website could otherwise make it add downloads.
@@ -407,25 +407,31 @@ subscription list shows channels and podcasts together (`GET /api/subscriptions`
 only (a test fails on `innerHTML`). The API, the file layout and the fetcher's safety rules are in
 [podcasts.md](podcasts.md).
 
-## VPN indicator (issue #28)
+## VPN indicator (issue #28, #61)
 
-A bar across the top of the page, sticky while scrolling, shows the state from `GET /api/vpn`
-(the watchdog's status, see watchdog.md). It asks every 5 s while the tab is visible, and once
-when the tab comes back.
+The state from `GET /api/vpn` (the watchdog's status, see watchdog.md) is a small round dot at the
+bottom of the sidebar, left of the language switch. It has a fixed size, so loading the state does
+not move the page: green for `ok` and the button red (`#ba1436`) for every other state. The dot,
+with the details in its `aria-label` and tooltip, links to `/dashboard#vpn`. It asks every 5 s
+while the tab is visible and once when the tab comes back.
 
-| View | Bar | When |
+A real problem also shows a red banner across the top, sticky while scrolling, with the text and
+details:
+
+| View | Indicator | Banner / when |
 | --- | --- | --- |
-| ok | calm green line, "VPN running", how long ago it changed, exit country | watchdog `ok` (and the egress check not alarming) |
-| down | **solid red band**, "VPN down - downloads paused", "torrents paused" if the watchdog paused them | watchdog `down` |
-| mismatch | **solid red band**, "WARNING: traffic is not going through the VPN" | the egress check (#23) reports a mismatch |
-| blind | **solid red band** | the watchdog cannot read the VPN state (treated like down) |
-| starting, unknown | gold line | the watchdog has not measured yet / does not answer |
-| stale | gold line "Status out of date" | the page's own request to the app failed |
+| ok | green | none (watchdog `ok`, egress check not alarming) |
+| down | red | "VPN down - downloads paused", "torrents paused" if the watchdog paused them |
+| mismatch | red | "WARNING: traffic is not going through the VPN" (egress check #23) |
+| blind | red | banner; the watchdog cannot read the VPN state (treated like down) |
+| starting, unknown | red | none; the watchdog has not measured yet / does not answer |
+| stale | red | none; the label says "Status out of date" |
 
-Anything the page cannot read counts as unknown, never as ok. In the red states the tab title gets
-a warning sign and the icon turns red (`favicon-alert.svg`), so it is visible from another tab too,
-and the bar gets `role="alert"` for screen readers. No sound or animation. The exit country is the
-only detail from the egress check shown; addresses are never sent to the page.
+Anything the page cannot read counts as unknown, never as ok. In the red banner states the tab
+title gets a warning sign and the icon turns red (`favicon-alert.svg`), and the banner has
+`role="alert"`. No sound or animation. The exit country is the only detail from the egress check
+shown; addresses are never sent to the page. The old full-width bar was removed in #61 because it
+shifted the layout while its text loaded.
 
 ## The "How to" guide (issue #33)
 
@@ -564,7 +570,7 @@ builds a path from.
 * **Navigation:** *Eingabe | Dashboard | Abonnements | Anleitung* (Input | Dashboard |
   Subscriptions | How to), 44 px high, the current one marked with `aria-current`.
   *Subscriptions* is the section of the input page (`/#subscriptions`).
-* **The VPN bar is a link** (the whole bar) to `/dashboard#vpn`: the explanation of the state and
+* **The VPN indicator is a link** (the dot, and the problem banner) to `/dashboard#vpn`: the explanation of the state and
   the history of changes, scrolled into view.
 * **"The watchdog does not answer" in the first minute** after the app started is reported as
   `starting` by `GET /api/vpn` (during an install or update the containers restart one after the

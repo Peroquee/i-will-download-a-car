@@ -530,10 +530,7 @@
 
   function refreshVpnText() {
     var info = L.vpnView(vpnStale ? null : vpnData);
-    var bar = $("vpn");
-    bar.className = "vpn-bar vpn-" + info.view + (vpnStale ? " vpn-stale" : "");
-    bar.setAttribute("role", info.alert ? "alert" : "status");
-    $("vpn-text").textContent = vpnStale ? t("vpn.stale") : t("vpn." + info.view);
+    var label = vpnStale ? t("vpn.stale") : t("vpn." + info.view);
     var parts = [];
     if (!vpnStale && ["down", "mismatch", "blind", "starting", "unknown"].indexOf(info.view) >= 0) {
       parts.push(t("vpn.d." + info.view));
@@ -544,12 +541,23 @@
       if (age) parts.push(t("vpn.since", { when: age.unit === "now" ? t("time.now") : t("time." + age.unit, { n: age.n }) }));
     }
     if (info.country) parts.push(t("vpn.country", { country: info.country }));
-    $("vpn-detail").textContent = parts.join(" · ");
+    var detail = parts.join(" · ");
+    // The dot never changes size, so loading the state only changes its colour (#61).
+    var indicator = $("vpn-indicator");
+    indicator.className = "vpn-indicator vpn-" + info.view + (vpnStale ? " vpn-stale" : "");
+    indicator.setAttribute("aria-label", label + (detail ? " · " + detail : ""));
+    indicator.title = indicator.getAttribute("aria-label");
+    // Only a real problem gets the unmissable banner at the top.
+    var banner = $("vpn");
+    banner.hidden = !info.alert;
+    banner.className = "vpn-banner vpn-" + info.view + (vpnStale ? " vpn-stale" : "");
+    banner.setAttribute("role", info.alert ? "alert" : "status");
+    $("vpn-text").textContent = label;
+    $("vpn-detail").textContent = detail;
     // The tab shows it too, for when the page is in the background.
     document.title = (info.alert || vpnStale ? "\u26a0 " : "") + baseTitle;
     $("favicon").setAttribute("href", info.alert ? "/static/favicon-alert.svg" : "/static/favicon.svg");
   }
-
   function pollVpn() {
     api("/api/vpn", { credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (response) {

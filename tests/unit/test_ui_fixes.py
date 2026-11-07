@@ -270,11 +270,15 @@ def test_the_navigation_is_big_enough_to_touch_and_marks_the_current_page():
 # --- the VPN bar --------------------------------------------------------------------------------
 
 
-def test_the_whole_vpn_bar_is_one_link_to_the_dashboard_part():
-    bar = re.search(r'<div id="vpn".*?\n</div>', HTML, re.S)
-    assert bar
+def test_the_vpn_banner_and_indicator_link_to_the_dashboard_part():
+    banner = re.search(r'<div id="vpn".*?\n</div>', HTML, re.S)
+    assert banner
+    assert 'class="vpn-banner vpn-unknown"' in banner.group(0)
+    assert "hidden" in banner.group(0).split(">")[0], "no banner for a normal load"
     link = re.search(
-        r'<a id="vpn-link" class="vpn-link" href="/dashboard#vpn">(.*?)</a>', bar.group(0), re.S
+        r'<a id="vpn-link" class="vpn-link" href="/dashboard#vpn">(.*?)</a>',
+        banner.group(0),
+        re.S,
     )
     assert link, "the link wraps the dot, the text and the hint"
     inner = link.group(1)
@@ -282,13 +286,20 @@ def test_the_whole_vpn_bar_is_one_link_to_the_dashboard_part():
     assert 'id="vpn-detail"' in inner
     assert 'class="vpn-dot"' in inner
     assert 'id="dash-vpn"' in HTML, "and the link has a target on the dashboard"
-    assert re.search(r"\.vpn-link \{[^}]*min-height: 44px", CSS, re.S)
+    assert re.search(r"\.vpn-banner \.vpn-link \{[^}]*min-height: 44px", CSS, re.S)
+    indicator = re.search(r'<a id="vpn-indicator"[^>]*>', HTML)
+    assert indicator, "the calm state is a dot beside the language switch"
+    assert 'href="/dashboard#vpn"' in indicator.group(0)
+    assert 'class="vpn-indicator vpn-unknown"' in indicator.group(0)
+    assert "data-auth-only" in indicator.group(0)
 
 
-def test_the_bar_keeps_its_states_and_roles_on_the_container():
-    assert 'class="vpn-bar vpn-unknown" role="status"' in HTML
-    for state in ("down", "mismatch", "blind"):
-        assert f".vpn-{state} .vpn-link" in CSS
+def test_the_problem_banner_and_the_indicator_keep_their_roles():
+    assert 'class="vpn-banner vpn-unknown" role="status"' in HTML
+    assert "hidden" in re.search(r'<div id="vpn"[^>]*>', HTML).group(0)
+    assert ".vpn-indicator:not(.vpn-ok) .vpn-dot" in CSS
+    assert ".vpn-indicator:not(.vpn-ok) .vpn-dot { background: var(--danger-bg); }" in CSS
+    assert ".vpn-banner .vpn-dot" in CSS
 
 
 # --- "the watchdog does not answer" in the first minute --------------------------------------

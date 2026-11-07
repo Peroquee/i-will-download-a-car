@@ -20,7 +20,7 @@ The Navigation Opens Every Page
     Wait Until Element Is Visible    id:form
 
 The VPN Bar Opens The VPN Section
-    Click Element    id:vpn-link
+    Click Element    id:vpn-indicator
     Wait Until Element Is Visible    id:dashboard
     Location Should Contain    /dashboard
     ${url}=    Get Location

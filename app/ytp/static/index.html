@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-auth="unknown">
-<div id="vpn" class="vpn-bar vpn-unknown" role="status" data-auth-only>
+<div id="vpn" class="vpn-banner vpn-unknown" role="status" data-auth-only hidden>
   <a id="vpn-link" class="vpn-link" href="/dashboard#vpn">
     <span class="vpn-dot" aria-hidden="true"></span>
     <span class="vpn-main"><strong id="vpn-text" data-i18n="vpn.unknown"></strong><span id="vpn-detail" class="vpn-detail"></span></span>
@@ -52,7 +52,10 @@
       <a id="nav-accounts" class="nav-item" href="/accounts" data-admin-only><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3.1-5.5 7-5.5s7 2 7 5.5"/></svg><span data-i18n="nav.accounts"></span></a>
       <button type="button" id="howto-open" class="nav-item nav-howto" aria-haspopup="dialog"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><span data-i18n="howto.button"></span></button>
     </nav>
-    <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
+    <div class="sidebar-foot">
+      <a id="vpn-indicator" class="vpn-indicator vpn-unknown" href="/dashboard#vpn" data-i18n-label="vpn.unknown" data-auth-only><span class="vpn-dot" aria-hidden="true"></span></a>
+      <button type="button" id="lang" class="ghost small" aria-label="Language / Sprache">DE</button>
+    </div>
   </div>
   <div class="wrap">
     <main class="card" aria-label="youtube-premium">

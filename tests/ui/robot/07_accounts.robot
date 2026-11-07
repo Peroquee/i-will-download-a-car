@@ -6,8 +6,8 @@ Test Setup        Open Accounts Page
 
 *** Test Cases ***
 The Accounts Page Lists The Admin And The Seeded User
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:accounts-list    alice
     Element Should Contain    id:accounts-list    boss
-    Element Should Contain    id:accounts-list    alice
 
 A User Can Be Created
     Input Text    id:accounts-name    carol
@@ -19,29 +19,37 @@ A User Can Be Created
 
 A Role Can Be Changed
     ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'carol')]
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Make administrator']
     Click Button    ${row}//button[normalize-space(.)='Make administrator']
     Wait Until Keyword Succeeds    10s    0.5s    Element Should Contain    ${row}    Administrator
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Make user']
     Click Button    ${row}//button[normalize-space(.)='Make user']
     Wait Until Keyword Succeeds    10s    0.5s    Element Should Contain    ${row}    User
 
 An Account Can Be Disabled And Enabled
     ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'carol')]
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Disable']
     Click Button    ${row}//button[normalize-space(.)='Disable']
     Wait Until Keyword Succeeds    10s    0.5s    Element Should Contain    ${row}    disabled
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Enable']
     Click Button    ${row}//button[normalize-space(.)='Enable']
     Wait Until Keyword Succeeds    10s    0.5s    Element Should Not Contain    ${row}    disabled
 
 A Password Can Be Reset
     ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'carol')]
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Set password']
     Click Button    ${row}//button[normalize-space(.)='Set password']
     Wait Until Element Is Visible    ${row}//input[@type='password']
     Input Password    ${row}//input[@type='password']    a long carol password two
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Save password']
     Click Button    ${row}//button[normalize-space(.)='Save password']
     Wait Until Keyword Succeeds    10s    0.5s    Element Should Contain    ${row}    The password is set
 
 An Account Can Be Deleted
     ${row}=    Set Variable    xpath=//li[contains(@class,'job')][contains(.,'carol')]
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Delete']
     Click Button    ${row}//button[normalize-space(.)='Delete']
+    Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Really delete?']
     Wait Until Element Is Visible    ${row}//button[normalize-space(.)='Really delete?']
     Click Button    ${row}//button[normalize-space(.)='Really delete?']
     Wait Until Keyword Succeeds    10s    0.5s    Page Should Not Contain    carol

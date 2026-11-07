@@ -122,7 +122,15 @@ def a_visitor_sees_only_the_sign_in_form_and_nothing_is_asked_of_the_app(ctx):
     page.on("request", lambda r: asked.append(r.url) if "/api/" in r.url else None)
     page.goto(BASE + "/")
     expect(page.locator("#login-form")).to_be_visible()
-    for hidden in ("#form", "#topnav", "#jobs-mini", "#subs-list", "#vpn", "#account-open"):
+    for hidden in (
+        "#form",
+        "#topnav",
+        "#jobs-mini",
+        "#subs-list",
+        "#vpn",
+        "#vpn-indicator",
+        "#account-open",
+    ):
         expect(page.locator(hidden)).to_be_hidden()
     page.wait_for_timeout(1500)
     others = [u for u in asked if not u.endswith("/api/auth/me") and not u.endswith("/api/version")]
@@ -237,7 +245,7 @@ def the_dashboard_tab_opens_the_dashboard(ctx):
 @check
 def the_vpn_bar_opens_the_vpn_part_from_the_dashboard(ctx):
     page = ctx.page
-    page.click("#vpn-link")
+    page.click("#vpn-indicator")
     expect(page).to_have_url(re.compile(r"/dashboard#vpn$"))
     expect(page.locator("#dash-vpn")).to_be_in_viewport()
     expect(page.locator("#dash-vpn-explain")).not_to_be_empty()
@@ -246,7 +254,7 @@ def the_vpn_bar_opens_the_vpn_part_from_the_dashboard(ctx):
 @check
 def the_vpn_bar_works_from_the_input_page_too(ctx):
     ctx.page.goto(BASE + "/")
-    ctx.page.click("#vpn-link")
+    ctx.page.click("#vpn-indicator")
     expect(ctx.page).to_have_url(re.compile(r"/dashboard#vpn$"))
 
 
