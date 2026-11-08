@@ -40,10 +40,15 @@ from .magnet import InvalidMagnet, infohash_from_magnet
 from .metadata import Metadata, Name, metadata_to_json
 from .netstatus import watchdog_view
 from .youtube import InvalidVideoUrl, ProbeError, YoutubeProbe, parse_video_url
+from .youtube_download import MAX_HEIGHTS
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
 from .youtube_jobs import YoutubeJobMetadata, YoutubeWorker, job_external_id
 
 logger = logging.getLogger(__name__)
+
+MAX_HEIGHT_DETAIL = "max_height must be 0 (best) or one of " + ", ".join(
+    str(height) for height in MAX_HEIGHTS[1:]
+)
 
 
 class MagnetRequest(BaseModel):
@@ -118,6 +123,9 @@ class DownloadRequest(BaseModel):
     title: Name
     target: Literal["video", "podcast", "music"] = "video"
     audio_only: StrictBool = False
+    # The resolution cap chosen in the form (#47), validated in the handler below so a bad value
+    # is a clear 400 rather than FastAPI's 422. Missing = the server default.
+    max_height: object = None
     # Music only (issue #36): `channel` is then the artist, `title` the track. Left out, the track
     # is a single: the album is named like the track.
     album: Name | None = None
@@ -188,7 +196,18 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
     the track's title, a single); the file goes to
     `<MEDIA_DIR_MUSIC>/<artist>/<album>/<title>.<ext>` like a torrent album, with
     artist/album/title tags and the cover when audio only.
+
+    Optional `max_height` (#47): 0 (best) or one of 2160, 1440, 1080, 720, 480, 360. It caps the
+    video stream of THIS job; missing = the server default (`YOUTUBE_MAX_HEIGHT`), and audio-only
+    downloads ignore it. Any other value is a 400.
     """
+    max_height = body.max_height
+    if max_height is not None and (
+        isinstance(max_height, bool)
+        or not isinstance(max_height, int)
+        or max_height not in MAX_HEIGHTS
+    ):
+        return problem(400, MAX_HEIGHT_DETAIL)
     db: Database | None = request.app.state.db
     worker: YoutubeWorker | None = request.app.state.youtube_worker
     if db is None or worker is None:
@@ -200,6 +219,7 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
         title=body.title,
         target=body.target,
         audio_only=body.audio_only,
+        max_height=max_height,
         album=(body.album or body.title) if body.target == "music" else None,
     )
     job, outcome = await asyncio.to_thread(
@@ -224,6 +244,18 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
         return JSONResponse({**summary, "duplicate": True}, status_code=200)
     worker.wake()
     return JSONResponse({**summary, "duplicate": False}, status_code=201)
+
+
+async def youtube_options(request: Request) -> JSONResponse:
+    """GET /api/youtube/options: the default resolution and the choices the form offers (#47).
+
+    200 {"max_height": 1080, "choices": [0, 2160, 1440, 1080, 720, 480, 360]}
+
+    Read-only: `max_height` is `YOUTUBE_MAX_HEIGHT` from the environment (0 = best), and the page
+    preselects it. The list is fixed; no formats are fetched from YouTube.
+    """
+    settings = request.app.state.settings
+    return JSONResponse({"max_height": settings.youtube_max_height, "choices": list(MAX_HEIGHTS)})
 
 
 async def vpn_status(request: Request) -> JSONResponse:
@@ -267,6 +299,7 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/magnet", add_magnet, methods=["POST"])
     app.add_api_route("/api/vpn", vpn_status, methods=["GET"])
     app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])
+    app.add_api_route("/api/youtube/options", youtube_options, methods=["GET"])
     app.add_api_route("/api/youtube/download", youtube_download, methods=["POST"])
     jobs_api.register(app)
     alerts_api.register(app)

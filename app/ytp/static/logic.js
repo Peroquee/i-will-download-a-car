@@ -60,8 +60,9 @@
     return { magnet: String(link).trim(), metadata: magnetMetadata(type, values) };
   }
 
-  /* target: "video" (the default), "podcast" or "music"; audioOnly means nothing for a video. */
-  function youtubePayload(link, channel, title, target, audioOnly, album) {
+  /* target: "video" (the default), "podcast" or "music"; audioOnly means nothing for a video.
+     maxHeight is the chosen cap (0 = best); audio-only and podcast downloads ignore it. */
+  function youtubePayload(link, channel, title, target, audioOnly, album, maxHeight) {
     var body = { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
     if (target === "podcast" || target === "music") {
       body.target = target;
@@ -69,6 +70,9 @@
     }
     /* Music: channel is the artist, title the track; an empty album means a single (the server names it). */
     if (target === "music" && album != null && String(album).trim()) body.album = String(album).trim();
+    if (target !== "podcast" && !audioOnly && maxHeight != null && String(maxHeight).trim() !== "") {
+      body.max_height = toNumber(maxHeight);
+    }
     return body;
   }
 

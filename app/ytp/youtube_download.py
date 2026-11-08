@@ -52,6 +52,8 @@ VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov")
 AUDIO_EXTENSIONS = (".m4a", ".opus", ".ogg", ".aac", ".mp3")
 AUDIO_FORMAT = "ba[ext=m4a]/ba[acodec^=mp4a]/ba"  # AAC first, then whatever audio is best
 THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+# The resolutions the input form offers and the API accepts. 0 = best, no cap (#47).
+MAX_HEIGHTS = (0, 2160, 1440, 1080, 720, 480, 360)
 INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
     "upload_date", "description", "tags", "categories", "width", "height", "fps",
@@ -190,8 +192,13 @@ class YoutubeDownloader:
         progress: Callable[[dict[str, Any]], None] | None = None,
         *,
         audio_only: bool = False,
+        max_height: int | None = None,
     ) -> Downloaded:
-        """Download into `workdir` (created fresh). Raises ProbeError or DownloadFailed."""
+        """Download into `workdir` (created fresh). Raises ProbeError or DownloadFailed.
+
+        `max_height` overrides this downloader's default for one job (0 = no limit); None means
+        the configured default, so jobs created before #47 keep their behaviour.
+        """
         if workdir.exists():
             shutil.rmtree(workdir)
         workdir.mkdir(parents=True)
@@ -204,7 +211,7 @@ class YoutubeDownloader:
         options = download_options(
             workdir,
             proxy=self.proxy,
-            max_height=self.max_height,
+            max_height=self.max_height if max_height is None else max_height,
             socket_timeout=self._socket_timeout,
             progress_hook=progress,
             audio_only=audio_only,

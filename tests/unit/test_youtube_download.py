@@ -25,6 +25,7 @@ from ytp.db import Database
 from ytp.main import create_app
 from ytp.youtube import ProbeError, VideoRef
 from ytp.youtube_download import (
+    AUDIO_FORMAT,
     DownloadFailed,
     YoutubeDownloader,
     download_options,
@@ -490,7 +491,9 @@ def make_client(tmp_path: Path, download=None, **env: str) -> TestClient:
     worker = client.app.state.youtube_worker
     if worker is not None:
         worker.downloader = YoutubeDownloader(
-            download=download or fake_download(), min_free_bytes=0
+            download=download or fake_download(),
+            min_free_bytes=0,
+            max_height=client.app.state.settings.youtube_max_height,
         )
     return client
 
@@ -633,6 +636,116 @@ def test_the_download_goes_through_the_configured_proxy_and_height(tmp_path):
     assert url == URL
     assert options["proxy"] == "http://gluetun:8888"
     assert "height<=720" in options["format"]
+
+
+# --- the per-download resolution (#47) -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("height", [0, 2160, 1440, 1080, 720, 480, 360])
+def test_each_allowed_max_height_is_accepted_and_stored(client, height):
+    response = post(client, max_height=height)
+    assert response.status_code == 201
+    job = wait_for(client, "done")
+    assert job.metadata["max_height"] == height
+
+
+@pytest.mark.parametrize("height", [999, "abc", -1, 1, True, 1080.5, [720], {"n": 1}])
+def test_a_bad_max_height_is_a_400_and_queues_nothing(client, height):
+    response = post(client, max_height=height)
+    assert response.status_code == 400
+    assert "max_height" in response.json()["detail"]
+    assert client.app.state.db.query("SELECT COUNT(*) FROM jobs")[0][0] == 0
+
+
+def test_a_missing_max_height_keeps_the_server_default(tmp_path):
+    seen = []
+    c = make_client(tmp_path, download=fake_download(seen=seen), YOUTUBE_MAX_HEIGHT="720")
+    try:
+        post(c)
+        job = wait_for(c, "done")
+    finally:
+        c.__exit__(None, None, None)
+    assert "max_height" not in job.metadata
+    assert "height<=720" in seen[0][1]["format"]
+
+
+def test_a_job_max_height_overrides_the_default_for_that_download(tmp_path):
+    seen = []
+    c = make_client(tmp_path, download=fake_download(seen=seen), YOUTUBE_MAX_HEIGHT="720")
+    try:
+        post(c, max_height=2160)
+        wait_for(c, "done")
+    finally:
+        c.__exit__(None, None, None)
+    assert "height<=2160" in seen[0][1]["format"]
+
+
+def test_an_audio_only_job_ignores_max_height(tmp_path):
+    seen = []
+    c = make_client(tmp_path, download=fake_download(files=("m4a",), seen=seen))
+    try:
+        post(c, target="podcast", audio_only=True, max_height=360)
+        wait_for(c, "done")
+    finally:
+        c.__exit__(None, None, None)
+    options = seen[0][1]
+    assert options["format"] == AUDIO_FORMAT
+    assert "height" not in options["format"]
+
+
+def test_a_podcast_job_ignores_max_height(tmp_path):
+    seen = []
+    c = make_client(tmp_path, download=fake_download(seen=seen), YOUTUBE_MAX_HEIGHT="720")
+    try:
+        post(c, target="podcast", max_height=2160)
+        wait_for(c, "done")
+    finally:
+        c.__exit__(None, None, None)
+    assert "height<=720" in seen[0][1]["format"]
+
+
+def test_old_job_metadata_without_max_height_uses_the_default(world):
+    seen = []
+    jobs.submit_job(
+        world.db,
+        JOB_TYPE,
+        ID,
+        json.dumps(
+            {
+                "type": "youtube",
+                "video_id": ID,
+                "channel": "Blender",
+                "title": "Big Buck Bunny",
+            }
+        ),
+    )
+    worker = world.worker(download=fake_download(seen=seen))
+    worker.downloader.max_height = 480
+    assert worker.run_one()
+    assert "height<=480" in seen[0][1]["format"]
+
+
+def test_the_stored_metadata_refuses_an_unknown_height():
+    with pytest.raises(ValueError, match="max_height"):
+        YoutubeJobMetadata(video_id=ID, channel="Blender", title="X", max_height=999)
+
+
+def test_the_page_can_read_the_default_resolution(client):
+    response = client.get("/api/youtube/options")
+    assert response.status_code == 200
+    assert response.json() == {
+        "max_height": 1080,
+        "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+    }
+
+
+def test_the_options_show_the_configured_default(tmp_path):
+    c = make_client(tmp_path, YOUTUBE_MAX_HEIGHT="720")
+    try:
+        response = c.get("/api/youtube/options")
+    finally:
+        c.__exit__(None, None, None)
+    assert response.json()["max_height"] == 720
 
 
 def test_a_finished_video_asks_jellyfin_for_a_refresh(tmp_path):

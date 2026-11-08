@@ -52,6 +52,7 @@ from .music import place_track
 from .podcasts import PodcastError, place_episode
 from .youtube import ProbeError, VideoRef, parse_video_url
 from .youtube_download import (
+    MAX_HEIGHTS,
     Downloaded,
     DownloadFailed,
     YoutubeDownloader,
@@ -83,9 +84,19 @@ class YoutubeJobMetadata(BaseModel):
     title: Name
     target: Literal["video", "podcast", "music"] = "video"
     audio_only: bool = False
+    # The cap chosen in the input form (#47); absent = the server default (YOUTUBE_MAX_HEIGHT).
+    max_height: int | None = None
     album: Name | None = None  # music only (issue #36)
     # YYYY-MM-DD, when the feed told us (the poller); the download's own upload date wins.
     published: str | None = None
+
+    @field_validator("max_height")
+    @classmethod
+    def _max_height(cls, value: int | None) -> int | None:
+        if value is not None and value not in MAX_HEIGHTS:
+            choices = ", ".join(str(height) for height in MAX_HEIGHTS[1:])
+            raise ValueError(f"max_height must be 0 (best) or one of {choices}")
+        return value
 
     @field_validator("published")
     @classmethod
@@ -205,7 +216,15 @@ class YoutubeWorker:
         logger.info("youtube download starts", extra={"job_id": job.id, "video_id": ref.video_id})
         try:
             downloaded = self.downloader.download(
-                ref, workdir, self._progress(job), audio_only=meta.audio_only
+                ref,
+                workdir,
+                self._progress(job),
+                audio_only=meta.audio_only,
+                # Audio-only streams have no height, and podcast downloads keep the default;
+                # a video job without the key keeps the default too (#47).
+                max_height=(
+                    None if meta.audio_only or meta.target == "podcast" else meta.max_height
+                ),
             )
             if not jobs.transition(self.db, job.id, "organizing", expected=("downloading",)):
                 return  # someone else changed the job; leave it alone
