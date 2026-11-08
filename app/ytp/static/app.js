@@ -14,6 +14,7 @@
   var auth = null;   // sign-in, account menu, accounts page (auth.js, #44)
   var catalogue = null;       // what "all episodes" would do for the feed in the form (#45)
   var allConfirmed = false;   // the question "download N episodes?" has been shown
+  var ytDefaultMaxHeight = null;   // the server's default resolution (#47)
 
   /* A form of this page is NEVER submitted natively (it would send the pasted link in the address
      and create no job): whatever else fails, this guard is the first thing that runs. */
@@ -311,6 +312,8 @@
     if (target === "music" && shownTarget !== "music") $("yt-audio").checked = true;
     if (target === "podcast" && shownTarget === "music") $("yt-audio").checked = false;
     shownTarget = target;
+    /* The resolution is a video setting; podcast and audio-only downloads have none. */
+    $("yt-resolution-row").hidden = target === "podcast" || ytAudioOnly();
     var text = TARGET_TEXT[target];
     var labels = [["yt-channel-label", text[0]], ["yt-title-label", text[1]], ["yt-subscribe-note", text[2]]];
     labels.forEach(function (pair) {
@@ -319,8 +322,39 @@
     });
   }
 
-  /* ---------------------------------------------------------------- subscribe (#19) */
+  /* The server's default resolution (YOUTUBE_MAX_HEIGHT) and the fixed choices the API accepts
+     (#47). The page preselects; it never fetches formats from YouTube. */
+  function loadYoutubeOptions() {
+    getJson("/api/youtube/options").then(function (data) {
+      if (!data || typeof data.max_height !== "number") return;
+      ytDefaultMaxHeight = data.max_height;
+      var select = $("yt-resolution");
+      var value = String(data.max_height);
+      var known = Array.prototype.some.call(select.options, function (option) {
+        return option.value === value;
+      });
+      if (!known) {
+        var option = document.createElement("option");
+        option.value = value;
+        option.textContent = t("yt.resolution_default", { value: value });
+        select.appendChild(option);
+      }
+      select.value = value;
+    }).catch(function () { /* keep the first choice; the server default still applies */ });
+  }
 
+  /* What the form sends for the resolution: nothing while audio only, and nothing while the
+     chosen value is the server default (then the server's own default applies, also when the
+     configured default is not one of the fixed choices). */
+  function ytMaxHeight() {
+    if (ytTarget() === "podcast" || ytAudioOnly()) return null;
+    var value = String($("yt-resolution").value);
+    if (value === "") return null;
+    if (ytDefaultMaxHeight !== null && value === String(ytDefaultMaxHeight)) return null;
+    return value;
+  }
+
+  /* ---------------------------------------------------------------- subscribe (#19) */
   /* Subscribing is offered for a video or a podcast episode, not for music (applyTarget). */
   function wantsSubscription() { return ytTarget() !== "music" && $("subscribe").checked; }
 
@@ -373,7 +407,7 @@
     }
     var path = current === "youtube" ? "/api/youtube/download" : "/api/magnet";
     var body = current === "youtube"
-      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly(), data.album)
+      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly(), data.album, ytMaxHeight())
       : L.magnetPayload(link, mediaType(), data);
     $("submit").disabled = true;
     post(path, body).then(function (reply) {
@@ -506,6 +540,7 @@
     showBackfill();
     $("yt-target").value = "video";
     shownTarget = "video";
+    $("yt-resolution").value = ytDefaultMaxHeight === null ? "0" : String(ytDefaultMaxHeight);
     applyTarget();
     $("pc-subscribe").checked = false;
     $("pc-backfill").value = "0";
@@ -935,6 +970,7 @@
     });
     $("media-type").addEventListener("change", showType);
     $("yt-target").addEventListener("change", applyTarget);
+    $("yt-audio").addEventListener("change", applyTarget);
     $("subscribe").addEventListener("change", showBackfill);
     $("pack").addEventListener("change", function () {
       $("f-episode").disabled = $("pack").checked;
@@ -977,6 +1013,7 @@
 
   function startApp() {
     pollVpn();
+    loadYoutubeOptions();
     window.setInterval(function () {
       if (document.visibilityState !== "hidden") { pollVpn(); if (dash) dash.refreshAlerts(); }
     }, VPN_POLL_MS);

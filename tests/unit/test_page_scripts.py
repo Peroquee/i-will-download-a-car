@@ -44,6 +44,10 @@ ANSWERS = {
     "/api/podcasts": {"podcasts": []},
     "/api/alerts": {"alerts": [], "unread": 0},
     "/api/version": {"version": PLACEHOLDER},
+    "/api/youtube/options": {
+        "max_height": 1080,
+        "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+    },
     "/api/dashboard": {
         "active": [],
         "recent": [],
@@ -109,6 +113,60 @@ def test_the_page_asks_the_server_for_what_it_shows():
         assert ["GET", path] in fetched
     assert ["GET", "/api/dashboard"] not in fetched
     assert ["GET", "/api/dashboard"] in page("/dashboard")["fetched"]
+
+
+@needs_node
+def test_the_resolution_dropdown_preselects_the_server_default():
+    out = page("/", steps=[{"read": "#yt-resolution"}])
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-resolution"]["value"] == "1080"
+
+
+@needs_node
+def test_the_resolution_dropdown_follows_a_configured_default():
+    out = page(
+        "/",
+        answers={
+            "/api/youtube/options": {
+                "max_height": 720,
+                "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+            }
+        },
+        steps=[{"read": "#yt-resolution"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-resolution"]["value"] == "720"
+
+
+@needs_node
+def test_the_resolution_dropdown_is_hidden_for_podcast_and_audio_only():
+    video = page("/", steps=[{"read": "#yt-resolution-row"}])
+    assert video["errors"] == [], video["errors"]
+    assert video["reads"]["#yt-resolution-row"]["hidden"] is False
+
+    podcast = page(
+        "/",
+        steps=[
+            {"set": "#yt-target", "value": "podcast"},
+            {"fire": "#yt-target", "type": "change"},
+            {"read": "#yt-resolution-row"},
+        ],
+    )
+    assert podcast["errors"] == [], podcast["errors"]
+    assert podcast["reads"]["#yt-resolution-row"]["hidden"] is True
+
+    audio = page(
+        "/",
+        steps=[
+            {"set": "#yt-target", "value": "podcast"},
+            {"fire": "#yt-target", "type": "change"},
+            {"check": "#yt-audio", "value": True},
+            {"fire": "#yt-audio", "type": "change"},
+            {"read": "#yt-resolution-row"},
+        ],
+    )
+    assert audio["errors"] == [], audio["errors"]
+    assert audio["reads"]["#yt-resolution-row"]["hidden"] is True
 
 
 @needs_node

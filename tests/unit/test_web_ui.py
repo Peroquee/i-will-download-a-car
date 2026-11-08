@@ -424,6 +424,13 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "dash.watchdog",
         "dash.internet_ok",
         "dash.watchdog_blind",
+        # Resolution labels are the same in both languages (#47).
+        "yt.resolution_2160",
+        "yt.resolution_1440",
+        "yt.resolution_1080",
+        "yt.resolution_720",
+        "yt.resolution_480",
+        "yt.resolution_360",
     }, same
 
 
@@ -998,6 +1005,34 @@ def test_the_page_has_the_target_choice_and_the_audio_checkbox():
     assert target
     assert re.findall(r'<option value="(\w+)"', target.group(0)) == ["video", "podcast", "music"]
     assert 'id="yt-audio-row" hidden' in HTML, "audio only is offered only for podcast episodes"
+
+
+def test_the_page_has_the_fixed_resolution_choices():
+    select = re.search(r'<select id="yt-resolution".*?</select>', HTML, re.S)
+    assert select
+    assert re.findall(r'<option value="(\d+)"', select.group(0)) == [
+        "0", "2160", "1440", "1080", "720", "480", "360",
+    ]  # fmt: skip
+    assert 'id="yt-resolution-row"' in HTML
+
+
+@needs_node
+def test_the_youtube_payload_carries_the_resolution_cap_only_for_video():
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    assert (
+        run_node(f"L.youtubePayload('{url}', 'B', 'T', 'video', false, null, 720)")["max_height"]
+        == 720
+    )
+    assert (
+        run_node(f"L.youtubePayload('{url}', 'B', 'T', 'video', false, null, 0)")["max_height"] == 0
+    )
+    assert "max_height" not in run_node(
+        f"L.youtubePayload('{url}', 'B', 'T', 'podcast', false, null, 720)"
+    )
+    assert "max_height" not in run_node(
+        f"L.youtubePayload('{url}', 'B', 'T', 'podcast', true, null, 720)"
+    )
+    assert "max_height" not in run_node(f"L.youtubePayload('{url}', 'B', 'T')")
 
 
 @needs_node

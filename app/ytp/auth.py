@@ -62,6 +62,7 @@ POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/dashboard"): USER,
     ("POST", "/api/magnet"): USER,
     ("POST", "/api/youtube/probe"): USER,
+    ("GET", "/api/youtube/options"): USER,
     ("POST", "/api/youtube/download"): USER,
     ("GET", "/api/jobs"): USER,
     ("POST", "/api/jobs/{job_id}/retry"): USER,
