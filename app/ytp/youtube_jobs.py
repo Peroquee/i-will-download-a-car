@@ -26,6 +26,10 @@ submitted and stored in the job's metadata:
 
 The job's `external_id` is the video id for the `video` target (unchanged) and `<id>@<target>` for
 the others, so the same video can be a video AND a podcast episode, but is queued once per target.
+
+**Resolution** (#47): a job may carry `max_height` (0 = best, or one of 2160, 1440, 1080, 720, 480,
+360), chosen in the input form. It caps the video stream of that job only; without it, and for
+podcast or audio-only downloads, the server default (`YOUTUBE_MAX_HEIGHT`) applies.
 """
 
 from __future__ import annotations
