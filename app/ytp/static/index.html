@@ -236,7 +236,8 @@
           <div class="pair">
             <div class="row">
               <label class="field" for="f-season" data-i18n="field.season"></label>
-              <input id="f-season" type="text" inputmode="numeric" maxlength="4" data-field="season" aria-describedby="f-season-error">
+              <input id="f-season" type="text" inputmode="text" maxlength="1000" data-field="season" aria-describedby="f-season-note f-season-error">
+              <p id="f-season-note" class="note" data-i18n="field.season_note"></p>
               <p id="f-season-error" class="error" role="alert"></p>
             </div>
             <div class="row">
@@ -662,6 +663,7 @@
     "field.year": "Erscheinungsjahr",
     "field.show": "Serientitel",
     "field.season": "Staffel",
+    "field.season_note": "Eine Staffel (2), ein Bereich (1-3) oder eine Liste (1,2,5).",
     "field.episode": "Folge (leer bei ganzer Staffel)",
     "field.pack": "Ganze Staffel (Season-Pack)",
     "field.author": "Autor",
@@ -712,6 +714,7 @@
     "err.name_dots_only": "Darf nicht nur aus Punkten bestehen.",
     "err.year_out_of_range": "Jahr zwischen 1870 und {max}.",
     "err.int_parsing": "Bitte eine ganze Zahl eingeben.",
+    "err.season_invalid": "Ungültige Staffelangabe. Erlaubt sind z. B. 2, 1-3 oder 1,2,5 (0-999, höchstens 50 Staffeln).",
     "err.int_from_float": "Bitte eine ganze Zahl eingeben.",
     "err.int_type": "Bitte eine ganze Zahl eingeben.",
     "err.greater_than_equal": "Mindestens 1.",
@@ -1119,6 +1122,7 @@
     "field.year": "Release year",
     "field.show": "Series title",
     "field.season": "Season",
+    "field.season_note": "One season (2), a range (1-3) or a list (1,2,5).",
     "field.episode": "Episode (empty for a whole season)",
     "field.pack": "Whole season (season pack)",
     "field.author": "Author",
@@ -1169,6 +1173,7 @@
     "err.name_dots_only": "Must not consist of dots only.",
     "err.year_out_of_range": "Year between 1870 and {max}.",
     "err.int_parsing": "Please enter a whole number.",
+    "err.season_invalid": "Invalid season. Use for example 2, 1-3 or 1,2,5 (0-999, at most 50 seasons).",
     "err.int_from_float": "Please enter a whole number.",
     "err.int_type": "Please enter a whole number.",
     "err.greater_than_equal": "At least 1.",

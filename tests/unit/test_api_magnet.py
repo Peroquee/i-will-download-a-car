@@ -109,7 +109,44 @@ def test_the_stored_metadata_is_the_normalised_json(client):
         "type": "series",
         "title": "Tatort",
         "season": 3,
+        "seasons": [3],
     }
+
+
+# --- several seasons in one series job (#52) ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("season", "expected", "single"),
+    [
+        ("1-3", [1, 2, 3], None),
+        ("1,2,5", [1, 2, 5], None),
+        ("1-3,5", [1, 2, 3, 5], None),
+        (" 1 - 3 ", [1, 2, 3], None),
+        ([1, 2, 5], [1, 2, 5], None),
+        ("2", [2], 2),
+        ([2], [2], 2),
+        ("0", [0], 0),
+    ],
+)
+def test_a_season_spec_is_accepted_and_stored(client, fake, season, expected, single):
+    response = post(client, metadata={"type": "series", "title": "Tatort", "season": season})
+    assert response.status_code == 201
+    stored = json.loads(rows(client)[0]["metadata"])
+    assert stored["seasons"] == expected
+    assert stored.get("season") == single
+    assert ("season" in stored) is (single is not None)
+
+
+@pytest.mark.parametrize(
+    "season", ["", "x", "1-", "3-1", "0-50", "1000", "1,", [1, "x"], [1000], []]
+)
+def test_a_bad_season_spec_is_a_400_and_queues_nothing(client, fake, season):
+    response = post(client, metadata={"type": "series", "title": "Tatort", "season": season})
+    assert response.status_code == 400
+    assert "season" in response.json()["detail"].lower()
+    assert rows(client) == []
+    assert fake.calls("torrents/add") == []
 
 
 # --- validation: field-level 422, nothing stored or sent ----------------------------------------

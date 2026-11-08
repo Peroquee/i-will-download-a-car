@@ -114,6 +114,20 @@ def list_jobs(client, **query):
         ({"type": "movies", "title": "Big Buck Bunny", "year": 2008}, "Big Buck Bunny (2008)"),
         ({"type": "series", "title": "Tatort", "season": 3}, "Tatort S03"),
         ({"type": "series", "title": "Tatort", "season": 3, "episode": 7}, "Tatort S03E07"),
+        (
+            {"type": "series", "title": "Tatort", "seasons": [1, 2, 3]},
+            f"Tatort S01{chr(0x2013)}S03",
+        ),
+        ({"type": "series", "title": "Tatort", "seasons": [1, 2, 5]}, "Tatort S01,S02,S05"),
+        (
+            {"type": "series", "title": "Tatort", "seasons": [1, 2, 3, 5]},
+            "Tatort S01,S02,S03,S05",
+        ),
+        ({"type": "series", "title": "Tatort", "seasons": [3]}, "Tatort S03"),
+        (
+            {"type": "series", "title": "Tatort", "season": 3, "seasons": [3], "episode": 7},
+            "Tatort S03E07",
+        ),
         ({"type": "audiobooks", "author": "Michael Ende", "title": "Momo"}, "Michael Ende - Momo"),
         ({"type": "music", "artist": "Kraftwerk", "album": "Autobahn"}, "Kraftwerk - Autobahn"),
         (YT, "Blender - Big Buck Bunny"),

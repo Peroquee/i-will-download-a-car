@@ -27,6 +27,8 @@ import time
 from typing import Literal
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -294,8 +296,18 @@ async def vpn_status(request: Request) -> JSONResponse:
 STARTUP_GRACE_SECONDS = 60
 
 
+async def _season_spec_is_a_400(request: Request, exc: RequestValidationError):
+    """A bad season spec answers 400 (it is a form mistake), not FastAPI's generic 422 (#52)."""
+    for error in exc.errors():
+        if error.get("type") == "season_invalid":
+            return problem(400, str(error.get("msg") or "invalid season"))
+    return await request_validation_exception_handler(request, exc)
+
+
 def register(app: FastAPI) -> None:
     """Add the API routes to the app (plain routes, so `app.routes` lists every path)."""
+    # One deliberate exception to the generic 422: the season field of a magnet job (#52).
+    app.add_exception_handler(RequestValidationError, _season_spec_is_a_400)
     app.add_api_route("/api/magnet", add_magnet, methods=["POST"])
     app.add_api_route("/api/vpn", vpn_status, methods=["GET"])
     app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])

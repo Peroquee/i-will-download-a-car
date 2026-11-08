@@ -45,6 +45,33 @@ MAX_LIMIT = 200
 PROGRESS_CACHE_SECONDS = 3.0
 
 
+def _season_tag(meta: dict) -> str:
+    """The season part of a series label: `S01-S03`, `S01,S02,S05` or the old `S03E07` (#52)."""
+    seasons = meta.get("seasons")
+    episode = meta.get("episode")
+    if (
+        isinstance(seasons, list)
+        and seasons
+        and all(isinstance(value, int) and not isinstance(value, bool) for value in seasons)
+    ):
+        ordered = sorted(set(seasons))
+        if len(ordered) == 1:
+            tag = f"S{ordered[0]:02d}"
+            if isinstance(episode, int) and not isinstance(episode, bool):
+                tag += f"E{episode:02d}"
+            return tag
+        if ordered == list(range(ordered[0], ordered[-1] + 1)):
+            return f"S{ordered[0]:02d}{chr(0x2013)}S{ordered[-1]:02d}"
+        return ",".join(f"S{season:02d}" for season in ordered)
+    season = meta.get("season")
+    if isinstance(season, int) and not isinstance(season, bool):
+        tag = f"S{season:02d}"
+        if isinstance(episode, int) and not isinstance(episode, bool):
+            tag += f"E{episode:02d}"
+        return tag
+    return ""
+
+
 def job_label(job: Job) -> str:
     """A readable name from the stored metadata; never raises on odd or old data."""
     meta = job.metadata
@@ -57,13 +84,8 @@ def job_label(job: Job) -> str:
     if kind == "movies":
         label = f"{text('title')} ({meta.get('year')})" if meta.get("year") else text("title")
     elif kind == "series":
-        season = meta.get("season")
-        episode = meta.get("episode")
-        if isinstance(season, int):
-            tag = f"S{season:02d}" + (f"E{episode:02d}" if isinstance(episode, int) else "")
-            label = f"{text('title')} {tag}"
-        else:
-            label = text("title")
+        tag = _season_tag(meta)
+        label = f"{text('title')} {tag}" if tag else text("title")
     elif kind == "audiobooks":
         label = f"{text('author')} - {text('title')}"
     elif kind == "music":

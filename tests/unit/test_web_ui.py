@@ -463,7 +463,8 @@ def test_every_server_error_and_probe_kind_has_a_text():
         for error_type in (
             "missing", "feed_invalid", "name_empty", "name_too_long", "name_path_separator", "name_control_character",
             "name_dots_only", "year_out_of_range", "int_parsing", "greater_than_equal",
-            "less_than_equal", "magnet_invalid", "video_url_invalid", "channel_invalid", "extra_forbidden",
+            "less_than_equal", "magnet_invalid", "video_url_invalid", "channel_invalid",
+            "extra_forbidden", "season_invalid",
         ):  # fmt: skip
             assert f"err.{error_type}" in t[lang], (lang, error_type)
 
@@ -577,6 +578,17 @@ def test_youtube_422s_are_mapped_too(client):
 
 
 @needs_node
+def test_the_client_season_parser_matches_the_server():
+    assert run_node("L.parseSeasons('1-3,5')") == [1, 2, 3, 5]
+    assert run_node("L.parseSeasons(' 3, 1 ')") == [1, 3]
+    assert run_node("L.parseSeasons(' 1 - 3 ')") == [1, 2, 3]
+    assert run_node("L.parseSeasons('0')") == [0]
+    assert run_node("L.parseSeasons('1-50').length") == 50
+    for bad in ("", "x", "1-", "3-1", "0-50", "1-51", "1000", "1,", "1 2", "1.5"):
+        assert run_node(f"L.parseSeasons({json.dumps(bad)})") is None, bad
+
+
+@needs_node
 def test_the_first_look_in_the_browser_catches_empty_fields_and_a_bad_year():
     year = 2026
     assert run_node(f"L.clientErrors('magnet', 'movies', '', {{title: '', year: ''}}, {year})") == {
@@ -591,7 +603,18 @@ def test_the_first_look_in_the_browser_catches_empty_fields_and_a_bad_year():
     )
     assert run_node(
         f"L.clientErrors('magnet', 'series', 'm', {{title: 't', season: 'x'}}, {year})"
-    ) == {"season": "err.int_parsing"}
+    ) == {"season": "err.season_invalid"}
+    for season in ("2", "1-3", "1,2,5", "1-3,5", "0", " 1 - 3 "):
+        assert (
+            run_node(
+                f"L.clientErrors('magnet', 'series', 'm', "
+                f"{{title: 't', season: {json.dumps(season)}}}, {year})"
+            )
+            == {}
+        ), season
+    assert run_node(
+        f"L.clientErrors('magnet', 'series', 'm', {{title: 't', season: '1-51'}}, {year})"
+    ) == {"season": "err.season_invalid"}
     assert run_node(
         f"L.clientErrors('youtube', 'movies', 'u', {{channel: '', title: 'x'}}, {year})"
     ) == {"channel": "err.required"}

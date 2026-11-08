@@ -173,8 +173,14 @@ def plan_movie(meta: MovieMetadata, root: Path, library: Path) -> Plan:
     return plan
 
 
-def parse_episode(path: Path, root: Path, default_season: int) -> tuple[int, list[int]] | None:
-    """(season, [episode numbers]) from a file's name or its folders, or None."""
+def parse_episode(
+    path: Path, root: Path, default_season: int | None
+) -> tuple[int, list[int]] | None:
+    """(season, [episode numbers]) from a file's name or its folders, or None.
+
+    `default_season` is the single season of an old/single-season job; None means a multi-season
+    job, where an episode-only name without a season folder cannot name a season (#52).
+    """
     stem = path.stem
     match = _SXXEYY.search(stem)
     if match:
@@ -191,6 +197,8 @@ def parse_episode(path: Path, root: Path, default_season: int) -> tuple[int, lis
             if folder:
                 season = int(folder[1])
                 break
+        if season is None:
+            return None
         return season, [int(match[1])]
     return None
 
@@ -213,19 +221,28 @@ def plan_series(meta: SeriesMetadata, root: Path, library: Path) -> Plan:
     if not videos:
         raise OrganizeError("no video file found in the torrent")
 
+    seasons = meta.seasons
+    multi = len(seasons) > 1
     chosen: dict[tuple[int, int], Path] = {}  # (season, first episode) -> source
     labels: dict[Path, tuple[int, list[int]]] = {}
-    if meta.episode is not None:
+    if meta.episode is not None and not multi:
         main = max(videos, key=_size)
-        labels[main] = (meta.season, [meta.episode])
-        chosen[(meta.season, meta.episode)] = main
+        labels[main] = (seasons[0], [meta.episode])
+        chosen[(seasons[0], meta.episode)] = main
         for extra in videos:
             if extra != main:
                 plan.skipped.append(f"{extra.name}: extra video file (only the largest is used)")
     else:
         for video in videos:
-            parsed = parse_episode(video, root, meta.season)
+            parsed = parse_episode(video, root, None if multi else seasons[0])
             if parsed is None:
+                if multi:
+                    # Never guess a season for a multi-season pack: a file without its own
+                    # season (S03E07 or a Season folder) cannot be filed correctly.
+                    raise OrganizeError(
+                        "could not find episode numbers (like S03E07) in the file name "
+                        f"{video.name}; a multi-season pack must name each file's season"
+                    )
                 plan.skipped.append(f"{video.name}: no episode number in the name")
                 continue
             key = (parsed[0], parsed[1][0])
@@ -237,6 +254,7 @@ def plan_series(meta: SeriesMetadata, root: Path, library: Path) -> Plan:
                 del labels[chosen[key]]
             chosen[key] = video
             labels[video] = parsed
+        # A file whose season is not in `seasons` is kept too: packs often carry extras (#52).
         if not labels:
             raise OrganizeError(
                 "could not find episode numbers (like S03E07) in the file names of this season pack"
