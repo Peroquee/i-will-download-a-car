@@ -28,7 +28,10 @@ to the VPN tab, and an alert link opens the Alerts tab.
   - **Internet** — the app's own DNS + TCP reachability check (`ok` is *Online*, `offline` is
     *Offline*, anything else is *Unknown*), with when it was last checked. It runs on the
     app's normal egress path and is cached for 30 seconds, so it is independent of the VPN and
-    of the watchdog (#63).
+    of the watchdog (#63). It connects (plain TCP, nothing is sent) to `INTERNET_CHECK_HOST`:
+    `INTERNET_CHECK_PORT`, by default `www.youtube.com:443`, a host the app contacts anyway; see
+    [configuration.md](configuration.md). With an **empty** host the check is off: the card says
+    *Unknown* with the reason "check switched off", never *Online*.
   - **VPN** — `ok`, `down`, `blind`, `starting` or `unknown` from the watchdog; an egress
     mismatch still shows *Not safe*.
   - **Watchdog** — whether the watchdog answers and its last poll is fresh: *Watching* (`ok`),

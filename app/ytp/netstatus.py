@@ -25,7 +25,9 @@ from .feeds import parse_time
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_HOST = "pypi.org"
+# A host the app contacts anyway (yt-dlp, the feeds); INTERNET_CHECK_HOST / INTERNET_CHECK_PORT
+# change it, an empty host switches the check off.
+DEFAULT_HOST = "www.youtube.com"
 DEFAULT_PORT = 443
 DEFAULT_TIMEOUT = 3.0
 DEFAULT_INTERVAL = 30.0
@@ -41,7 +43,10 @@ class InternetChecker:
     The check happens on the app's normal egress path (a direct socket, not the VPN proxy):
     it answers "the host can reach the internet", not "the VPN is working". A successful
     connection is `ok`; a refused or timed-out one is `offline`; before the first check, or
-    after an unexpected error, it is `unknown`.
+    after an unexpected error, it is `unknown`. With an EMPTY host the check is switched off: it
+    never opens a connection and always answers `unknown` with `reason: "disabled"` (never `ok`).
+    The answer carries a `reason` only when it is `unknown` for a known cause (`disabled`,
+    `error`). Only the host name is ever logged, never the port or an address it resolved to.
     """
 
     def __init__(
@@ -62,6 +67,7 @@ class InternetChecker:
         self._wall_clock = wall_clock
         self._lock = threading.Lock()
         self._state = "unknown"
+        self._reason: str | None = "disabled" if not host else None
         self._checked_at: str | None = None
         self._checked_monotonic: float | None = None
 
@@ -77,6 +83,8 @@ class InternetChecker:
         network round trip instead of starting a check each.
         """
         with self._lock:
+            if not self._host:
+                return self._answer()  # switched off: no connection, no "checked" time
             now = self._clock()
             if (
                 self._checked_monotonic is not None
@@ -88,15 +96,28 @@ class InternetChecker:
             self._checked_monotonic = self._clock()
             return self._answer()
 
+    @property
+    def enabled(self) -> bool:
+        return bool(self._host)
+
     def _answer(self) -> dict[str, Any]:
-        return {"state": self._state, "checked_at": self._checked_at}
+        answer: dict[str, Any] = {"state": self._state, "checked_at": self._checked_at}
+        if self._state == "unknown" and self._reason:
+            answer["reason"] = self._reason
+        return answer
 
     def _probe_safely(self) -> str:
         try:
-            return self._probe()
-        except Exception:  # a status check must never take the API down
-            LOGGER.warning("the internet reachability check failed", exc_info=True)
+            state = self._probe()
+        except Exception as exc:  # a status check must never take the API down
+            LOGGER.warning(
+                "the internet reachability check failed",
+                extra={"host": self._host, "error": type(exc).__name__},
+            )
+            self._reason = "error"
             return "unknown"
+        self._reason = None
+        return state
 
     def _probe(self) -> str:
         try:

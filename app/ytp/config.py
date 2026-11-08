@@ -10,6 +10,7 @@ All problems are collected and reported together, so a bad .env is fixed in one 
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
@@ -86,6 +87,11 @@ class Settings:
     # admin password). The hash is made by scripts/app/set_admin.py; empty = no bootstrap.
     admin_user: str = "admin"
     admin_password_hash: str = field(default="", repr=False)
+    # The dashboard's "internet" check opens a TCP connection to this host:port every 30 s while
+    # a dashboard is open (#63). A host the app contacts anyway; EMPTY = check off (reported as
+    # "unknown", never "ok"). Only the host name is ever logged.
+    internet_check_host: str = "www.youtube.com"
+    internet_check_port: int = 443
     # Networks the app never fetches from (podcasts): HOME_PUBLIC_IP plus FETCH_BLOCKED_NETWORKS,
     # i.e. the home network's own global IPv6 prefixes. Semi-secret like HOME_PUBLIC_IP: never in
     # repr/str or a log line, only the count (see `summary`).
@@ -123,6 +129,11 @@ class Settings:
             "qbit_user": self.qbit_user,
             "qbit_configured": self.qbit_configured,
             "fetch_blocked_networks": len(self.fetch_blocked_networks),
+            "internet_check": (
+                f"{self.internet_check_host}:{self.internet_check_port}"
+                if self.internet_check_host
+                else None
+            ),
             "admin_user": self.admin_user,
             "admin_bootstrap": bool(self.admin_password_hash),
         }
@@ -263,6 +274,19 @@ class Settings:
                 "APP_ADMIN_PASSWORD_HASH is not a hash made by scripts/app/set_admin.py"
             )
 
+        raw_check_host = env.get("INTERNET_CHECK_HOST")  # unset = default, set but empty = off
+        check_host = "www.youtube.com" if raw_check_host is None else raw_check_host.strip()
+        if check_host and not valid_host(check_host):
+            problems.append("INTERNET_CHECK_HOST must be a host name or IP address, or empty")
+        raw_check_port = text("INTERNET_CHECK_PORT", "443")
+        check_port = 443
+        if raw_check_port.isdigit() and 1 <= int(raw_check_port) <= 65535:
+            check_port = int(raw_check_port)
+        else:
+            problems.append(
+                f"INTERNET_CHECK_PORT must be a port number (1-65535), got {raw_check_port!r}"
+            )
+
         blocked: list = []
         for name in ("HOME_PUBLIC_IP", "FETCH_BLOCKED_NETWORKS"):
             try:
@@ -295,8 +319,24 @@ class Settings:
             magnet_stall_days=stall_days,
             admin_user=admin_user,
             admin_password_hash=admin_hash,
+            internet_check_host=check_host,
+            internet_check_port=check_port,
             fetch_blocked_networks=tuple(blocked),
         )
+
+
+HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+
+
+def valid_host(value: str) -> bool:
+    """A host name (letters, digits, hyphens, dots) or an IP address; no scheme, port or path."""
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    else:
+        return True
+    return len(value) <= 253 and all(HOST_LABEL.fullmatch(label) for label in value.split("."))
 
 
 def valid_folder_name(name: str) -> bool:

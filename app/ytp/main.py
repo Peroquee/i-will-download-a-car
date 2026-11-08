@@ -254,7 +254,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.backlog_feeder = None
     app.state.monitor = None
     app.state.watchdog_status = None
-    app.state.internet = InternetChecker()  # independent of the watchdog (#63)
+    app.state.internet = InternetChecker(  # independent of the watchdog (#63)
+        resolved.internet_check_host, resolved.internet_check_port
+    )
     app.state.youtube = None
     app.state.channels = None
     app.state.youtube_worker = None

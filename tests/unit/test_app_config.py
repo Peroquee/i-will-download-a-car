@@ -236,3 +236,67 @@ def test_magnet_stall_days_accepts_zero_and_up_to_a_year(value, expected):
 @pytest.mark.parametrize("value", ["-1", "366", "seven", "1.5"])
 def test_magnet_stall_days_rejects_anything_else(value):
     assert any("MAGNET_STALL_DAYS" in p for p in problems(MAGNET_STALL_DAYS=value))
+
+
+# --- INTERNET_CHECK_HOST / INTERNET_CHECK_PORT (the dashboard's internet card) ---------
+
+
+def test_the_internet_check_defaults_to_youtube_not_pypi():
+    s = settings()
+    assert (s.internet_check_host, s.internet_check_port) == ("www.youtube.com", 443)
+    assert s.summary()["internet_check"] == "www.youtube.com:443"
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["example.org", "nas", "a-b.example.com", "EXAMPLE.org", "192.168.1.1", "::1", "2001:db8::1"],
+)
+def test_the_internet_check_accepts_host_names_and_addresses(host):
+    assert settings(INTERNET_CHECK_HOST=host).internet_check_host == host
+
+
+def test_the_internet_check_settings_are_used():
+    s = settings(INTERNET_CHECK_HOST="1.1.1.1", INTERNET_CHECK_PORT="53")
+    assert (s.internet_check_host, s.internet_check_port) == ("1.1.1.1", 53)
+
+
+def test_an_empty_host_switches_the_check_off_but_an_unset_one_uses_the_default():
+    assert settings(INTERNET_CHECK_HOST="").internet_check_host == ""
+    assert settings(INTERNET_CHECK_HOST="   ").internet_check_host == ""
+    assert settings(INTERNET_CHECK_HOST=None).internet_check_host == "www.youtube.com"
+    assert settings(INTERNET_CHECK_HOST="").summary()["internet_check"] is None
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://example.org",
+        "example.org:443",
+        "example.org/path",
+        "exa mple.org",
+        "-bad.example.org",
+        "bad-.example.org",
+        "a..b",
+        "example.org.",
+        "x" * 64 + ".org",
+        ("a" * 60 + ".") * 5 + "org",
+        "ex_ample.org",
+        "user@example.org",
+    ],
+)
+def test_a_bad_internet_check_host_is_a_startup_error(host):
+    assert any("INTERNET_CHECK_HOST" in p for p in problems(INTERNET_CHECK_HOST=host))
+
+
+@pytest.mark.parametrize("port", ["1", "443", "65535"])
+def test_the_internet_check_port_accepts_1_to_65535(port):
+    assert settings(INTERNET_CHECK_PORT=port).internet_check_port == int(port)
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "-1", "https", "44.3", "4 43"])
+def test_a_bad_internet_check_port_is_a_startup_error(port):
+    assert any("INTERNET_CHECK_PORT" in p for p in problems(INTERNET_CHECK_PORT=port))
+
+
+def test_an_empty_internet_check_port_means_the_default():
+    assert settings(INTERNET_CHECK_PORT="").internet_check_port == 443
