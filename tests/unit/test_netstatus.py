@@ -39,6 +39,14 @@ def free_port() -> int:
 # --- the independent internet check ------------------------------------------------
 
 
+def test_the_default_host_is_one_the_app_contacts_anyway():
+    from ytp import netstatus
+
+    assert netstatus.DEFAULT_HOST == "www.youtube.com"
+    assert netstatus.DEFAULT_PORT == 443
+    assert "pypi" not in netstatus.DEFAULT_HOST
+
+
 def test_before_the_first_check_the_answer_is_unknown():
     checker = InternetChecker(host="127.0.0.1", port=free_port(), timeout=0.2)
     assert checker.status() == {"state": "unknown", "checked_at": None}
@@ -127,3 +135,79 @@ def test_watchdog_view_keeps_last_poll_and_understands_offsets():
 def test_a_malformed_status_is_unreachable_never_ok():
     assert watchdog_view({"state": "exploding"}, now=NOW)["state"] == "unreachable"
     assert watchdog_view("nope", now=NOW)["state"] == "unreachable"  # type: ignore[arg-type]
+
+
+def test_the_configured_host_and_port_are_the_ones_connected_to(monkeypatch):
+    seen = []
+
+    def connect(address, timeout=None):
+        seen.append(address)
+        raise OSError("no route")
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    checker = InternetChecker("example.org", 8443)
+    assert checker.refresh()["state"] == "offline"
+    assert seen == [("example.org", 8443)]
+
+
+def test_without_a_host_the_check_is_off_and_never_connects(monkeypatch):
+    def connect(*args, **kwargs):
+        raise AssertionError("an empty host must not open a connection")
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    checker = InternetChecker("", 443, wall_clock=lambda: NOW)
+    assert checker.enabled is False
+    expected = {"state": "unknown", "checked_at": None, "reason": "disabled"}
+    assert checker.status() == expected
+    assert checker.refresh() == expected  # no "checked" time, and certainly never "ok"
+    assert checker.refresh() == expected
+
+
+def test_a_working_checker_has_no_reason_and_is_enabled(tcp_server):
+    checker = InternetChecker("127.0.0.1", tcp_server.getsockname()[1], timeout=0.5)
+    assert checker.enabled is True
+    assert "reason" not in checker.status()
+    assert "reason" not in checker.refresh()
+
+
+def test_an_unexpected_error_is_unknown_with_a_reason_and_logs_only_the_host(monkeypatch, caplog):
+    def explode(address, timeout=None):
+        raise RuntimeError("secret detail 203.0.113.9")
+
+    monkeypatch.setattr(socket, "create_connection", explode)
+    checker = InternetChecker("example.org", 8443)
+    with caplog.at_level("WARNING"):
+        answer = checker.refresh()
+    assert answer["state"] == "unknown"
+    assert answer["reason"] == "error"
+    text = " ".join(f"{r.getMessage()} {r.__dict__}" for r in caplog.records)
+    assert "example.org" in text
+    assert "203.0.113.9" not in text
+    assert all("8443" not in r.getMessage() for r in caplog.records)
+    assert all(r.exc_info is None for r in caplog.records)
+
+
+def test_the_app_builds_its_checker_from_the_settings(tmp_path):
+    from ytp.config import Settings
+    from ytp.main import create_app
+
+    env = {
+        "MEDIA_DIR_MOVIES": "Filme",
+        "MEDIA_DIR_SERIES": "Serien",
+        "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
+        "MEDIA_DIR_MUSIC": "Musik",
+        "MEDIA_DIR_PODCASTS": "Podcasts",
+        "MEDIA_DIR_YOUTUBE": "Youtube",
+        "DATA_ROOT": str(tmp_path),
+        "CONFIG_DIR": str(tmp_path),
+    }
+    default = create_app(Settings.from_env(env)).state.internet
+    assert (default._host, default._port) == ("www.youtube.com", 443)
+    custom = create_app(
+        Settings.from_env(
+            {**env, "INTERNET_CHECK_HOST": "example.org", "INTERNET_CHECK_PORT": "80"}
+        )
+    ).state.internet
+    assert (custom._host, custom._port) == ("example.org", 80)
+    off = create_app(Settings.from_env({**env, "INTERNET_CHECK_HOST": ""})).state.internet
+    assert off.enabled is False

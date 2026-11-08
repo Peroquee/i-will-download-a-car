@@ -176,6 +176,25 @@ def test_a_bad_configuration_stops_the_process_with_a_json_error_and_exit_2():
     assert any("MEDIA_DIR_MOVIES" in p for p in error["problems"])
 
 
+def test_a_bad_internet_check_host_stops_the_process_at_start_not_at_request_time():
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("MEDIA_DIR_", "JELLYFIN_"))}
+    env.update(ENV)
+    env["INTERNET_CHECK_HOST"] = "https://www.youtube.com/"
+    result = subprocess.run(
+        [sys.executable, "-m", "ytp"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=30,
+        cwd=REPO_ROOT / "app",
+    )
+    assert result.returncode == 2
+    error = json.loads(result.stdout.strip().splitlines()[-1])
+    assert error["msg"] == "invalid configuration"
+    assert any("INTERNET_CHECK_HOST" in p for p in error["problems"])
+
+
 def test_health_is_503_when_the_database_folder_is_missing(tmp_path, capfd):
     """/config not mounted: the app stays up, says why in the log and in /health."""
     with make(tmp_path, CONFIG_DIR=str(tmp_path / "no-such-config")) as client:

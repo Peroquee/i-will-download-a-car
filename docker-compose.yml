@@ -162,6 +162,10 @@ services:
       # the same setting the watchdog's egress check uses (#23).
       HOME_PUBLIC_IP: ${HOME_PUBLIC_IP:-}
       FETCH_BLOCKED_NETWORKS: ${FETCH_BLOCKED_NETWORKS:-}
+      # The dashboard's "internet" check connects here (a host the app contacts anyway). No colon:
+      # unset = default, set EMPTY = check off.
+      INTERNET_CHECK_HOST: ${INTERNET_CHECK_HOST-www.youtube.com}
+      INTERNET_CHECK_PORT: ${INTERNET_CHECK_PORT:-443}
     volumes:
       # The app's database folder (#9). The app runs as PUID:PGID and cannot create or chown it,
       # and Docker would create a MISSING source as root:root, which the app can then not write.

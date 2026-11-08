@@ -255,6 +255,9 @@
       var internetDetail = internet.checked_at
         ? t("dash.checked", { when: ctx.timeText(internet.checked_at) || internet.checked_at })
         : "";
+      if (internetState === "unknown" && internet.reason === "disabled") {
+        internetDetail = t("dash.internet_disabled");
+      }
       setStatusCard("status-internet", "status-internet-state", "status-internet-detail",
         internetState === "ok" ? "ok" : internetState === "offline" ? "bad" : "warn",
         t("dash.internet_" + internetState), internetDetail);

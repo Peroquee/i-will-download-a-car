@@ -235,8 +235,10 @@ async def vpn_status(request: Request) -> JSONResponse:
     The dashboard's two independent signals are added next to the unchanged watchdog fields
     (issue #63):
 
-    * `internet`: {state: ok | offline | unknown, checked_at}, a DNS + TCP check on the app's
-      normal egress path, cached by the checker.
+    * `internet`: {state: ok | offline | unknown, checked_at[, reason]}, a DNS + TCP check on the
+      app's normal egress path to INTERNET_CHECK_HOST:INTERNET_CHECK_PORT, cached by the checker.
+      With an empty host the check is off: `unknown` with `reason: "disabled"` (`error` = the
+      check itself failed unexpectedly).
     * `watchdog`: {state: ok | blind | stale | unreachable | starting, last_poll}, whether the
       watchdog answers and its last poll is fresh. The VPN's own state is separate (top-level
       `state`), so a watchdog that answers "down" is still healthy.

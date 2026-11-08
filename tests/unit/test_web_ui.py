@@ -1477,6 +1477,23 @@ def test_the_internet_card_uses_the_independent_state(state, text, tone):
 
 
 @needs_node
+def test_a_switched_off_internet_check_says_so_and_is_never_online():
+    internet = {"state": "unknown", "checked_at": None, "reason": "disabled"}
+    vpn = {**VPN_STATUS, "internet": internet}
+    out = smoke("/dashboard", "", {**ANSWERS, "/api/vpn": vpn})
+    assert out["nodes"]["status-internet-state"]["text"] == "Unknown"
+    assert "state-warn" in out["nodes"]["status-internet"]["cls"]
+    assert "INTERNET_CHECK_HOST is empty" in out["nodes"]["status-internet-detail"]["text"]
+
+
+@needs_node
+def test_an_unknown_internet_check_without_that_reason_shows_no_switched_off_note():
+    internet = {"state": "unknown", "checked_at": None, "reason": "error"}
+    out = smoke("/dashboard", "", {**ANSWERS, "/api/vpn": {**VPN_STATUS, "internet": internet}})
+    assert "switched off" not in out["nodes"]["status-internet-detail"]["text"]
+
+
+@needs_node
 @pytest.mark.parametrize(
     ("state", "text", "tone"),
     [("ok", "Watching", "state-ok"), ("blind", "Blind", "state-bad"),
