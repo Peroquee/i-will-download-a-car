@@ -1156,6 +1156,17 @@ def test_the_subscribe_payload():
 
 
 @needs_node
+def test_the_subscribe_payload_carries_the_subscription_resolution_only_when_given():
+    assert run_node("L.subscribePayload('@x', null, 0, 'video', false, 720)") == {
+        "channel": "@x",
+        "backfill": 0,
+        "max_height": 720,
+    }
+    assert "max_height" not in run_node("L.subscribePayload('@x', null, 0, 'video', false, null)")
+    assert "max_height" not in run_node("L.subscribePayload('@x', null, 0, 'podcast', false, 720)")
+
+
+@needs_node
 def test_what_the_page_sends_is_accepted_by_the_server(client):
     url = "https://youtu.be/dQw4w9WgXcQ"
     for call in (

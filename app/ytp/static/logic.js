@@ -110,14 +110,18 @@
     return body;
   }
 
-  /* The body of POST /api/subscriptions for a channel; target "video" sends nothing extra. */
-  function subscribePayload(channel, name, backfill, target, audioOnly) {
+  /* The body of POST /api/subscriptions for a channel; target "video" sends nothing extra.
+     maxHeight is the subscription's own cap for new videos (#65); empty = server default. */
+  function subscribePayload(channel, name, backfill, target, audioOnly, maxHeight) {
     var body = { channel: String(channel).trim() };
     if (name && String(name).trim()) body.name = String(name).trim();
     if (backfill != null) body.backfill = backfill;
     if (target === "podcast") {
       body.target = "podcast";
       if (audioOnly) body.audio_only = true;
+    }
+    if (target !== "podcast" && maxHeight != null && String(maxHeight).trim() !== "") {
+      body.max_height = toNumber(maxHeight);
     }
     return body;
   }

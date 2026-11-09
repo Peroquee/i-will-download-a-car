@@ -36,6 +36,7 @@ class Subscription:
     last_error: str | None
     target: str = "video"  # "video" or "podcast" (issue #35)
     audio_only: bool = False
+    max_height: int | None = None  # new videos of this channel (#65); None = server default
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subscription:
@@ -50,6 +51,7 @@ class Subscription:
             last_error=row["last_error"],
             target=row["target"],
             audio_only=bool(row["audio_only"]),
+            max_height=row["max_height"],
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -65,6 +67,7 @@ class Subscription:
             "last_error": self.last_error,
             "target": self.target,
             "audio_only": self.audio_only,
+            "max_height": self.max_height,
         }
 
 
@@ -75,6 +78,7 @@ def add(
     backfill: int = 0,
     target: str = "video",
     audio_only: bool = False,
+    max_height: int | None = None,
 ) -> tuple[Subscription, bool]:
     """Subscribe to a channel. Returns (subscription, created); an existing one is unchanged."""
     with db.transaction() as conn:
@@ -87,9 +91,10 @@ def add(
         if count >= MAX_SUBSCRIPTIONS:
             raise TooManySubscriptions
         cursor = conn.execute(
-            "INSERT INTO subscriptions (channel_id, channel_name, backfill, target, audio_only) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (channel_id, channel_name, backfill, target, int(audio_only)),
+            "INSERT INTO subscriptions "
+            "(channel_id, channel_name, backfill, target, audio_only, max_height) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (channel_id, channel_name, backfill, target, int(audio_only), max_height),
         )
         row = conn.execute(
             "SELECT * FROM subscriptions WHERE id = ?", (cursor.lastrowid,)
@@ -100,6 +105,23 @@ def add(
 def get(db: Database, subscription_id: int) -> Subscription | None:
     rows = db.query("SELECT * FROM subscriptions WHERE id = ?", (subscription_id,))
     return Subscription.from_row(rows[0]) if rows else None
+
+
+def set_max_height(
+    db: Database, subscription_id: int, max_height: int | None
+) -> Subscription | None:
+    """Change the resolution cap for new videos of this channel; None = server default (#65)."""
+    with db.transaction() as conn:
+        updated = conn.execute(
+            "UPDATE subscriptions SET max_height = ? WHERE id = ?",
+            (max_height, subscription_id),
+        ).rowcount
+        if updated != 1:
+            return None
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE id = ?", (subscription_id,)
+        ).fetchone()
+    return Subscription.from_row(row)
 
 
 def list_all(db: Database) -> list[Subscription]:

@@ -174,6 +174,7 @@ def test_a_new_database_gets_the_initial_schema(database):
         "backfill",
         "target",
         "audio_only",
+        "max_height",  # #65
     ]
 
 

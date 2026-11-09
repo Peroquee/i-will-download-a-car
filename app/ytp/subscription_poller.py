@@ -277,6 +277,8 @@ class SubscriptionPoller:
                 title=sanitize_name(entry.title, entry.video_id),
                 target=sub.target,
                 audio_only=sub.audio_only,
+                # The channel's own cap (#65); None = the server default.
+                max_height=sub.max_height,
                 published=published_day.date().isoformat() if published_day else None,
             )
             job, outcome = jobs.submit_job(

@@ -58,6 +58,7 @@ POLICY: dict[tuple[str, str], str] = {
     # any logged-in account
     ("POST", "/api/auth/logout"): USER,
     ("POST", "/api/auth/password"): USER,
+    ("PATCH", "/api/me/settings"): USER,
     ("GET", "/api/vpn"): USER,
     ("GET", "/api/dashboard"): USER,
     ("POST", "/api/magnet"): USER,
@@ -71,6 +72,7 @@ POLICY: dict[tuple[str, str], str] = {
     ("POST", "/api/jobs/dismiss-failed"): USER,
     ("GET", "/api/subscriptions"): USER,
     ("POST", "/api/subscriptions"): USER,
+    ("PATCH", "/api/subscriptions/{subscription_id}"): USER,
     ("DELETE", "/api/subscriptions/{subscription_id}"): USER,
     ("POST", "/api/subscriptions/{subscription_id}/poll"): USER,
     ("POST", "/api/podcasts/probe"): USER,

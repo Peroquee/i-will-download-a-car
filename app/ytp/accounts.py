@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import passwords
+from . import passwords, resolution
 from .db import Database
 
 ROLES = ("admin", "user")
@@ -58,6 +58,10 @@ class Account:
     disabled: bool
     created_at: str
     last_login: str | None
+    # The resolution the account gets when a download sends none; None = the server default (#65).
+    default_max_height: int | None = None
+    # Whether an admin lets this account choose resolutions; admins always may (#65).
+    can_set_resolution: bool = True
 
     @property
     def is_admin(self) -> bool:
@@ -72,6 +76,8 @@ class Account:
             disabled=bool(row["disabled"]),
             created_at=row["created_at"],
             last_login=row["last_login"],
+            default_max_height=row["default_max_height"],
+            can_set_resolution=bool(row["can_set_resolution"]),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -82,6 +88,8 @@ class Account:
             "disabled": self.disabled,
             "created_at": self.created_at,
             "last_login": self.last_login,
+            "default_max_height": self.default_max_height,
+            "can_set_resolution": self.can_set_resolution,
         }
 
 
@@ -188,6 +196,49 @@ def set_disabled(db: Database, account_id: int, disabled: bool) -> Account:
             conn.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
         row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
     return Account.from_row(row)
+
+
+_UNCHANGED = object()
+
+
+def set_resolution_settings(
+    db: Database,
+    account_id: int,
+    *,
+    default_max_height: int | None | object = _UNCHANGED,
+    can_set_resolution: bool | object = _UNCHANGED,
+) -> Account:
+    """Change one or both resolution settings of an account (#65). `_UNCHANGED` leaves a setting
+    alone; `default_max_height=None` clears the personal default."""
+    updates: list[str] = []
+    values: list[Any] = []
+    if default_max_height is not _UNCHANGED:
+        if default_max_height is not None and not resolution.valid(default_max_height):
+            raise AccountError("invalid", resolution.DETAIL)
+        updates.append("default_max_height = ?")
+        values.append(default_max_height)
+    if can_set_resolution is not _UNCHANGED:
+        if not isinstance(can_set_resolution, bool):
+            raise AccountError("invalid", "can_set_resolution must be true or false")
+        updates.append("can_set_resolution = ?")
+        values.append(int(can_set_resolution))
+    if not updates:
+        raise AccountError("invalid", "no resolution setting to change")
+    with db.transaction() as conn:
+        if conn.execute("SELECT 1 FROM accounts WHERE id = ?", (account_id,)).fetchone() is None:
+            raise AccountError("not_found", "no such account")
+        conn.execute(
+            f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?",
+            (*values, account_id),
+        )
+        row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    return Account.from_row(row)
+
+
+def set_default_max_height(db: Database, account_id: int, max_height: int | None) -> Account:
+    """The account's own default resolution (it may only do this with the admin's right; the
+    API checks that)."""
+    return set_resolution_settings(db, account_id, default_max_height=max_height)
 
 
 def set_password(
