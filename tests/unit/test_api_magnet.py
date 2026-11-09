@@ -173,6 +173,21 @@ def test_a_single_season_with_an_episode_is_still_accepted(client, fake):
     assert json.loads(rows(client)[0]["metadata"])["seasons"] == [3]
 
 
+# --- high priority (#51) -------------------------------------------------------------------------
+
+
+def test_high_priority_is_stored_and_normal_is_the_default(client, fake):
+    assert post(client).status_code == 201
+    other = MAGNET.replace(HASH, "1" * 40)
+    assert post(client, magnet=other, high_priority=True).status_code == 201
+    assert [row["priority"] for row in rows(client)] == [0, 1]
+
+
+def test_high_priority_must_be_a_boolean(client, fake):
+    assert post(client, high_priority="yes").status_code == 422
+    assert rows(client) == []
+
+
 # --- validation: field-level 422, nothing stored or sent ----------------------------------------
 
 

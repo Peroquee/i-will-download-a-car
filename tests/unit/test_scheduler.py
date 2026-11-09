@@ -87,6 +87,7 @@ def test_the_migration_creates_app_state_without_touching_the_first_tables(datab
         "0011_podcast_backlog.sql",
         "0012_seen_videos.sql",
         "0013_job_dismissals.sql",
+        "0014_job_priority.sql",
     ]
 
 

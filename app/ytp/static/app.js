@@ -405,10 +405,11 @@
       showResult(t("result.fix"), false);
       return;
     }
+    var highPriority = $("high-priority").checked;
     var path = current === "youtube" ? "/api/youtube/download" : "/api/magnet";
     var body = current === "youtube"
-      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly(), data.album, ytMaxHeight())
-      : L.magnetPayload(link, mediaType(), data);
+      ? L.youtubePayload(link, data.channel, data.title, ytTarget(), ytAudioOnly(), data.album, ytMaxHeight(), highPriority)
+      : L.magnetPayload(link, mediaType(), data, highPriority);
     $("submit").disabled = true;
     post(path, body).then(function (reply) {
       $("submit").disabled = false;
@@ -468,7 +469,7 @@
         return;
       }
     }
-    var payloads = L.podcastPayloads(link, data);
+    var payloads = L.podcastPayloads(link, data, $("high-priority").checked);
     var lines = [];
     var good = true;
     var fieldErrors = null;
@@ -535,6 +536,7 @@
   function resetFields() {
     document.querySelectorAll("#form input[type=text]").forEach(function (input) { input.value = ""; });
     $("pack").checked = false;
+    $("high-priority").checked = false;
     $("subscribe").checked = false;
     $("yt-backfill").value = "0";
     showBackfill();

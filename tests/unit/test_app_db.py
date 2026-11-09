@@ -161,6 +161,7 @@ def test_a_new_database_gets_the_initial_schema(database):
         "source",
         "progress_bytes",
         "progress_at",
+        "priority",
     ]
     assert list(columns(conn, "subscriptions")) == [
         "id",
@@ -193,6 +194,7 @@ def test_a_job_gets_sensible_defaults(database):
     (row,) = database.query("SELECT * FROM jobs")
     assert row["id"] == 1
     assert row["status"] == "queued"
+    assert row["priority"] == 0, "a job is a normal download unless asked otherwise (#51)"
     assert row["metadata"] == "{}"
     assert row["error"] is None
     assert row["created_at"].endswith("Z")

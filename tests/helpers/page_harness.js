@@ -145,6 +145,7 @@ const errors = [];
 const timers = [];
 let timerIds = 0;
 const fetched = [];
+const sent = [];
 const store = {};
 const document = {
   visibilityState: "visible", documentElement: new El("html"), body: tree,
@@ -174,6 +175,7 @@ const window = {
 const navigator = { language };
 const fetchStub = (url, options) => {
   fetched.push([(options && options.method) || "GET", String(url)]);
+  sent.push({ method: (options && options.method) || "GET", url: String(url), body: (options && options.body) || null });
   const path = String(url).split("?")[0];
   const method = (options && options.method) || "GET";
   const key = method + " " + path in answers ? method + " " + path : path;
@@ -207,7 +209,7 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
   }
   const warning = document.getElementById("js-warning");
   console.log(JSON.stringify({
-    errors, warningHidden: warning ? warning.hidden : null, fetched, reads, prevented, reloads, scrolled,
+    errors, warningHidden: warning ? warning.hidden : null, fetched, sent, reads, prevented, reloads, scrolled,
     auth: tree.attrs["data-auth"] || null, role: tree.attrs["data-role"] || null, href: location.href,
     version: (document.querySelector('meta[name="ytp-static-version"]') || { attrs: {} }).attrs.content || null,
     banner: document.getElementById("update-banner").hidden,

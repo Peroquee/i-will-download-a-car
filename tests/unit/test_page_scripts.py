@@ -237,6 +237,28 @@ def test_a_season_range_is_submitted():
     assert ["POST", "/api/magnet"] in out["fetched"]
 
 
+@needs_node
+def test_the_high_priority_checkbox_marks_the_job():
+    steps = [
+        {"check": "#mode-magnet", "value": True},
+        {"fire": "#mode-magnet", "type": "change"},
+        {"set": "#link", "value": "magnet:?xt=urn:btih:" + "a" * 40},
+        {"set": "#f-movie-title", "value": "A Film"},
+        {"set": "#f-year", "value": "2000"},
+        {"check": "#high-priority", "value": True},
+        {"submit": "#form"},
+    ]
+    out = page("/", steps=steps)
+    assert out["errors"] == [], out["errors"]
+    (post,) = [s for s in out["sent"] if s["method"] == "POST" and s["url"] == "/api/magnet"]
+    assert json.loads(post["body"])["high_priority"] is True
+
+    normal_steps = [step for step in steps if step.get("check") != "#high-priority"]
+    out = page("/", steps=normal_steps)
+    (post,) = [s for s in out["sent"] if s["method"] == "POST" and s["url"] == "/api/magnet"]
+    assert "high_priority" not in json.loads(post["body"]), "a normal job sends no marker"
+
+
 def test_a_youtube_link_is_looked_up_and_submitted_without_a_native_submit():
     out = page(
         "/",
@@ -506,6 +528,38 @@ def test_a_user_gets_the_page_without_the_admin_requests():
     assert "/api/jobs?limit=50" in requests_made(out)
     assert not [u for u in requests_made(out) if u.startswith("/api/alerts")]
     assert not [u for u in requests_made(out) if u.startswith("/api/accounts")]
+
+
+@needs_node
+def test_the_dashboard_marks_a_high_priority_job():
+    job = {
+        "id": 7,
+        "type": "magnet",
+        "kind": "movies",
+        "label": "A Film (2000)",
+        "status": "queued",
+        "high_priority": True,
+        "progress": None,
+        "created_at": "2026-11-09T00:00:00.000Z",
+        "updated_at": "2026-11-09T00:00:00.000Z",
+    }
+    out = page(
+        "/dashboard",
+        answers={
+            "/api/dashboard": {
+                "active": [job],
+                "recent": [],
+                "disk": None,
+                "deploy": None,
+                "vpn": {"current": {"state": "ok"}, "history": []},
+            }
+        },
+        steps=[{"read": "#dash-active-list"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    text = out["reads"]["#dash-active-list"]["text"]
+    assert "A Film (2000)" in text
+    assert "High priority" in text, "the job list marks high-priority jobs (#51)"
 
 
 @needs_node

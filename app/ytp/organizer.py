@@ -419,4 +419,7 @@ class FileOrganizer:
             },
         )
         # Fail soft by design: this only notes the request; Jellyfin trouble never reaches here.
-        self.refresher.request_refresh(unicodedata.normalize("NFC", library_name))
+        # A high-priority job asks for the scan right away, skipping the debounce once (#51).
+        self.refresher.request_refresh(
+            unicodedata.normalize("NFC", library_name), immediate=job.priority > 0
+        )

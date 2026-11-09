@@ -36,9 +36,11 @@ class Refresher(LibraryRefresher):
     def __init__(self) -> None:
         super().__init__(None)
         self.requested: list[str | None] = []
+        self.immediate: list[bool] = []
 
-    def request_refresh(self, folder: str | None = None) -> None:
+    def request_refresh(self, folder: str | None = None, *, immediate: bool = False) -> None:
         self.requested.append(folder)
+        self.immediate.append(immediate)
 
 
 class World:
@@ -60,8 +62,8 @@ class World:
         path.write_bytes(content if content is not None else b"x" * size)
         return path
 
-    def run(self, metadata: dict, content: str) -> None:
-        job = Job(1, "magnet", "a" * 40, metadata, "organizing", None, "", "")
+    def run(self, metadata: dict, content: str, priority: int = 0) -> None:
+        job = Job(1, "magnet", "a" * 40, metadata, "organizing", None, "", "", priority=priority)
         path = str(self.downloads / content)
         torrent = Torrent.from_api(
             {
@@ -554,6 +556,14 @@ def test_success_asks_for_a_debounced_refresh_of_that_library_folder(world):
     world.make("rel/Movie.mkv", 100)
     world.run(MOVIE, "rel")
     assert world.refresher.requested == ["Filme"]
+    assert world.refresher.immediate == [False], "a normal job keeps the debounce"
+
+
+def test_a_high_priority_job_asks_for_an_immediate_refresh(world):
+    world.make("rel/Movie.mkv", 100)
+    world.run(MOVIE, "rel", priority=1)
+    assert world.refresher.requested == ["Filme"]
+    assert world.refresher.immediate == [True], "a high-priority job skips the debounce once (#51)"
 
 
 def test_the_umlaut_library_is_requested_in_nfc(world):

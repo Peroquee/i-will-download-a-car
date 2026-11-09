@@ -32,6 +32,7 @@ class Job:
     updated_at: str
     progress_bytes: int | None = None  # magnet jobs: what the reconciler last saw (#40)
     progress_at: str | None = None  # ... and when that last changed
+    priority: int = 0  # 1 = high priority (#51); 0 = a normal download
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Job:
@@ -46,6 +47,7 @@ class Job:
             updated_at=row["updated_at"],
             progress_bytes=row["progress_bytes"],
             progress_at=row["progress_at"],
+            priority=row["priority"],
         )
 
 
@@ -70,11 +72,15 @@ def submit_job(
     source: str | None = None,
     *,
     retry_failed: bool = True,
+    priority: int = 0,
 ) -> tuple[Job, Outcome]:
     """Create the job for a thing (`job_type`: 'magnet' or 'youtube'), or find the existing one.
 
     One transaction; the unique index on (type, external_id) decides, so two simultaneous
     submissions create exactly one job.
+
+    `priority` (1 = high, #51) is stored for a NEW job only; changing the priority of an
+    existing job is deliberately not a feature. A retried failed job keeps its priority.
 
     * "created": a new row with status `queued`.
     * "requeued": it was there with status `failed`; it is queued again with the new metadata and
@@ -83,11 +89,13 @@ def submit_job(
       job is returned. (With `retry_failed=False`, also when it failed: the channel poller must
       not re-queue a video that failed, over and over; retrying one is the user's decision.)
     """
+    stored_priority = 1 if priority else 0
     with db.transaction() as conn:
         cursor = conn.execute(
-            "INSERT INTO jobs (type, external_id, metadata, source) VALUES (?, ?, ?, ?) "
+            "INSERT INTO jobs (type, external_id, metadata, source, priority) "
+            "VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT (type, external_id) DO NOTHING",
-            (job_type, external_id, metadata_json, source),
+            (job_type, external_id, metadata_json, source, stored_priority),
         )
         outcome: Outcome = "created" if cursor.rowcount == 1 else "duplicate"
         row = conn.execute(
@@ -106,20 +114,32 @@ def submit_job(
 
 
 def submit_magnet_job(
-    db: Database, infohash: str, metadata_json: str, magnet: str | None = None
+    db: Database,
+    infohash: str,
+    metadata_json: str,
+    magnet: str | None = None,
+    *,
+    priority: int = 0,
 ) -> tuple[Job, Outcome]:
     """`submit_job` for a magnet link, keyed by its infohash (the link is kept for a retry)."""
-    return submit_job(db, "magnet", infohash, metadata_json, magnet)
+    return submit_job(db, "magnet", infohash, metadata_json, magnet, priority=priority)
 
 
 def claim_next_queued(db: Database, job_type: str) -> Job | None:
-    """Take the oldest `queued` job of a type and mark it `downloading`; None if there is none.
+    """Take the highest-priority `queued` job of a type and mark it `downloading`.
+
+    High priority wins first, then the oldest (#51). While a high-priority job of ANY type is
+    `downloading`, a normal YouTube/podcast job is not claimed at all: it waits in `queued`
+    until the high-priority download is done. A high-priority job is always claimable.
 
     The claim is one transaction, so two workers can never take the same job.
     """
     with db.transaction() as conn:
         row = conn.execute(
-            "SELECT * FROM jobs WHERE type = ? AND status = 'queued' ORDER BY id LIMIT 1",
+            "SELECT * FROM jobs WHERE type = ? AND status = 'queued' "
+            "AND (priority > 0 OR NOT EXISTS ("
+            " SELECT 1 FROM jobs hi WHERE hi.status = 'downloading' AND hi.priority > 0)) "
+            "ORDER BY priority DESC, id LIMIT 1",
             (job_type,),
         ).fetchone()
         if row is None:
@@ -337,3 +357,52 @@ def get_source(db: Database, job_id: int) -> str | None:
     """The stored source of a job (the magnet link). Only the retry reads it."""
     rows = db.query("SELECT source FROM jobs WHERE id = ?", (job_id,))
     return rows[0]["source"] if rows else None
+
+
+# --- high priority (#51) -------------------------------------------------------------------
+
+
+def high_priority_downloading(db: Database) -> bool:
+    """Is at least one high-priority job downloading right now?"""
+    return bool(
+        db.query("SELECT 1 FROM jobs WHERE priority > 0 AND status = 'downloading' LIMIT 1")
+    )
+
+
+def normal_magnet_hashes(db: Database) -> list[str]:
+    """Infohashes of normal magnet jobs that are queued or downloading (the torrents to pause).
+
+    `queued` is included because qBittorrent starts a torrent as soon as the add call returns,
+    while the reconciler only later moves the job to `downloading`; holding those back too is
+    what keeps a normal torrent from running beside a high-priority download.
+    """
+    rows = db.query(
+        "SELECT external_id FROM jobs WHERE type = 'magnet' AND priority = 0 "
+        "AND status IN ('queued', 'downloading')"
+    )
+    return [row["external_id"] for row in rows]
+
+
+def app_paused_hashes(db: Database) -> list[str]:
+    """The torrents the app itself paused while a high-priority job was downloading."""
+    return [row["infohash"] for row in db.query("SELECT infohash FROM priority_paused")]
+
+
+def remember_app_paused(db: Database, hashes: list[str]) -> None:
+    """Remember torrents the app paused, so only those are ever resumed again."""
+    if not hashes:
+        return
+    with db.transaction() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO priority_paused (infohash) VALUES (?)",
+            [(value,) for value in hashes],
+        )
+
+
+def forget_app_paused(db: Database, hashes: list[str]) -> None:
+    """Drop the record after the app resumed these torrents (or they are gone for good)."""
+    if not hashes:
+        return
+    marks = ", ".join("?" for _ in hashes)
+    with db.transaction() as conn:
+        conn.execute(f"DELETE FROM priority_paused WHERE infohash IN ({marks})", tuple(hashes))

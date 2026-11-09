@@ -217,7 +217,10 @@ class PodcastWorker:
             self._cover(library, meta)
             if jobs.transition(self.db, job.id, "done", expected=("organizing",)):
                 logger.info("job done", extra={"job_id": job.id})
-                self.refresher.request_refresh(self.settings.library_dirs["podcasts"])
+                self.refresher.request_refresh(
+                    self.settings.library_dirs["podcasts"],
+                    immediate=job.priority > 0,  # high priority skips the debounce once (#51)
+                )
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 

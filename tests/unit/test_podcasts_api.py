@@ -161,6 +161,17 @@ def test_one_episode_is_queued_by_its_key(client):
     assert job.metadata["podcast"] == "Test Cast"
     assert job.metadata["title"] == "First"
     assert job.metadata["enclosure_url"] == "https://cdn.example/a.mp3"
+    assert job.priority == 0
+
+
+def test_an_episode_can_be_high_priority(client):
+    client.fetcher.feeds[FEED] = feed_of(episode_item("a", "First", -2))
+    response = client.post(
+        "/api/podcasts/episode",
+        json={"feed": FEED, "key": episode_key(FEED, "a"), "high_priority": True},
+    )
+    assert response.status_code == 201
+    assert jobs.get_job(client.app.state.db, response.json()["id"]).priority == 1
 
 
 def test_the_same_episode_twice_is_one_job(client):

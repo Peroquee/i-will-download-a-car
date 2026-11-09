@@ -161,6 +161,19 @@ def test_the_active_list_has_live_numbers_for_a_torrent(client):
     assert waiting["speed"] is None
 
 
+def test_the_lists_mark_high_priority_jobs(client):
+    high = add_job(client, "magnet", H1, MOVIE, "downloading")
+    normal = add_job(client, "magnet", H2, MOVIE, "downloading")
+    finished = add_job(client, "magnet", "3" * 40, MOVIE, "done")
+    with client.app.state.db.transaction() as conn:
+        conn.execute("UPDATE jobs SET priority = 1 WHERE id IN (?, ?)", (high.id, finished.id))
+    body = client.get("/api/dashboard").json()
+    active = {row["id"]: row for row in body["active"]}
+    assert active[high.id]["high_priority"] is True
+    assert active[normal.id]["high_priority"] is False
+    assert body["recent"][0]["high_priority"] is True
+
+
 def test_an_unknown_eta_and_a_torrent_without_metadata_are_null(client):
     add_job(client, "magnet", H1, MOVIE, "downloading")
     client.app.state.torrent_progress = TorrentProgress(

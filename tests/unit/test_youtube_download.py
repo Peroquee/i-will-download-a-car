@@ -95,7 +95,7 @@ class World:
         self.db = Database.open(tmp / "app.db")
         self.requested: list = []
         refresher = LibraryRefresher(None)
-        refresher.request_refresh = lambda folder=None: self.requested.append(folder)  # type: ignore[method-assign]
+        refresher.request_refresh = lambda folder=None, **kw: self.requested.append(folder)  # type: ignore[method-assign]
         self.refresher = refresher
 
     def worker(self, **kw) -> YoutubeWorker:
@@ -540,6 +540,14 @@ def test_the_endpoint_queues_a_job_and_the_background_worker_finishes_it(client,
         "title": "Big Buck Bunny",
     }
     assert (tmp_path / "data" / "Youtube" / "Blender" / f"Big Buck Bunny [{ID}].mp4").exists()
+
+
+def test_the_endpoint_stores_high_priority(client):
+    response = post(client, high_priority=True)
+    assert response.status_code == 201
+    job = jobs.get_job(client.app.state.db, response.json()["id"])
+    assert job.priority == 1
+    assert wait_for(client, "done").priority == 1, "the worker keeps the priority (#51)"
 
 
 def test_a_pasted_address_with_a_tail_is_reduced_to_the_id(client):
