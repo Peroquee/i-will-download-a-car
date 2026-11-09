@@ -304,6 +304,25 @@ def test_delete_buttons_are_crimson_with_light_text():
     assert "color: var(--danger-ink)" in rule
 
 
+def test_alert_severities_have_their_own_colours():
+    """Issue #64: warnings orange, errors in the delete-button crimson, info green."""
+    assert "--warn: #e8913a" in CSS
+    warning_chip = re.search(
+        r"\.alert-chip\.alert-warning, \.alert-item\.alert-warning \{[^}]*\}", CSS
+    ).group(0)
+    assert "border-left-color: var(--warn)" in warning_chip
+    error_chip = re.search(
+        r"\.alert-chip\.alert-error, \.alert-item\.alert-error \{[^}]*\}", CSS
+    ).group(0)
+    assert "border-left-color: var(--danger-bg)" in error_chip
+    assert "background: var(--danger-bg)" in re.search(
+        r"\.alert-count\.error \.dot \{[^}]*\}", CSS
+    ).group(0)
+    assert "background: var(--warn)" in re.search(
+        r"\.alert-count\.warning \.dot \{[^}]*\}", CSS
+    ).group(0)
+
+
 def test_the_sidebar_is_glued_to_the_top_left_of_the_screen():
     """Issue #57: the logo and the menu must sit at the screen's left edge, not inside a
     centred container, and stay there while the page scrolls."""
