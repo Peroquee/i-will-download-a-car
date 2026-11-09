@@ -335,6 +335,84 @@ def test_without_a_watchdog_client_the_manager_resumes_as_before(db, fake):
     assert jobs.app_paused_hashes(db) == []
 
 
+# --- a watchdog pause during a high-priority download (#66) ---------------------------------------
+
+
+def test_an_outage_that_starts_and_ends_during_a_high_download_keeps_the_pause(db, fake):
+    """#66: the pause is seen though the high job outlives the outage.
+
+    The watchdog pauses everything when the VPN drops; the app's own rows must go without a
+    resume, or the manager would undo the watchdog's "stay paused" policy when the job ends.
+    """
+    high = magnet_job(db, H1, priority=1, status="downloading")
+    magnet_job(db, H2, status="downloading")
+    fake.torrents = [torrent(H1), torrent(H2)]
+    watchdog = FakeWatchdog({"state": "ok", "paused": False})
+    priority = manager(db, fake, watchdog)
+    priority.tick()  # the app pauses H2 for the high-priority download
+    assert jobs.app_paused_hashes(db) == [H2]
+    with db.transaction() as conn:
+        conn.execute("UPDATE priority_paused SET paused_at = '2026-11-09T01:00:00.500Z'")
+
+    # The outage starts: the watchdog pauses everything (qBittorrent reports H2 paused).
+    fake.torrents = [torrent(H1), torrent(H2, state="pausedDL")]
+    watchdog.status = {"state": "down", "paused": True, "since": "2026-11-09T01:00:05+00:00"}
+    priority.tick()
+    assert jobs.app_paused_hashes(db) == [], "the watchdog's policy owns the torrents now"
+
+    # The outage ends before the high download does; the watchdog clears `paused` again.
+    watchdog.status = {"state": "ok", "paused": False}
+    priority.tick()
+    assert jobs.app_paused_hashes(db) == []
+
+    jobs.transition(db, high.id, "done", expected=("downloading",))
+    priority.tick()
+
+    assert fake.calls("torrents/start") == [], "the app never resumes the watchdog's pause"
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_an_egress_mismatch_during_a_high_download_is_never_resumed(db, fake):
+    high = magnet_job(db, H1, priority=1, status="downloading")
+    magnet_job(db, H2, status="downloading")
+    fake.torrents = [torrent(H1), torrent(H2)]
+    watchdog = FakeWatchdog({"state": "ok", "paused": False})
+    priority = manager(db, fake, watchdog)
+    priority.tick()
+    assert jobs.app_paused_hashes(db) == [H2]
+
+    fake.torrents = [torrent(H1), torrent(H2, state="pausedDL")]
+    watchdog.status = {"state": "ok", "paused": False, "egress": "mismatch"}
+    priority.tick()
+    assert jobs.app_paused_hashes(db) == []
+
+    watchdog.status = {"state": "ok", "paused": False}
+    jobs.transition(db, high.id, "done", expected=("downloading",))
+    priority.tick()
+
+    assert fake.calls("torrents/start") == []
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_the_watchdog_status_is_read_once_per_tick(db, fake):
+    paused_by_the_app(db, fake)
+    watchdog = FakeWatchdog({"state": "ok", "paused": False})
+
+    manager(db, fake, watchdog).tick()
+
+    assert watchdog.calls == 1, "the pre-check's answer is passed to the resume path"
+    (resume,) = fake.calls("torrents/start")
+    assert resume.form["hashes"] == [H2]
+
+
+def test_the_watchdog_is_not_asked_without_paused_rows(db, fake):
+    watchdog = FakeWatchdog({"state": "ok", "paused": False})
+
+    manager(db, fake, watchdog).tick()
+
+    assert watchdog.calls == 0
+
+
 # --- the immediate Jellyfin refresh (#51 requirement 5) ------------------------------------------
 
 

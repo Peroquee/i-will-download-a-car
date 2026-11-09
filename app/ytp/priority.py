@@ -24,6 +24,13 @@ watchdog's own pause is newer than the app's it forgets its rows WITHOUT resumin
 safety policy owns those torrents. The same applies to a confirmed egress mismatch, which the
 watchdog never auto-resumes either. With no status client the manager behaves as before.
 
+**A watchdog pause is noticed during a hold, too (#66).** The status is read at the start of a
+tick whenever the app has paused rows, not only on the resume path: an outage that starts AND ends
+while a high-priority download still runs would otherwise never be seen (the watchdog clears its
+`paused` flag when it gets healthy again), and the manager would later resume against the "stay
+paused" policy. The status is read once per tick and passed on, so the resume path does not fetch
+it a second time.
+
 qBittorrent trouble is normal (the VPN reconnects): a failed tick logs once per state change and
 tries again on the next run. A pause is only recorded after qBittorrent accepted it, so a lost
 connection can never make the app "remember" a pause it did not do.
@@ -73,10 +80,20 @@ class PriorityManager:
         if self.qbit is None:
             return
         try:
+            # Read the watchdog once at the start (#66): its pause may start and end while a
+            # high-priority download still runs, so the resume path alone would miss it.
+            paused = jobs.app_paused_hashes(self.db)
+            status: dict[str, object] | None = None
+            if self.watchdog is not None and paused:
+                status = self._watchdog_status()
+                reason = self._watchdog_owns_the_pause(status)
+                if reason is not None:
+                    self._leave_to_watchdog(paused, reason)
+                    paused = []
             if jobs.high_priority_downloading(self.db):
                 self._hold_normal_torrents()
             else:
-                self._resume_app_paused()
+                self._resume_app_paused(paused, status)
         except QbitError as exc:
             # The VPN is probably reconnecting; the next tick tries again.
             if self._last_problem != str(exc):
@@ -115,11 +132,14 @@ class PriorityManager:
 
     # ------------------------------------------------------------------ resuming
 
-    def _resume_app_paused(self) -> None:
-        hashes = jobs.app_paused_hashes(self.db)
+    def _resume_app_paused(self, hashes: list[str], status: dict[str, object] | None) -> None:
+        """Resume the app's own pauses, unless the watchdog's policy owns them.
+
+        `status` is the watchdog answer `tick` already read (None without a watchdog or when
+        there were no rows to compare), so the status is never fetched twice in one tick (#66).
+        """
         if not hashes:
             return
-        status = self._watchdog_status()
         if status is not None:
             if status.get("state") != "ok":
                 # The watchdog is not healthy (VPN down, blind, starting, or not answering):
@@ -128,12 +148,9 @@ class PriorityManager:
                 if self._watchdog_paused_after_us(status):
                     self._leave_to_watchdog(hashes, "the watchdog paused during an outage")
                 return
-            if status.get("egress") == "mismatch":
-                # The watchdog's egress policy pauses everything and never resumes by itself.
-                self._leave_to_watchdog(hashes, "the watchdog paused after an egress mismatch")
-                return
-            if self._watchdog_paused_after_us(status):
-                self._leave_to_watchdog(hashes, "the watchdog paused during an outage")
+            reason = self._watchdog_owns_the_pause(status)
+            if reason is not None:
+                self._leave_to_watchdog(hashes, reason)
                 return
         self.qbit.resume_torrents(hashes)
         jobs.forget_app_paused(self.db, hashes)
@@ -165,6 +182,18 @@ class PriorityManager:
             logger.warning("priority: the watchdog status could not be read", exc_info=True)
             return {"state": "unknown"}
         return status if isinstance(status, dict) else {"state": "unknown"}
+
+    def _watchdog_owns_the_pause(self, status: dict[str, object]) -> str | None:
+        """Why the watchdog's pause policy owns the app's paused torrents, or None (#66).
+
+        A pause delivered after the app's own pause, or a confirmed egress mismatch (which the
+        watchdog never auto-resumes), means the app must only forget its rows, never resume.
+        """
+        if status.get("egress") == "mismatch":
+            return "the watchdog paused after an egress mismatch"
+        if self._watchdog_paused_after_us(status):
+            return "the watchdog paused during an outage"
+        return None
 
     def _watchdog_paused_after_us(self, status: dict[str, object]) -> bool:
         """Did the watchdog's own pause start after the app paused its torrents?
