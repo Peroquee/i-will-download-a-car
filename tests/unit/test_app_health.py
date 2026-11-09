@@ -80,6 +80,7 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/youtube/probe",
         "/api/youtube/options",  # the default resolution for the form (#47)
         "/api/youtube/download",
+        "/api/youtube/cookies",  # the admin's YouTube login cookies (#46)
         "/api/jobs",  # the job list (#26)
         "/api/jobs/{job_id}/retry",
         "/api/jobs/{job_id}/dismiss",  # hide a failed job (dismissed, not deleted)

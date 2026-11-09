@@ -29,6 +29,7 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -215,9 +216,15 @@ class VideoInfo:
         }
 
 
-def ydl_options(proxy: str, socket_timeout: float) -> dict[str, Any]:
-    """The yt-dlp options for a metadata-only probe (also used to pin them in tests)."""
-    return {
+def ydl_options(
+    proxy: str, socket_timeout: float, cookie_file: Path | None = None
+) -> dict[str, Any]:
+    """The yt-dlp options for a metadata-only probe (also used to pin them in tests).
+
+    `cookie_file` (#46): the admin's YouTube login cookies, passed only when the file exists.
+    The probe itself never uses it; a channel listing may.
+    """
+    options = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
@@ -234,6 +241,9 @@ def ydl_options(proxy: str, socket_timeout: float) -> dict[str, Any]:
         "logger": _SilentLogger(),
         **({"proxy": proxy} if proxy else {}),
     }
+    if cookie_file is not None and cookie_file.is_file():
+        options["cookiefile"] = str(cookie_file)
+    return options
 
 
 class _SilentLogger:

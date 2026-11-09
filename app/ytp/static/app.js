@@ -162,6 +162,20 @@
 
   function post(path, body) { return request("POST", path, body); }
 
+  /* A request whose body is plain text, not JSON (the YouTube cookies file, #46). */
+  function requestText(method, path, text) {
+    var options = {
+      method: method, credentials: "same-origin",
+      headers: { "Accept": "application/json", "Content-Type": "text/plain; charset=utf-8" },
+      body: text,
+    };
+    return api(path, options).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (data) {
+        return { status: response.status, data: data };
+      });
+    });
+  }
+
   function statusText(status) { return t("status." + status); }
 
   /* ---------------------------------------------------------------- YouTube probe */
@@ -963,7 +977,7 @@
     } catch (e) { dash = null; }
     try {
       auth = window.Auth ? window.Auth.create({
-        t: t, $: $, post: post, request: request, getJson: getJson, timeText: timeText,
+        t: t, $: $, post: post, request: request, requestText: requestText, getJson: getJson, timeText: timeText,
       }) : null;
     } catch (e) { auth = null; }
     applyLanguage();

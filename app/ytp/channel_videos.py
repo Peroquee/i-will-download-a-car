@@ -23,8 +23,10 @@ import logging
 import re
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from . import youtube_cookies
 from .feeds import VIDEO_ID, FeedEntry
 from .youtube import ProbeError, YoutubeProbe, _clean, classify, ydl_options
 
@@ -71,11 +73,13 @@ class ChannelLister:
         limit: int = LIMIT,
         max_parallel: int = 2,
         extract: Callable[[str, dict[str, Any], int], list[dict[str, Any]]] | None = None,
+        cookie_file: Path | None = None,
     ):
         self._probe = probe
         self.limit = limit
         self._extract = extract  # None: yt-dlp (looked up when used, so a test can replace it)
         self._slots = threading.BoundedSemaphore(max_parallel)
+        self._cookie_file = cookie_file  # the admin's YouTube login cookies (#46)
 
     def __repr__(self) -> str:
         return f"ChannelLister(limit={self.limit})"
@@ -83,14 +87,17 @@ class ChannelLister:
     def list(self, channel_id: str) -> list[FeedEntry]:
         if not CHANNEL_ID.fullmatch(channel_id):
             raise ProbeError("unsupported", "not a channel id")
-        options = ydl_options(self._probe.proxy, self._probe.socket_timeout)
-        options |= {
-            "extract_flat": "in_playlist",
-            "noplaylist": False,
-            "allowed_extractors": ["youtube", "youtube:tab"],  # channel tabs are "youtube:tab"
-        }
-        url = f"https://www.youtube.com/channel/{channel_id}/videos"
-        with self._slots:
+        # Every listing gets its own throwaway cookie copy: yt-dlp truncates and rewrites the
+        # cookiefile in place, and up to two listings run at the same time (#46 follow-up).
+        # The slot is taken first, so no copy waits around for a free one.
+        with self._slots, youtube_cookies.private_copy(self._cookie_file) as cookie_copy:
+            options = ydl_options(self._probe.proxy, self._probe.socket_timeout, cookie_copy)
+            options |= {
+                "extract_flat": "in_playlist",
+                "noplaylist": False,
+                "allowed_extractors": ["youtube", "youtube:tab"],  # channel tabs are "youtube:tab"
+            }
+            url = f"https://www.youtube.com/channel/{channel_id}/videos"
             try:
                 raw = (self._extract or _list_with_ytdlp)(url, options, self.limit)
             except ProbeError:

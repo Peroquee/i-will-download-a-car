@@ -42,6 +42,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from . import youtube_cookies
 from .youtube import ProbeError, VideoRef, _SilentLogger, classify
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,10 @@ INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
     "upload_date", "description", "tags", "categories", "width", "height", "fps",
 )  # fmt: skip
+# Shown when an age-restricted download has no cookies to try (#46).
+AGE_COOKIE_HINT = (
+    " An admin can add YouTube cookies in the settings to download age-restricted videos."
+)
 
 
 class DownloadFailed(Exception):
@@ -81,8 +86,12 @@ def download_options(
     socket_timeout: float,
     progress_hook: Callable[[dict[str, Any]], None] | None = None,
     audio_only: bool = False,
+    cookie_file: Path | None = None,
 ) -> dict[str, Any]:
-    """The yt-dlp options for a download (fixed in code; pinned by tests)."""
+    """The yt-dlp options for a download (fixed in code; pinned by tests).
+
+    `cookie_file` (#46) is passed only when it exists: the admin's YouTube login cookies.
+    """
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -121,6 +130,9 @@ def download_options(
             # "best" = copy the stream into its natural container (m4a for AAC, opus for Opus).
             {"key": "FFmpegExtractAudio", "preferredcodec": "best"},
         ]
+    # Only if the admin stored a cookies file (#46): yt-dlp may rewrite it while it runs.
+    if cookie_file is not None and cookie_file.is_file():
+        options["cookiefile"] = str(cookie_file)
     return options
 
 
@@ -178,12 +190,14 @@ class YoutubeDownloader:
         socket_timeout: float = 20.0,
         download: Callable[[str, dict[str, Any]], dict[str, Any]] = _download_with_ytdlp,
         min_free_bytes: int = MIN_FREE_BYTES,
+        cookie_file: Path | None = None,
     ):
         self.proxy = proxy
         self.max_height = max_height
         self._socket_timeout = socket_timeout
         self._download = download
         self._min_free = min_free_bytes
+        self.cookie_file = cookie_file  # the admin's YouTube login cookies (#46)
 
     def download(
         self,
@@ -208,23 +222,34 @@ class YoutubeDownloader:
                 f"not enough free space on the media volume ({free // 1024**2} MiB left, "
                 f"{self._min_free // 1024**2} MiB needed to start)"
             )
-        options = download_options(
-            workdir,
-            proxy=self.proxy,
-            max_height=self.max_height if max_height is None else max_height,
-            socket_timeout=self._socket_timeout,
-            progress_hook=progress,
-            audio_only=audio_only,
-        )
-        try:
-            info = self._download(ref.url, options)
-        except (ProbeError, DownloadFailed):
-            raise
-        except OSError as exc:
-            raise DownloadFailed(f"could not write the download: {exc.strerror or exc}") from exc
-        except Exception as exc:  # a bug or odd failure in yt-dlp must end as a failed job
-            logger.exception("yt-dlp download crashed", extra={"video_id": ref.video_id})
-            raise DownloadFailed(f"the download failed: {type(exc).__name__}") from exc
+        # Each run gets its own throwaway copy: yt-dlp truncates and rewrites the cookiefile
+        # in place, and several runs share the stored login (#46 follow-up).
+        with youtube_cookies.private_copy(self.cookie_file) as cookie_copy:
+            options = download_options(
+                workdir,
+                proxy=self.proxy,
+                max_height=self.max_height if max_height is None else max_height,
+                socket_timeout=self._socket_timeout,
+                progress_hook=progress,
+                audio_only=audio_only,
+                cookie_file=cookie_copy,
+            )
+            try:
+                info = self._download(ref.url, options)
+            except ProbeError as exc:
+                if exc.kind == "age" and cookie_copy is None:
+                    # Tell the owner how to fix it; the message names no cookie content (#46).
+                    raise ProbeError(exc.kind, exc.message + AGE_COOKIE_HINT) from exc
+                raise
+            except DownloadFailed:
+                raise
+            except OSError as exc:
+                raise DownloadFailed(
+                    f"could not write the download: {exc.strerror or exc}"
+                ) from exc
+            except Exception as exc:  # a bug or odd failure in yt-dlp must end as a failed job
+                logger.exception("yt-dlp download crashed", extra={"video_id": ref.video_id})
+                raise DownloadFailed(f"the download failed: {type(exc).__name__}") from exc
         media = _find(workdir, ref.video_id, AUDIO_EXTENSIONS if audio_only else VIDEO_EXTENSIONS)
         if media is None or media.stat().st_size == 0:
             raise DownloadFailed(

@@ -92,6 +92,10 @@ POLICY: dict[tuple[str, str], str] = {
     ("PATCH", "/api/accounts/{account_id}"): ADMIN,
     ("POST", "/api/accounts/{account_id}/password"): ADMIN,
     ("DELETE", "/api/accounts/{account_id}"): ADMIN,
+    # the YouTube login cookies: the cookies ARE the login (#46)
+    ("GET", "/api/youtube/cookies"): ADMIN,
+    ("PUT", "/api/youtube/cookies"): ADMIN,
+    ("DELETE", "/api/youtube/cookies"): ADMIN,
 }
 
 
