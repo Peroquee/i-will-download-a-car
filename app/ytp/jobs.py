@@ -388,6 +388,12 @@ def app_paused_hashes(db: Database) -> list[str]:
     return [row["infohash"] for row in db.query("SELECT infohash FROM priority_paused")]
 
 
+def oldest_app_pause_at(db: Database) -> str | None:
+    """The stored time of the app's oldest pause (for the watchdog comparison, #51)."""
+    rows = db.query("SELECT MIN(paused_at) AS at FROM priority_paused")
+    return rows[0]["at"] if rows and rows[0]["at"] else None
+
+
 def remember_app_paused(db: Database, hashes: list[str]) -> None:
     """Remember torrents the app paused, so only those are ever resumed again."""
     if not hashes:

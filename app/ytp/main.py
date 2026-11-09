@@ -139,8 +139,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 seconds=RECONCILE_SECONDS,
                 run_immediately=True,
             )
-            # Holds normal torrents back while a high-priority job downloads (#51).
-            app.state.priority = PriorityManager(app.state.db, app.state.qbit)
+            # Holds normal torrents back while a high-priority job downloads (#51). The
+            # watchdog status keeps a VPN/egress pause intact (the watchdog's policy wins).
+            app.state.priority = PriorityManager(
+                app.state.db, app.state.qbit, app.state.watchdog_status
+            )
             app.state.scheduler.add_interval_job(
                 app.state.priority.tick,
                 job_id=PRIORITY_JOB_ID,

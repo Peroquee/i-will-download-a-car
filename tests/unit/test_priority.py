@@ -73,8 +73,8 @@ def podcast_job(db: Database, key: str, *, priority: int = 0):
     return job
 
 
-def manager(db: Database, fake: FakeQbittorrent) -> PriorityManager:
-    return PriorityManager(db, QbitClient(fake.url, USER, PASSWORD, timeout=3))
+def manager(db: Database, fake: FakeQbittorrent, watchdog=None) -> PriorityManager:
+    return PriorityManager(db, QbitClient(fake.url, USER, PASSWORD, timeout=3), watchdog)
 
 
 # --- the queue (#51 requirement 3) ---------------------------------------------------------------
@@ -225,6 +225,113 @@ def test_qbittorrent_trouble_does_not_record_a_pause_it_did_not_do(db, fake):
 
     manager(db, fake).tick()  # must not raise
 
+    assert jobs.app_paused_hashes(db) == []
+
+
+# --- the VPN watchdog's pause wins (#51 follow-up) -----------------------------------------------
+
+
+class FakeWatchdog:
+    def __init__(self, status: dict) -> None:
+        self.status = status
+        self.calls = 0
+
+    def fetch_status(self) -> dict:
+        self.calls += 1
+        return self.status
+
+
+def paused_by_the_app(db: Database, fake: FakeQbittorrent):
+    """A high-priority download runs and the app has paused the normal torrent H2."""
+    high = magnet_job(db, H1, priority=1, status="downloading")
+    magnet_job(db, H2, status="downloading")
+    fake.torrents = [torrent(H1), torrent(H2)]
+    manager(db, fake).tick()
+    assert jobs.app_paused_hashes(db) == [H2]
+    jobs.transition(db, high.id, "done", expected=("downloading",))
+    return high
+
+
+@pytest.mark.parametrize("state", ["down", "blind", "starting", "unknown"])
+def test_no_resume_while_the_watchdog_is_not_healthy(db, fake, state):
+    paused_by_the_app(db, fake)
+    watchdog = FakeWatchdog({"state": state, "paused": False})
+
+    manager(db, fake, watchdog).tick()
+
+    assert fake.calls("torrents/start") == []
+    assert jobs.app_paused_hashes(db) == [H2], "the rows are kept and retried"
+
+
+def test_resume_happens_once_the_watchdog_is_healthy_again(db, fake):
+    paused_by_the_app(db, fake)
+    watchdog = FakeWatchdog({"state": "down", "paused": False})
+    priority = manager(db, fake, watchdog)
+    priority.tick()
+    assert jobs.app_paused_hashes(db) == [H2]
+
+    watchdog.status = {"state": "ok", "paused": False}
+    priority.tick()
+
+    (resume,) = fake.calls("torrents/start")
+    assert resume.form["hashes"] == [H2]
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_the_watchdogs_own_pause_is_not_undone(db, fake):
+    """The watchdog paused all torrents during an outage, after the app paused its ones."""
+    paused_by_the_app(db, fake)
+    with db.transaction() as conn:
+        conn.execute("UPDATE priority_paused SET paused_at = '2026-11-09T01:00:00.500Z'")
+    watchdog = FakeWatchdog({"state": "down", "paused": True, "since": "2026-11-09T01:00:05+00:00"})
+
+    manager(db, fake, watchdog).tick()
+
+    assert fake.calls("torrents/start") == []
+    assert jobs.app_paused_hashes(db) == [], "the watchdog's policy owns the torrents now"
+
+
+def test_a_watchdog_pause_in_the_same_second_still_wins(db, fake):
+    """`since` has second precision: a watchdog pause in the app's second counts as newer."""
+    paused_by_the_app(db, fake)
+    with db.transaction() as conn:
+        conn.execute("UPDATE priority_paused SET paused_at = '2026-11-09T01:00:01.900Z'")
+    watchdog = FakeWatchdog({"state": "down", "paused": True, "since": "2026-11-09T01:00:01+00:00"})
+
+    manager(db, fake, watchdog).tick()
+
+    assert fake.calls("torrents/start") == []
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_a_reported_watchdog_pause_wins_when_the_times_cannot_be_compared(db, fake):
+    paused_by_the_app(db, fake)
+    watchdog = FakeWatchdog({"state": "down", "paused": True})  # no usable `since`
+
+    manager(db, fake, watchdog).tick()
+
+    assert fake.calls("torrents/start") == []
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_an_egress_mismatch_keeps_the_watchdogs_pause(db, fake):
+    """The watchdog never auto-resumes after an egress mismatch; neither may the app."""
+    paused_by_the_app(db, fake)
+    watchdog = FakeWatchdog({"state": "ok", "paused": False, "egress": "mismatch"})
+
+    manager(db, fake, watchdog).tick()
+
+    assert fake.calls("torrents/start") == []
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_without_a_watchdog_client_the_manager_resumes_as_before(db, fake):
+    paused_by_the_app(db, fake)
+
+    manager(db, fake).tick()
+
+    (resume,) = fake.calls("torrents/start")
+    assert resume.form["hashes"] == [H2]
     assert jobs.app_paused_hashes(db) == []
 
 

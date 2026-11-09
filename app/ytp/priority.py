@@ -17,6 +17,13 @@ stop seeding a completed download. YouTube and podcast downloads are never touch
 normal download of those is not interrupted (#51 requirement 7), and the queue (`claim_next_queued`)
 already stops new normal claims while a high-priority job downloads.
 
+**The VPN watchdog's pause wins.** The watchdog (#21) pauses ALL torrents when the VPN drops and,
+with `WATCHDOG_RESUME_AFTER=0` (the default), leaves them paused until the owner resumes them by
+hand. The manager therefore never resumes while the watchdog is not healthy, and when the
+watchdog's own pause is newer than the app's it forgets its rows WITHOUT resuming: the watchdog's
+safety policy owns those torrents. The same applies to a confirmed egress mismatch, which the
+watchdog never auto-resumes either. With no status client the manager behaves as before.
+
 qBittorrent trouble is normal (the VPN reconnects): a failed tick logs once per state change and
 tries again on the next run. A pause is only recorded after qBittorrent accepted it, so a lost
 connection can never make the app "remember" a pause it did not do.
@@ -25,9 +32,11 @@ connection can never make the app "remember" a pause it did not do.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from . import jobs
 from .clients.qbittorrent import QbitClient, QbitError
+from .clients.watchdog import WatchdogStatusClient
 from .db import Database
 
 logger = logging.getLogger(__name__)
@@ -36,10 +45,27 @@ PRIORITY_JOB_ID = "priority"
 PRIORITY_SECONDS = 5  # how quickly a high-priority download holds the line
 
 
+def _parse_time(value: object) -> datetime | None:
+    """An ISO timestamp (the watchdog's seconds or SQLite's milliseconds) as aware UTC."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 class PriorityManager:
-    def __init__(self, db: Database, qbit: QbitClient | None):
+    def __init__(
+        self,
+        db: Database,
+        qbit: QbitClient | None,
+        watchdog: WatchdogStatusClient | None = None,
+    ):
         self.db = db
         self.qbit = qbit
+        self.watchdog = watchdog
         self._last_problem: str | None = None
 
     def tick(self) -> None:
@@ -93,9 +119,66 @@ class PriorityManager:
         hashes = jobs.app_paused_hashes(self.db)
         if not hashes:
             return
+        status = self._watchdog_status()
+        if status is not None:
+            if status.get("state") != "ok":
+                # The watchdog is not healthy (VPN down, blind, starting, or not answering):
+                # never undo a pause while it is protecting the stack. If its own pause is in
+                # force, it now owns these torrents; otherwise keep the rows and try next tick.
+                if self._watchdog_paused_after_us(status):
+                    self._leave_to_watchdog(hashes, "the watchdog paused during an outage")
+                return
+            if status.get("egress") == "mismatch":
+                # The watchdog's egress policy pauses everything and never resumes by itself.
+                self._leave_to_watchdog(hashes, "the watchdog paused after an egress mismatch")
+                return
+            if self._watchdog_paused_after_us(status):
+                self._leave_to_watchdog(hashes, "the watchdog paused during an outage")
+                return
         self.qbit.resume_torrents(hashes)
         jobs.forget_app_paused(self.db, hashes)
         logger.info(
             "priority: resumed the torrents the app paused",
             extra={"torrents": len(hashes)},
         )
+
+    def _leave_to_watchdog(self, hashes: list[str], reason: str) -> None:
+        """Forget our rows without resuming: the watchdog's pause policy now owns the torrents."""
+        jobs.forget_app_paused(self.db, hashes)
+        logger.info(
+            "priority: torrents stay paused, %s",
+            reason,
+            extra={"torrents": len(hashes)},
+        )
+
+    def _watchdog_status(self) -> dict[str, object] | None:
+        """The watchdog's status, or None when no watchdog is configured.
+
+        A status client never raises in production; a broken one is treated as `unknown`,
+        which never resumes anything.
+        """
+        if self.watchdog is None:
+            return None
+        try:
+            status = self.watchdog.fetch_status()
+        except Exception:
+            logger.warning("priority: the watchdog status could not be read", exc_info=True)
+            return {"state": "unknown"}
+        return status if isinstance(status, dict) else {"state": "unknown"}
+
+    def _watchdog_paused_after_us(self, status: dict[str, object]) -> bool:
+        """Did the watchdog's own pause start after the app paused its torrents?
+
+        The status has `paused` (a pause was delivered during the current outage) and `since`
+        (when the watchdog entered that state; ISO with SECOND precision). `paused_at` in the
+        database has millisecond precision, so a watchdog pause in the same second as the app's
+        pause counts as "after": never resume a torrent the watchdog may have paused. When the
+        times cannot be compared, the reported watchdog pause wins as well.
+        """
+        if status.get("paused") is not True:
+            return False
+        since = _parse_time(status.get("since"))
+        oldest = _parse_time(jobs.oldest_app_pause_at(self.db))
+        if since is None or oldest is None:
+            return True  # cannot decide: the safe rule is that the watchdog owns the pause
+        return since + timedelta(seconds=1) > oldest
