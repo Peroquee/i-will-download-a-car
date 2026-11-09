@@ -16,7 +16,10 @@ Rules this module enforces:
   At least one youtube.com cookie must be present.
 * The stored file lives at `<DATA_ROOT>/secrets/youtube-cookies.txt`, the folder is mode 0700
   and the file 0600, written atomically (a temp file in the same folder, then `os.replace`).
-  yt-dlp may rewrite the file while it runs; that is fine.
+* yt-dlp never gets the stored file itself: `private_copy` hands every run its own throwaway
+  copy (mode 0600, deleted afterwards). yt-dlp truncates and rewrites `cookiefile` in place at
+  the end of a run, and several runs share the login (the YouTube worker, parallel channel
+  listings); the stored file is only ever written by the PUT endpoint.
 
 Nothing here logs or raises the cookie text: `CookieFileError` messages name the problem, never
 the content. The endpoints in `youtube_cookies_api.py` return only counts and times.
@@ -24,12 +27,18 @@ the content. The endpoints in `youtube_cookies_api.py` return only counts and ti
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import os
+import shutil
 import tempfile
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
 
 DIR_NAME = "secrets"
 FILE_NAME = "youtube-cookies.txt"
@@ -52,6 +61,56 @@ def cookie_file(settings: Settings) -> Path | None:
     """The stored file, or None when no cookies are stored (the downloader asks this)."""
     path = cookie_path(settings)
     return path if path.is_file() else None
+
+
+def _copy_to_temp(path: Path) -> Path | None:
+    """A new private copy of `path`, or None when it cannot be made (logged, no content)."""
+    try:
+        handle, name = tempfile.mkstemp(dir=path.parent, prefix=".youtube-cookies-", suffix=".tmp")
+        temp = Path(name)
+        try:
+            os.fchmod(handle, 0o600)  # mkstemp already creates 0600; be explicit
+            with os.fdopen(handle, "wb") as target, path.open("rb") as source:
+                shutil.copyfileobj(source, target)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.close(handle)  # already closed when os.fdopen or the with block got it
+            temp.unlink(missing_ok=True)
+            raise
+        return temp
+    except OSError:
+        # Never the content, never the path (the folder is private, but still).
+        logger.warning("youtube cookies could not be copied; this run has no cookies")
+        return None
+
+
+@contextlib.contextmanager
+def private_copy(path: Path | None) -> Iterator[Path | None]:
+    """A disposable private copy of the stored cookies file for ONE yt-dlp run (#46).
+
+    yt-dlp saves its cookie jar back into `cookiefile` with mode 'w' at the end of every run
+    (truncate, then write). Several yt-dlp runs share the stored file (the YouTube worker and up
+    to two channel listings), so handing it over directly would let one run read another's
+    half-written file, and a crash mid-write could empty the admin's login. Each run therefore
+    gets its own copy (mode 0600, in the private 0700 secrets folder), which is deleted
+    afterwards, also when the run raises. The stored file is only ever written by the PUT
+    endpoint.
+
+    Yields None when no cookies are stored (the "only when the file exists" behaviour) or when
+    the copy cannot be made: that run simply goes on without cookies.
+    """
+    if path is None or not path.is_file():
+        yield None
+        return
+    temp = _copy_to_temp(path)
+    if temp is None:
+        yield None
+        return
+    try:
+        yield temp
+    finally:
+        with contextlib.suppress(OSError):
+            temp.unlink()
 
 
 def _domain_of(line: str) -> str:

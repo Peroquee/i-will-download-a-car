@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 import stat
+from pathlib import Path
 
 import pytest
 
 from tests.helpers.accounts_app import ADMIN, add_account, client_for, running
 from ytp import youtube_cookies
+from ytp.channel_videos import ChannelLister
 from ytp.youtube import ProbeError, VideoRef
 from ytp.youtube_download import YoutubeDownloader, download_options
 
@@ -202,19 +204,95 @@ def test_the_cookiefile_option_is_passed_only_when_the_file_exists(tmp_path):
     )
 
 
-def test_the_downloader_hands_the_file_to_ytdlp(tmp_path):
+def test_the_downloader_hands_a_private_copy_to_ytdlp(tmp_path):
     cookie = tmp_path / "cookies.txt"
-    cookie.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    cookie.write_text(COOKIES, encoding="utf-8")
+    original = cookie.read_text(encoding="utf-8")
     seen: dict = {}
 
     def capture(url, options):
-        seen.update(options)
+        seen["cookiefile"] = options["cookiefile"]
+        seen["exists"] = Path(seen["cookiefile"]).is_file()
+        seen["mode"] = stat.S_IMODE(Path(seen["cookiefile"]).stat().st_mode)
+        # Like yt-dlp: truncate and rewrite the given file in place at the end of the run.
+        Path(seen["cookiefile"]).write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
         raise ProbeError("private", "This video is private.")
 
     downloader = YoutubeDownloader(download=capture, min_free_bytes=0, cookie_file=cookie)
     with pytest.raises(ProbeError):
         downloader.download(VideoRef(ID), tmp_path / "work")
-    assert seen["cookiefile"] == str(cookie)
+
+    assert seen["cookiefile"] != str(cookie), "the stored login is never handed to yt-dlp"
+    assert seen["exists"] is True
+    assert seen["mode"] == 0o600
+    assert not Path(seen["cookiefile"]).exists(), "the copy is deleted, also on a failure"
+    assert cookie.read_text(encoding="utf-8") == original, "the stored login is untouched"
+
+
+class StubProbe:
+    proxy = ""
+    socket_timeout = 1.0
+
+
+def test_the_channel_lister_hands_a_private_copy_to_ytdlp(tmp_path):
+    cookie = tmp_path / "cookies.txt"
+    cookie.write_text(COOKIES, encoding="utf-8")
+    original = cookie.read_text(encoding="utf-8")
+    seen: dict = {}
+
+    def extract(url, options, limit):
+        seen["cookiefile"] = options["cookiefile"]
+        seen["mode"] = stat.S_IMODE(Path(seen["cookiefile"]).stat().st_mode)
+        Path(seen["cookiefile"]).write_text("truncated by yt-dlp", encoding="utf-8")
+        return []
+
+    lister = ChannelLister(StubProbe(), extract=extract, cookie_file=cookie)
+    assert lister.list("UC" + "a" * 22) == []
+
+    assert seen["cookiefile"] != str(cookie)
+    assert seen["mode"] == 0o600
+    assert not Path(seen["cookiefile"]).exists()
+    assert cookie.read_text(encoding="utf-8") == original
+
+
+def test_private_copy_is_private_and_removed(tmp_path):
+    stored = tmp_path / "cookies.txt"
+    stored.write_text(COOKIES, encoding="utf-8")
+    with youtube_cookies.private_copy(stored) as copy:
+        assert copy is not None
+        assert copy != stored
+        assert copy.read_text(encoding="utf-8") == stored.read_text(encoding="utf-8")
+        assert stat.S_IMODE(copy.stat().st_mode) == 0o600
+    assert not copy.exists()
+
+
+def test_private_copy_is_removed_when_the_run_raises(tmp_path):
+    stored = tmp_path / "cookies.txt"
+    stored.write_text(COOKIES, encoding="utf-8")
+    with pytest.raises(RuntimeError), youtube_cookies.private_copy(stored) as copy:
+        raise RuntimeError("the yt-dlp run failed")
+    assert copy is not None
+    assert not copy.exists()
+
+
+def test_private_copy_without_a_stored_file_yields_none(tmp_path):
+    with youtube_cookies.private_copy(None) as copy:
+        assert copy is None
+    with youtube_cookies.private_copy(tmp_path / "missing.txt") as copy:
+        assert copy is None
+
+
+def test_a_copy_error_means_a_run_without_cookies_and_no_content_in_the_log(tmp_path, caplog):
+    stored = tmp_path / "cookies.txt"
+    stored.write_text(COOKIES, encoding="utf-8")
+    stored.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING), youtube_cookies.private_copy(stored) as copy:
+            assert copy is None
+    finally:
+        stored.chmod(0o600)
+    assert any("could not be copied" in record.getMessage() for record in caplog.records)
+    assert COOKIE_VALUE not in caplog.text
 
 
 def test_an_age_error_without_cookies_tells_how_to_fix_it(tmp_path):
