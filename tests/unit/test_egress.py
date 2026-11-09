@@ -350,6 +350,29 @@ def test_when_the_check_passes_again_the_torrents_stay_paused(gluetun, qbit_serv
     assert qbit_server.calls("torrents/start") == [], "never resumed automatically"
 
 
+@pytest.mark.security
+def test_a_second_mismatch_after_a_good_check_pauses_again(gluetun, qbit_server, target):
+    """Regression (#67): the "already paused" flag was never reset, so after one mismatch, a good
+    check and the owner resuming, a NEW confirmed mismatch did not pause anything while its
+    alert still said "All torrents were paused"."""
+    dog = make(gluetun, qbit_server, target, confirm=1)
+    set_ip(gluetun, HOME_V4)
+    dog.check_egress()
+    assert pauses(qbit_server) == 1
+    gluetun.public = {"public_ip": "185.107.12.34", "country": "Germany"}
+    dog.check_egress()
+    assert dog.egress_state == "ok"
+    set_ip(gluetun, HOME_V4)  # the leak is back, after the owner resumed the torrents
+    dog.check_egress()
+    assert dog.egress_state == "mismatch"
+    assert pauses(qbit_server) == 2, "a new mismatch pauses again"
+    assert target.wait_for(3)
+    time.sleep(0.3)
+    events = [(b["event"], b["message"]) for b in target.json_bodies()]
+    assert [event for event, _ in events] == ["egress", "egress_ok", "egress"]
+    assert "All torrents were paused" in events[2][1]
+
+
 def test_a_pause_that_fails_is_retried_at_the_next_check(gluetun, qbit_server):
     dog = make(gluetun, qbit_server, confirm=1)
     set_ip(gluetun, HOME_V4)
