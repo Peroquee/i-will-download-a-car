@@ -6,6 +6,7 @@
   --muted: #9aa6b4;
   --gold: #c9a227;
   --gold-soft: rgba(201, 162, 39, 0.16);
+  --warn: #e8913a;          /* orange for warnings (#64) */
   --line: rgba(233, 228, 216, 0.12);
   --bad: #e4806f;
   --good: #7fc58b;
@@ -289,7 +290,8 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
   border-left: 4px solid var(--gold);
   background: var(--gold-soft);
 }
-.alert-chip.alert-error, .alert-item.alert-error { border-left-color: var(--bad); }
+.alert-chip.alert-error, .alert-item.alert-error { border-left-color: var(--danger-bg); }
+.alert-chip.alert-warning, .alert-item.alert-warning { border-left-color: var(--warn); }
 .alert-chip.alert-info, .alert-item.alert-info { border-left-color: var(--good); }
 .alert-link { color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
 .alert-link:hover, .alert-more:hover { text-decoration: underline; }
@@ -325,8 +327,8 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .alert-count { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
 .alert-count strong { font-size: 16px; color: var(--ink); }
 .alert-count .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
-.alert-count.error .dot { background: var(--bad); }
-.alert-count.warning .dot { background: var(--gold); }
+.alert-count.error .dot { background: var(--danger-bg); }
+.alert-count.warning .dot { background: var(--warn); }
 .alert-count.info .dot { background: var(--good); }
 .summary-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
 .summary-stat { min-width: 0; }
