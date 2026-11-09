@@ -117,8 +117,14 @@ so the id is looked up **once**, when subscribing, and stored.
   should also fetch. The default means: **only videos published after subscribing; the back
   catalogue is never downloaded.** 15 is the size of a channel's RSS feed (the list from yt-dlp
   is longer, but the limit stays).
-- `GET /api/subscriptions` lists them (by name) with `last_checked` and `last_error` (both empty
-  until the poller of #20 has run; it records them with `subscriptions.record_poll`).
+- `max_height` (#65) is the resolution cap for the channel's new videos: `0` (best) or one of
+  2160, 1440, 1080, 720, 480, 360; missing/null = `YOUTUBE_MAX_HEIGHT`. It is set on `POST` and
+  changed with `PATCH /api/subscriptions/{id} {"max_height": ...}`; both need the account's
+  resolution right (an admin always has it, `docs/accounts.md`). A subscription is shared, so the
+  value applies to everyone who follows the channel; `GET` shows it.
+- `GET /api/subscriptions` lists them (by name) with `last_checked`, `last_error` (both empty
+  until the poller of #20 has run; it records them with `subscriptions.record_poll`) and
+  `max_height`.
 - `DELETE /api/subscriptions/{id}` unsubscribes (204; 404 if unknown). Videos already downloaded
   stay where they are.
 - `POST /api/subscriptions/{id}/poll` is the "check now" button of the page (#27): it polls that
