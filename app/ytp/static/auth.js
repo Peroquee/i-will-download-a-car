@@ -6,6 +6,7 @@
   "use strict";
 
   var MIN_PASSWORD = 12;
+  var MAX_COOKIE_BYTES = 1024 * 1024;   // the server's limit for the cookies file (#46)
 
   function create(ctx) {
     var t = ctx.t;
@@ -18,6 +19,8 @@
     var confirmDelete = {};     // id -> true after the first click on Delete
     var resetOpen = {};         // id -> true while the "set password" field is shown
     var rowMessages = {};       // id -> {text(), ok}
+    var cookieStatus = null;    // GET /api/youtube/cookies (#46)
+    var cookiesFailed = false;
 
     function el(tag, className, text) {
       var node = document.createElement(tag);
@@ -335,6 +338,87 @@
       });
     }
 
+    /* ---------------------------------------------------------------- the YouTube cookies (admin, #46) */
+
+    function cookiesResult(text, ok) {
+      var node = $("cookies-result");
+      node.textContent = text;
+      node.className = "result " + (ok ? "ok" : "bad");
+    }
+
+    function loadCookies() {
+      return ctx.getJson("/api/youtube/cookies").then(function (data) {
+        cookieStatus = data;
+        cookiesFailed = false;
+      }).catch(function () { cookiesFailed = true; }).then(renderCookies);
+    }
+
+    function renderCookies() {
+      var status = $("cookies-status");
+      if (!status) return;
+      if (cookiesFailed) {
+        status.textContent = t("cookies.load_error");
+      } else if (cookieStatus && cookieStatus.present) {
+        var when = ctx.timeText(cookieStatus.updated_at) || cookieStatus.updated_at;
+        status.textContent = t("cookies.present", { n: cookieStatus.cookie_count, when: when });
+      } else if (cookieStatus) {
+        status.textContent = t("cookies.absent");
+      } else {
+        status.textContent = "";
+      }
+      var remove = $("cookies-remove");
+      if (remove) remove.disabled = !(cookieStatus && cookieStatus.present);
+    }
+
+    function readCookieFile(file) {
+      if (typeof file.text === "function") return file.text();
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result || "")); };
+        reader.onerror = function () { reject(reader.error); };
+        reader.readAsText(file);
+      });
+    }
+
+    function onSaveCookies() {
+      var input = $("cookies-file");
+      var file = input.files && input.files[0];
+      if (!file) { cookiesResult(t("cookies.no_file"), false); return; }
+      if (file.size > MAX_COOKIE_BYTES) { cookiesResult(t("cookies.too_large"), false); return; }
+      readCookieFile(file).then(function (text) {
+        return ctx.requestText("PUT", "/api/youtube/cookies", text);
+      }).then(function (reply) {
+        if (reply.status === 200) {
+          cookieStatus = reply.data;
+          cookiesFailed = false;
+          $("cookies-file").value = "";
+          cookiesResult(t("cookies.saved"), true);
+          renderCookies();
+        } else if (reply.status === 400) {
+          cookiesResult(t("cookies.invalid"), false);
+        } else {
+          cookiesResult(t("cookies.failed"), false);
+        }
+      }).catch(function () {
+        cookiesResult(t("cookies.failed") + " " + t("result.network"), false);
+      });
+    }
+
+    function onRemoveCookies() {
+      ctx.request("DELETE", "/api/youtube/cookies", null).then(function (reply) {
+        if (reply.status === 200) {
+          cookieStatus = reply.data;
+          cookiesFailed = false;
+          cookiesResult(t("cookies.removed"), true);
+          renderCookies();
+        } else {
+          cookiesResult(t("cookies.failed"), false);
+        }
+      }).catch(function () {
+        cookiesResult(t("cookies.failed") + " " + t("result.network"), false);
+      });
+    }
+
     /* ---------------------------------------------------------------- wiring */
 
     function wire() {
@@ -345,6 +429,8 @@
       $("account-logout").addEventListener("click", onLogout);
       $("account").addEventListener("click", function (event) { if (event.target === $("account")) closeAccount(); });
       $("accounts-form").addEventListener("submit", onCreate);
+      $("cookies-save").addEventListener("click", onSaveCookies);
+      $("cookies-remove").addEventListener("click", onRemoveCookies);
     }
 
     /* Called once the page knows who is signed in. */
@@ -353,6 +439,7 @@
       if (view === "accounts") {
         if (!isAdmin()) { root.location.href = "/"; return; }
         loadAccounts();
+        loadCookies();
       }
     }
 
@@ -361,6 +448,7 @@
       renderTools();
       if (setupNeeded) $("login-setup").textContent = t("login.setup");
       renderAccounts();
+      renderCookies();
     }
 
     return {

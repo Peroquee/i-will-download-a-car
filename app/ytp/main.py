@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
 
-from . import __version__, accounts, api, auth, auth_api
+from . import __version__, accounts, api, auth, auth_api, youtube_cookies
 from .auth import AuthMiddleware, LoginLimiter
 from .channel_videos import ChannelLister
 from .channels import ChannelResolver
@@ -94,7 +94,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.youtube_worker = YoutubeWorker(
             app.state.db,
             settings,
-            YoutubeDownloader(proxy=settings.ytdlp_proxy, max_height=settings.youtube_max_height),
+            YoutubeDownloader(
+                proxy=settings.ytdlp_proxy,
+                max_height=settings.youtube_max_height,
+                # The admin's YouTube login cookies, if one was stored (#46).
+                cookie_file=youtube_cookies.cookie_path(settings),
+            ),
             app.state.jellyfin,
         )
         threading.Thread(
@@ -159,7 +164,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             probe=app.state.youtube,  # lives, premieres and Shorts are left out (#39)
             # The list of a channel's newest videos comes from yt-dlp (the RSS feed is the
             # fallback: YouTube answers it with 404 for whole networks), through the same proxy.
-            lister=ChannelLister(app.state.youtube),
+            lister=ChannelLister(
+                app.state.youtube, cookie_file=youtube_cookies.cookie_path(settings)
+            ),
         )
         if settings.subscription_poll_minutes > 0:
             # New videos of subscribed channels go into the YouTube queue (#20). The feeds are

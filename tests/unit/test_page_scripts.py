@@ -502,7 +502,8 @@ ACCOUNTS = {
             {**USER_ACCOUNT, "last_login": "2026-11-01T10:00:00.000Z"},
             {**USER_ACCOUNT, "id": 3, "username": "bob", "disabled": True},
         ]
-    }
+    },
+    "/api/youtube/cookies": {"present": False, "updated_at": None, "cookie_count": 0},
 }
 
 
@@ -753,10 +754,34 @@ def test_the_password_change_reports_the_answer(reply, text):
 
 @needs_node
 def test_the_accounts_page_lists_the_accounts_for_an_admin():
-    out = page("/accounts", answers=ACCOUNTS, steps=[{"read": "#accounts-list"}])
+    out = page(
+        "/accounts",
+        answers=ACCOUNTS,
+        steps=[{"read": "#accounts-list"}, {"read": "#cookies-status"}],
+    )
     assert out["errors"] == [], out["errors"]
     assert ["GET", "/api/accounts"] in out["fetched"]
+    assert ["GET", "/api/youtube/cookies"] in out["fetched"]
     assert out["reads"]["#accounts-list"]["children"] == 3
+    assert out["reads"]["#cookies-status"]["text"] == "No cookies stored."
+
+
+@needs_node
+def test_the_accounts_page_shows_how_many_youtube_cookies_are_stored():
+    out = page(
+        "/accounts",
+        answers={
+            **ACCOUNTS,
+            "/api/youtube/cookies": {
+                "present": True,
+                "updated_at": "2026-11-08T10:00:00+00:00",
+                "cookie_count": 3,
+            },
+        },
+        steps=[{"read": "#cookies-status"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#cookies-status"]["text"].startswith("Stored: 3 cookies")
 
 
 @needs_node
@@ -764,6 +789,7 @@ def test_a_user_is_sent_away_from_the_accounts_page_without_asking_for_it():
     out = page("/accounts", answers={"/api/auth/me": {"account": USER_ACCOUNT}})
     assert out["href"] == "/"
     assert ["GET", "/api/accounts"] not in out["fetched"]
+    assert ["GET", "/api/youtube/cookies"] not in out["fetched"]
 
 
 @needs_node

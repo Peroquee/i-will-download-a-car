@@ -450,6 +450,21 @@
       </form>
       <p id="accounts-load-error" class="error" role="status"></p>
       <ul id="accounts-list" class="job-list"></ul>
+
+      <section id="youtube-cookies" class="panel" data-admin-only aria-labelledby="cookies-title">
+        <h2 id="cookies-title" class="subs-group-title" data-i18n="cookies.title"></h2>
+        <p id="cookies-status" class="note" role="status" aria-live="polite"></p>
+        <p class="note" data-i18n="cookies.help"></p>
+        <div class="row">
+          <label class="field" for="cookies-file" data-i18n="cookies.file"></label>
+          <input id="cookies-file" type="file" accept=".txt,text/plain">
+        </div>
+        <div class="actions">
+          <button type="button" class="primary" id="cookies-save" data-i18n="cookies.save"></button>
+          <button type="button" class="ghost" id="cookies-remove" data-i18n="cookies.remove"></button>
+        </div>
+        <p id="cookies-result" class="result" role="status" aria-live="polite"></p>
+      </section>
     </section>
       </div>
     </main>
@@ -968,6 +983,20 @@
     "accounts.confirm": "Wirklich löschen?",
     "accounts.deleted_note": "Gelöscht. Seine Abonnements enden, wenn niemand sonst ihnen folgt; seine Downloads bleiben.",
     "accounts.last_admin": "Es muss immer einen aktiven Administrator geben.",
+    "cookies.title": "YouTube-Anmeldung (Cookies)",
+    "cookies.help": "Exportiere cookies.txt aus einem Browser, in dem du bei YouTube angemeldet bist (z. B. mit der Erweiterung „Get cookies.txt LOCALLY“).",
+    "cookies.file": "Cookie-Datei (cookies.txt)",
+    "cookies.save": "Speichern",
+    "cookies.remove": "Entfernen",
+    "cookies.present": "Gespeichert: {n} Cookies, aktualisiert {when}.",
+    "cookies.absent": "Keine Cookies gespeichert.",
+    "cookies.saved": "Die Cookies wurden gespeichert.",
+    "cookies.removed": "Die Cookies wurden entfernt.",
+    "cookies.no_file": "Bitte zuerst eine cookies.txt auswählen.",
+    "cookies.invalid": "Die Datei ist keine gültige cookies.txt (Netscape-Format mit YouTube-Cookies).",
+    "cookies.too_large": "Die Datei ist zu groß (höchstens 1 MiB).",
+    "cookies.failed": "Das hat nicht funktioniert.",
+    "cookies.load_error": "Der Cookie-Status konnte nicht gelesen werden.",
     "accounts.failed": "Das hat nicht geklappt.",
     "accounts.load_error": "Die Konten konnten nicht geladen werden.",
     "subs.followers": "Folgen: {names}",
@@ -1430,6 +1459,20 @@
     "accounts.confirm": "Really delete?",
     "accounts.deleted_note": "Deleted. Its subscriptions end unless others follow them; its downloads stay.",
     "accounts.last_admin": "There must always be one active administrator.",
+    "cookies.title": "YouTube login (cookies)",
+    "cookies.help": "Export cookies.txt from a browser where you are logged in to YouTube (e.g. with the 'Get cookies.txt LOCALLY' extension)",
+    "cookies.file": "Cookie file (cookies.txt)",
+    "cookies.save": "Save",
+    "cookies.remove": "Remove",
+    "cookies.present": "Stored: {n} cookies, updated {when}.",
+    "cookies.absent": "No cookies stored.",
+    "cookies.saved": "The cookies were saved.",
+    "cookies.removed": "The cookies were removed.",
+    "cookies.no_file": "Choose a cookies.txt first.",
+    "cookies.invalid": "The file is not a valid cookies.txt (Netscape format with YouTube cookies).",
+    "cookies.too_large": "The file is too large (at most 1 MiB).",
+    "cookies.failed": "That did not work.",
+    "cookies.load_error": "The cookie status could not be read.",
     "accounts.failed": "That did not work.",
     "accounts.load_error": "The accounts could not be loaded.",
     "subs.followers": "Followed by: {names}",

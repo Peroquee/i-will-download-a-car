@@ -58,6 +58,10 @@ INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
     "upload_date", "description", "tags", "categories", "width", "height", "fps",
 )  # fmt: skip
+# Shown when an age-restricted download has no cookies to try (#46).
+AGE_COOKIE_HINT = (
+    " An admin can add YouTube cookies in the settings to download age-restricted videos."
+)
 
 
 class DownloadFailed(Exception):
@@ -81,8 +85,12 @@ def download_options(
     socket_timeout: float,
     progress_hook: Callable[[dict[str, Any]], None] | None = None,
     audio_only: bool = False,
+    cookie_file: Path | None = None,
 ) -> dict[str, Any]:
-    """The yt-dlp options for a download (fixed in code; pinned by tests)."""
+    """The yt-dlp options for a download (fixed in code; pinned by tests).
+
+    `cookie_file` (#46) is passed only when it exists: the admin's YouTube login cookies.
+    """
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -121,6 +129,9 @@ def download_options(
             # "best" = copy the stream into its natural container (m4a for AAC, opus for Opus).
             {"key": "FFmpegExtractAudio", "preferredcodec": "best"},
         ]
+    # Only if the admin stored a cookies file (#46): yt-dlp may rewrite it while it runs.
+    if cookie_file is not None and cookie_file.is_file():
+        options["cookiefile"] = str(cookie_file)
     return options
 
 
@@ -178,12 +189,17 @@ class YoutubeDownloader:
         socket_timeout: float = 20.0,
         download: Callable[[str, dict[str, Any]], dict[str, Any]] = _download_with_ytdlp,
         min_free_bytes: int = MIN_FREE_BYTES,
+        cookie_file: Path | None = None,
     ):
         self.proxy = proxy
         self.max_height = max_height
         self._socket_timeout = socket_timeout
         self._download = download
         self._min_free = min_free_bytes
+        self.cookie_file = cookie_file  # the admin's YouTube login cookies (#46)
+
+    def _cookies_stored(self) -> bool:
+        return self.cookie_file is not None and self.cookie_file.is_file()
 
     def download(
         self,
@@ -215,10 +231,16 @@ class YoutubeDownloader:
             socket_timeout=self._socket_timeout,
             progress_hook=progress,
             audio_only=audio_only,
+            cookie_file=self.cookie_file,
         )
         try:
             info = self._download(ref.url, options)
-        except (ProbeError, DownloadFailed):
+        except ProbeError as exc:
+            if exc.kind == "age" and not self._cookies_stored():
+                # Tell the owner how to fix it; the message still names no cookie content (#46).
+                raise ProbeError(exc.kind, exc.message + AGE_COOKIE_HINT) from exc
+            raise
+        except DownloadFailed:
             raise
         except OSError as exc:
             raise DownloadFailed(f"could not write the download: {exc.strerror or exc}") from exc

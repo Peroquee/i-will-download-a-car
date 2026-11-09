@@ -23,6 +23,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .feeds import VIDEO_ID, FeedEntry
@@ -71,11 +72,13 @@ class ChannelLister:
         limit: int = LIMIT,
         max_parallel: int = 2,
         extract: Callable[[str, dict[str, Any], int], list[dict[str, Any]]] | None = None,
+        cookie_file: Path | None = None,
     ):
         self._probe = probe
         self.limit = limit
         self._extract = extract  # None: yt-dlp (looked up when used, so a test can replace it)
         self._slots = threading.BoundedSemaphore(max_parallel)
+        self._cookie_file = cookie_file  # the admin's YouTube login cookies (#46)
 
     def __repr__(self) -> str:
         return f"ChannelLister(limit={self.limit})"
@@ -83,7 +86,7 @@ class ChannelLister:
     def list(self, channel_id: str) -> list[FeedEntry]:
         if not CHANNEL_ID.fullmatch(channel_id):
             raise ProbeError("unsupported", "not a channel id")
-        options = ydl_options(self._probe.proxy, self._probe.socket_timeout)
+        options = ydl_options(self._probe.proxy, self._probe.socket_timeout, self._cookie_file)
         options |= {
             "extract_flat": "in_playlist",
             "noplaylist": False,
