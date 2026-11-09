@@ -282,15 +282,19 @@ def test_private_copy_without_a_stored_file_yields_none(tmp_path):
         assert copy is None
 
 
-def test_a_copy_error_means_a_run_without_cookies_and_no_content_in_the_log(tmp_path, caplog):
+def test_a_copy_error_means_a_run_without_cookies_and_no_content_in_the_log(
+    tmp_path, caplog, monkeypatch
+):
     stored = tmp_path / "cookies.txt"
     stored.write_text(COOKIES, encoding="utf-8")
-    stored.chmod(0o000)
-    try:
-        with caplog.at_level(logging.WARNING), youtube_cookies.private_copy(stored) as copy:
-            assert copy is None
-    finally:
-        stored.chmod(0o600)
+
+    def broken(*args, **kwargs):
+        raise OSError("the disk is full")
+
+    # A real unreadable file would not fail as root (the CI unit job runs as root).
+    monkeypatch.setattr(youtube_cookies.tempfile, "mkstemp", broken)
+    with caplog.at_level(logging.WARNING), youtube_cookies.private_copy(stored) as copy:
+        assert copy is None
     assert any("could not be copied" in record.getMessage() for record in caplog.records)
     assert COOKIE_VALUE not in caplog.text
 
