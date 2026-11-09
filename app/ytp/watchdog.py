@@ -443,6 +443,9 @@ class Watchdog:
                     urgent=False,
                 )
             self.egress_state = "ok"
+            # The pause belonged to the mismatch that just ended (the owner may have resumed by
+            # now): a LATER confirmed mismatch is a new leak and must pause again (#67).
+            self._egress_paused = False
             return
         self._egress_bad += 1
         logger.error(
