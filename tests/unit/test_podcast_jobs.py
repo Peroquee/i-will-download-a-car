@@ -82,9 +82,11 @@ class FakeFetcher:
 class Refresher:
     def __init__(self):
         self.asked: list[str | None] = []
+        self.immediate: list[bool] = []
 
-    def request_refresh(self, folder=None):
+    def request_refresh(self, folder=None, *, immediate=False):
         self.asked.append(folder)
+        self.immediate.append(immediate)
 
 
 class World:

@@ -13,7 +13,8 @@ key configured it does nothing at all.
   pack, ten files) calls `request_refresh` ten times; Jellyfin gets ONE `POST /Library/Refresh`,
   sent after things have been quiet for `quiet_seconds` (but never later than
   `max_wait_seconds` after the first request, so a steady trickle cannot postpone it for ever).
-  The scheduler calls `flush_due()` every few seconds.
+  The scheduler calls `flush_due()` every few seconds. A high-priority job (#51) passes
+  `immediate=True`: its batch skips the quiet period once, so Jellyfin scans right away.
 
 **Why always the full scan.** The cheaper per-library call, `POST /Items/{libraryId}/Refresh`,
 only re-reads the items Jellyfin already knows: on a real Jellyfin 10.11.11 a library stayed at 0
@@ -180,6 +181,7 @@ class _Pending:
     last_at: float = 0.0
     failures: int = 0
     retry_at: float = 0.0
+    immediate: bool = False  # a high-priority job finished: do not wait for the quiet period
 
 
 class LibraryRefresher:
@@ -214,10 +216,12 @@ class LibraryRefresher:
         with self._lock:
             return self._pending is not None
 
-    def request_refresh(self, folder: str | None = None) -> None:
+    def request_refresh(self, folder: str | None = None, *, immediate: bool = False) -> None:
         """Note that new files arrived in the library folder `folder` (None: somewhere).
 
-        Never raises and never waits for Jellyfin: safe to call from a download job.
+        Never raises and never waits for Jellyfin: safe to call from a download job. With
+        `immediate=True` (a high-priority job finished, #51) the batch is sent at the next
+        `flush_due`, without waiting out the quiet period: the debounce is bypassed once.
         """
         if self.client is None:
             return
@@ -225,6 +229,7 @@ class LibraryRefresher:
         with self._lock:
             pending = self._pending or _Pending(first_at=now)
             pending.last_at = now
+            pending.immediate = pending.immediate or immediate
             if folder:
                 pending.folders.add(unicodedata.normalize("NFC", folder))
             self._pending = pending
@@ -232,8 +237,9 @@ class LibraryRefresher:
     def flush_due(self) -> bool:
         """Send the pending refresh if it is due. Called by the scheduler every few seconds.
 
-        Due = quiet for `quiet_seconds`, or `max_wait_seconds` since the first request, and not
-        waiting out a retry delay. Returns True if a refresh went out.
+        Due = quiet for `quiet_seconds`, or `max_wait_seconds` since the first request, or marked
+        immediate by a high-priority job (#51), and not waiting out a retry delay. Returns True if
+        a refresh went out.
         """
         client = self.client
         if client is None:
@@ -245,7 +251,7 @@ class LibraryRefresher:
                 return False
             quiet = now - pending.last_at >= self.quiet_seconds
             overdue = now - pending.first_at >= self.max_wait_seconds
-            if not (quiet or overdue):
+            if not (pending.immediate or quiet or overdue):
                 return False
             # Work on a snapshot; requests arriving meanwhile start a new pending batch.
             self._pending = None

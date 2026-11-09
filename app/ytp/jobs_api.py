@@ -2,7 +2,7 @@
 
 GET /api/jobs?limit=50&status=failed
     {"jobs": [{"id", "type", "kind", "label", "status", "error", "progress", "can_retry",
-               "dismissed", "created_at", "updated_at"}, ...],
+               "dismissed", "high_priority", "created_at", "updated_at"}, ...],
      "counts": {"queued": n, "downloading": n, "organizing": n, "done": n, "failed": n,
                 "dismissed": n}}
 
@@ -167,6 +167,7 @@ def summarize(
         "progress": job_progress(job, torrents, youtube),
         "can_retry": job.status == "failed",
         "dismissed": dismissed,
+        "high_priority": job.priority > 0,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }

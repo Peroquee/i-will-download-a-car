@@ -259,7 +259,10 @@ class YoutubeWorker:
             return
         if jobs.transition(self.db, job.id, "done", expected=("organizing",)):
             logger.info("job done", extra={"job_id": job.id, "video_id": ref.video_id})
-            self.refresher.request_refresh(self.settings.library_dirs[LIBRARY_KEYS[meta.target]])
+            self.refresher.request_refresh(
+                self.settings.library_dirs[LIBRARY_KEYS[meta.target]],
+                immediate=job.priority > 0,  # a high-priority job skips the debounce once (#51)
+            )
 
     def _file_music(
         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path

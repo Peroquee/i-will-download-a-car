@@ -1,9 +1,9 @@
 """The dashboard's data (issue #38): GET /api/dashboard.
 
-    {"active": [{id, type, kind, label, status, progress, done_bytes, total_bytes, speed, eta,
+    {"active": [{id, type, kind, label, status, high_priority, progress, done_bytes,
+                 total_bytes, speed, eta, created_at, updated_at}, ...],
+     "recent": [{id, type, kind, label, status, error, can_retry, dismissed, high_priority,
                  created_at, updated_at}, ...],
-     "recent": [{id, type, kind, label, status, error, can_retry, dismissed, created_at,
-                 updated_at}, ...],
      "dismissed": n,
      "vpn": {"current": {state, since, paused, egress, country}, "history": [{time, condition,
              paused, reason}, ...]},
@@ -81,6 +81,7 @@ def active_row(
         "kind": job.metadata.get("type"),
         "label": job_label(job),
         "status": job.status,
+        "high_priority": job.priority > 0,
         "progress": None,
         "done_bytes": None,
         "total_bytes": None,
@@ -116,6 +117,7 @@ def recent_row(job: Job, dismissed: bool = False) -> dict[str, Any]:
         "error": job.error,
         "can_retry": job.status == "failed",
         "dismissed": dismissed,
+        "high_priority": job.priority > 0,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }

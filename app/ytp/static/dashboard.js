@@ -137,7 +137,9 @@
     function activeRow(job) {
       var li = el("li", "job");
       var top = el("div", "job-top");
-      top.appendChild(el("span", "job-name", job.label));
+      var name = el("span", "job-name", job.label);
+      if (job.high_priority) name.appendChild(el("span", "priority-badge", t("jobs.priority")));
+      top.appendChild(name);
       top.appendChild(el("span", "job-status", ctx.statusText(job.status)));
       li.appendChild(top);
       var meta = [t("jobs.id", { id: job.id })];
@@ -333,7 +335,9 @@
     function recentRow(job) {
       var li = el("li", "job" + (job.status === "failed" ? " job-failed" : job.status === "done" ? " job-done" : ""));
       var top = el("div", "job-top");
-      top.appendChild(el("span", "job-name", job.label));
+      var name = el("span", "job-name", job.label);
+      if (job.high_priority) name.appendChild(el("span", "priority-badge", t("jobs.priority")));
+      top.appendChild(name);
       top.appendChild(el("span", "job-status", ctx.statusText(job.status)));
       li.appendChild(top);
       var meta = [t("jobs.id", { id: job.id })];

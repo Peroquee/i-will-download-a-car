@@ -51,7 +51,7 @@ import threading
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from pydantic_core import PydanticCustomError
 
 from . import accounts, jobs, podcast_backlog, podcast_subscriptions
@@ -110,6 +110,8 @@ class EpisodeFeedRequest(FeedRequest):
 class EpisodeRequest(FeedRequest):
     key: str = Field(pattern=r"^[0-9a-f]{40}$")
     name: Name | None = None
+    # Start before normal queued downloads and hold them back while this one runs (#51).
+    high_priority: StrictBool = False
 
 
 def _context(request: Request):
@@ -231,7 +233,12 @@ async def queue_episode(body: EpisodeRequest, request: Request) -> JSONResponse:
     folder = _folder_for(podcast, body.name, subscription.title if subscription else None)
     metadata = episode_metadata(folder, episode, podcast.feed_url, podcast.image_url)
     job, outcome = await asyncio.to_thread(
-        jobs.submit_job, db, JOB_TYPE, episode.key, metadata.model_dump_json()
+        jobs.submit_job,
+        db,
+        JOB_TYPE,
+        episode.key,
+        metadata.model_dump_json(),
+        priority=1 if body.high_priority else 0,
     )
     await asyncio.to_thread(accounts.add_job_owner, db, job.id, request.state.account.id)
     logger.info("podcast job", extra={"job_id": job.id, "outcome": outcome})

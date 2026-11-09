@@ -86,13 +86,16 @@
     throw new Error("unknown type " + type);
   }
 
-  function magnetPayload(link, type, values) {
-    return { magnet: String(link).trim(), metadata: magnetMetadata(type, values) };
+  function magnetPayload(link, type, values, highPriority) {
+    var body = { magnet: String(link).trim(), metadata: magnetMetadata(type, values) };
+    if (highPriority) body.high_priority = true;
+    return body;
   }
 
   /* target: "video" (the default), "podcast" or "music"; audioOnly means nothing for a video.
-     maxHeight is the chosen cap (0 = best); audio-only and podcast downloads ignore it. */
-  function youtubePayload(link, channel, title, target, audioOnly, album, maxHeight) {
+     maxHeight is the chosen cap (0 = best); audio-only and podcast downloads ignore it.
+     highPriority starts the job before normal queued downloads (#51). */
+  function youtubePayload(link, channel, title, target, audioOnly, album, maxHeight, highPriority) {
     var body = { url: String(link).trim(), channel: String(channel).trim(), title: String(title).trim() };
     if (target === "podcast" || target === "music") {
       body.target = target;
@@ -103,6 +106,7 @@
     if (target !== "podcast" && !audioOnly && maxHeight != null && String(maxHeight).trim() !== "") {
       body.max_height = toNumber(maxHeight);
     }
+    if (highPriority) body.high_priority = true;
     return body;
   }
 
@@ -123,7 +127,7 @@
 
   /* The requests a podcast form sends: {episode, subscribe}, each null when not wanted.
      values: {name, episode (a key or ""), subscribe (bool), backfill (text)} */
-  function podcastPayloads(link, values) {
+  function podcastPayloads(link, values, highPriority) {
     var feed = String(link).trim();
     var name = String(values.name == null ? "" : values.name).trim();
     var episode = null;
@@ -131,6 +135,7 @@
     if (values.episode) {
       episode = { feed: feed, key: String(values.episode) };
       if (name) episode.name = name;
+      if (highPriority) episode.high_priority = true;
     }
     if (values.subscribe) {
       subscribe = { feed: feed, backfill: toNumber(values.backfill === "" ? "0" : values.backfill) };

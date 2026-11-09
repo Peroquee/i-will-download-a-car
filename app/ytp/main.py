@@ -37,6 +37,7 @@ from .podcast_backlog import BacklogFeeder
 from .podcast_jobs import POLL_JOB_ID as PODCAST_POLL_JOB_ID
 from .podcast_jobs import PodcastPoller, PodcastWorker
 from .podcasts import PodcastFeedClient
+from .priority import PRIORITY_JOB_ID, PRIORITY_SECONDS, PriorityManager
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .safefetch import SafeFetcher
 from .scheduler import AppScheduler
@@ -115,6 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The scheduler needs the database (its jobs keep their state there).
     app.state.scheduler = None
     app.state.reconciler = None
+    app.state.priority = None
     app.state.poller = None
     app.state.podcast_poller = None
     app.state.backlog_feeder = None
@@ -135,6 +137,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 app.state.reconciler.run_once,
                 job_id=RECONCILE_JOB_ID,
                 seconds=RECONCILE_SECONDS,
+                run_immediately=True,
+            )
+            # Holds normal torrents back while a high-priority job downloads (#51). The
+            # watchdog status keeps a VPN/egress pause intact (the watchdog's policy wins).
+            app.state.priority = PriorityManager(
+                app.state.db, app.state.qbit, app.state.watchdog_status
+            )
+            app.state.scheduler.add_interval_job(
+                app.state.priority.tick,
+                job_id=PRIORITY_JOB_ID,
+                seconds=PRIORITY_SECONDS,
                 run_immediately=True,
             )
         # The poller also serves the "check now" button, so it exists even when the schedule is off.
@@ -247,6 +260,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.scheduler = None
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None
+    app.state.priority = None
     app.state.poller = None
     app.state.podcast_feeds = None
     app.state.podcast_worker = None

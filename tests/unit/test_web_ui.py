@@ -1105,6 +1105,26 @@ def test_the_youtube_payload_only_carries_the_target_when_it_is_a_podcast():
 
 
 @needs_node
+def test_the_payloads_carry_high_priority_only_when_asked():
+    magnet = run_node("L.magnetPayload('m', 'movies', {title: 't', year: '2000'}, true)")
+    assert magnet["high_priority"] is True
+    assert "high_priority" not in run_node(
+        "L.magnetPayload('m', 'movies', {title: 't', year: '2000'})"
+    )
+    youtube = run_node(
+        "L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T', 'video', false, null, 720, true)"
+    )
+    assert youtube["high_priority"] is True
+    assert "high_priority" not in run_node(
+        "L.youtubePayload('https://youtu.be/dQw4w9WgXcQ', 'B', 'T')"
+    )
+    episode = run_node("L.podcastPayloads('https://p.example/f', {episode: 'k'}, true)")
+    assert episode["episode"]["high_priority"] is True
+    normal = run_node("L.podcastPayloads('https://p.example/f', {episode: 'k'})")
+    assert "high_priority" not in normal["episode"]
+
+
+@needs_node
 def test_the_subscribe_payload():
     assert run_node("L.subscribePayload(' @x ', null, 3)") == {"channel": "@x", "backfill": 3}
     assert run_node("L.subscribePayload('@x', ' My Cast ', null, 'podcast', true)") == {
@@ -1123,6 +1143,7 @@ def test_what_the_page_sends_is_accepted_by_the_server(client):
         f"L.youtubePayload('{url}', 'B', 'T', 'podcast', true)",
         f"L.youtubePayload('{url}', 'B', 'T', 'podcast', false)",
         f"L.youtubePayload('{url}', 'B', 'T', 'video', false)",
+        f"L.youtubePayload('{url}', 'B', 'T', 'video', false, null, null, true)",
     ):
         response = client.post("/api/youtube/download", json=run_node(call))
         assert response.status_code in {200, 201}, (call, response.text)

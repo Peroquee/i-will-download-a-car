@@ -280,6 +280,25 @@ def test_requests_after_a_flush_start_a_new_batch(fake):
     assert refresher_.refreshes_sent == 2
 
 
+def test_an_immediate_request_bypasses_the_quiet_period(fake):
+    """A high-priority job finished (#51): the debounce is skipped once."""
+    clock = Clock()
+    refresher_ = refresher(fake, clock, quiet_seconds=30, max_wait_seconds=300)
+    refresher_.request_refresh("Filme", immediate=True)
+    assert refresher_.flush_due() is True, "sent at the next flush, not after 30 s"
+    assert len(fake.calls("/Library/Refresh")) == 1
+
+
+def test_an_immediate_request_carries_the_whole_pending_batch(fake):
+    clock = Clock()
+    refresher_ = refresher(fake, clock, quiet_seconds=30)
+    refresher_.request_refresh("Filme")
+    refresher_.request_refresh("Serien", immediate=True)
+    assert refresher_.flush_due() is True
+    assert len(fake.calls("/Library/Refresh")) == 1, "one scan covers both folders"
+    assert not refresher_.pending
+
+
 # --- the refresher: fail soft ----------------------
 
 

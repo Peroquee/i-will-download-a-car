@@ -180,6 +180,16 @@ def test_jobs_are_listed_newest_first_with_label_status_and_error(client):
     assert body["counts"]["queued"] == 1
 
 
+def test_the_list_marks_high_priority_jobs(client):
+    high = add_magnet_job(client)
+    normal = add_magnet_job(client, HASH2)
+    with client.app.state.db.transaction() as conn:
+        conn.execute("UPDATE jobs SET priority = 1 WHERE id = ?", (high.id,))
+    rows = {job["id"]: job for job in list_jobs(client).json()["jobs"]}
+    assert rows[high.id]["high_priority"] is True
+    assert rows[normal.id]["high_priority"] is False
+
+
 def test_the_list_never_contains_the_magnet_link_or_its_passkey(client):
     add_magnet_job(client)
     text = list_jobs(client).text

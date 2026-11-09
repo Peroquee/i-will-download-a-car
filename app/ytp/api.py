@@ -1,10 +1,13 @@
 """The HTTP API (issue #13). Mounted by `create_app`; sits behind the reverse proxy's login.
 
 POST /api/magnet
-    {"magnet": "magnet:?xt=urn:btih:...", "metadata": {"type": "movies", "title": ..., "year": ...}}
+    {"magnet": "magnet:?xt=urn:btih:...", "metadata": {"type": "movies", "title": ..., "year": ...},
+     "high_priority": false}
 
     Validates the link and the per-type metadata (field-level 422 errors), records a job keyed by
     the infohash, and hands the torrent to qBittorrent in the category named by `metadata.type`.
+    `high_priority` (#51) starts the job before normal queued downloads and holds those back
+    while it runs.
 
     201 {"id", "infohash", "type", "status": "queued", "duplicate": false}   new job
     200 {... "duplicate": true}                                              already in the system
@@ -58,6 +61,8 @@ class MagnetRequest(BaseModel):
 
     magnet: str
     metadata: Metadata
+    # Start before normal queued downloads and hold them back while this one runs (#51).
+    high_priority: StrictBool = False
 
     @field_validator("magnet")
     @classmethod
@@ -82,7 +87,12 @@ async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     infohash = infohash_from_magnet(body.magnet)
     category = body.metadata.type  # the metadata types are the qBittorrent category names
     job, outcome = await asyncio.to_thread(
-        jobs.submit_magnet_job, db, infohash, metadata_to_json(body.metadata), body.magnet
+        jobs.submit_magnet_job,
+        db,
+        infohash,
+        metadata_to_json(body.metadata),
+        body.magnet,
+        priority=1 if body.high_priority else 0,
     )
     # Whoever asked sees the job (also when somebody asked for the same torrent before).
     await asyncio.to_thread(accounts.add_job_owner, db, job.id, request.state.account.id)
@@ -131,6 +141,8 @@ class DownloadRequest(BaseModel):
     # Music only (issue #36): `channel` is then the artist, `title` the track. Left out, the track
     # is a single: the album is named like the track.
     album: Name | None = None
+    # Start before normal queued downloads and hold them back while this one runs (#51).
+    high_priority: StrictBool = False
 
     @model_validator(mode="after")
     def _target_rules(self) -> DownloadRequest:
@@ -202,6 +214,9 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
     Optional `max_height` (#47): 0 (best) or one of 2160, 1440, 1080, 720, 480, 360. It caps the
     video stream of THIS job; missing = the server default (`YOUTUBE_MAX_HEIGHT`), and audio-only
     downloads ignore it. Any other value is a 400.
+
+    Optional `high_priority` (#51): true starts this job before normal queued downloads and holds
+    normal work back while it runs.
     """
     max_height = body.max_height
     if max_height is not None and (
@@ -230,6 +245,7 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
         YOUTUBE_JOB_TYPE,
         job_external_id(ref.video_id, body.target),
         metadata.to_json(),
+        priority=1 if body.high_priority else 0,
     )
     await asyncio.to_thread(accounts.add_job_owner, db, job.id, request.state.account.id)
     logger.info(
