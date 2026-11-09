@@ -170,7 +170,6 @@ def test_the_resolution_dropdown_is_hidden_for_podcast_and_audio_only():
 
 
 @needs_node
-@needs_node
 def test_a_bad_season_is_a_field_error_and_nothing_is_sent():
     out = page(
         "/",
@@ -188,7 +187,31 @@ def test_a_bad_season_is_a_field_error_and_nothing_is_sent():
     )
     assert out["errors"] == [], out["errors"]
     assert out["reads"]["#f-season-error"]["text"] == (
-        "Invalid season. Use for example 2, 1-3 or 1,2,5 (0-999, at most 50 seasons)."
+        "Invalid season. Use for example 2, 1-3 or 1,2,5 (0-9999, at most 50 seasons)."
+    )
+    assert ["POST", "/api/magnet"] not in out["fetched"]
+
+
+@needs_node
+def test_a_multi_season_spec_with_an_episode_is_a_field_error_and_nothing_is_sent():
+    out = page(
+        "/",
+        steps=[
+            {"check": "#mode-magnet", "value": True},
+            {"fire": "#mode-magnet", "type": "change"},
+            {"set": "#media-type", "value": "series"},
+            {"fire": "#media-type", "type": "change"},
+            {"set": "#link", "value": "magnet:?xt=urn:btih:" + "a" * 40},
+            {"set": "#f-series-title", "value": "Tatort"},
+            {"set": "#f-season", "value": "1-3"},
+            {"set": "#f-episode", "value": "5"},
+            {"submit": "#form"},
+            {"read": "#f-episode-error"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#f-episode-error"]["text"] == (
+        "An episode belongs to exactly one season. Leave it empty for several seasons."
     )
     assert ["POST", "/api/magnet"] not in out["fetched"]
 

@@ -296,18 +296,26 @@ async def vpn_status(request: Request) -> JSONResponse:
 STARTUP_GRACE_SECONDS = 60
 
 
-async def _season_spec_is_a_400(request: Request, exc: RequestValidationError):
-    """A bad season spec answers 400 (it is a form mistake), not FastAPI's generic 422 (#52)."""
+_FORM_MISTAKE_TYPES = {"season_invalid", "episode_multi_season"}
+
+
+async def _form_mistake_is_a_400(request: Request, exc: RequestValidationError):
+    """A form mistake about seasons answers 400, not FastAPI's generic 422 (#52).
+
+    Two cases: a season spec that does not parse, and an episode number together with several
+    seasons (which names no single episode).
+    """
     for error in exc.errors():
-        if error.get("type") == "season_invalid":
+        if error.get("type") in _FORM_MISTAKE_TYPES:
             return problem(400, str(error.get("msg") or "invalid season"))
     return await request_validation_exception_handler(request, exc)
 
 
 def register(app: FastAPI) -> None:
     """Add the API routes to the app (plain routes, so `app.routes` lists every path)."""
-    # One deliberate exception to the generic 422: the season field of a magnet job (#52).
-    app.add_exception_handler(RequestValidationError, _season_spec_is_a_400)
+    # One deliberate exception to the generic 422: the season and episode fields of a magnet
+    # job (#52).
+    app.add_exception_handler(RequestValidationError, _form_mistake_is_a_400)
     app.add_api_route("/api/magnet", add_magnet, methods=["POST"])
     app.add_api_route("/api/vpn", vpn_status, methods=["GET"])
     app.add_api_route("/api/youtube/probe", youtube_probe, methods=["POST"])

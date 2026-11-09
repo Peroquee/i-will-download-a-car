@@ -60,7 +60,7 @@
       var end = match[2] === undefined ? start : parseInt(match[2], 10);
       if (start > end) return null;
       for (var season = start; season <= end; season++) {
-        if (season > 999) return null;
+        if (season > MAX_NUMBER) return null;
         if (!seen[season]) {
           seen[season] = true;
           count += 1;
@@ -179,7 +179,13 @@
     });
     if (type === "series") {
       var seasonSpec = String(values.season == null ? "" : values.season).trim();
-      if (seasonSpec !== "" && !parseSeasons(seasonSpec)) errors.season = "err.season_invalid";
+      var seasons = seasonSpec === "" ? null : parseSeasons(seasonSpec);
+      if (seasonSpec !== "" && !seasons) errors.season = "err.season_invalid";
+      /* An episode number names one episode of one season; several seasons are a pack. */
+      var episode = String(values.episode == null ? "" : values.episode).trim();
+      if (!values.pack && seasons && seasons.length > 1 && episode !== "") {
+        errors.episode = "err.episode_multi_season";
+      }
     }
     var year = String(values.year == null ? "" : values.year).trim();
     if (type === "movies" && year !== "" && /^\d+$/.test(year) && (+year < MIN_YEAR || +year > nowYear + 1)) {

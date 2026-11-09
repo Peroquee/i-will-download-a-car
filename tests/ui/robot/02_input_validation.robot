@@ -52,14 +52,14 @@ A Year Outside The Range Is Refused
     Assert Field Error    f-year-error    Year between 1870
     Assert Field Invalid    f-year
 
-A Season Must Be A Whole Number
+A Season Must Be A Season Range Or List
     Select Mode    magnet
     Select From List By Value    id:media-type    series
     Input Text    id:link    ${MAGNET}
     Input Text    id:f-series-title    A Show
     Input Text    id:f-season    x
     Submit The Form
-    Assert Field Error    f-season-error    Please enter a whole number.
+    Assert Field Error    f-season-error    Invalid season.
     Assert Field Invalid    f-season
 
 The Podcast Form Requires A Folder And A Choice

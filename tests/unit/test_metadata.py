@@ -219,6 +219,9 @@ def test_episode_zero_is_not_a_season_pack():
         ("3,1,3", [1, 3]),
         ("0", [0]),
         ("999", [999]),
+        ("1000", [1000]),
+        ("2024", [2024]),
+        ("2020-2024", [2020, 2021, 2022, 2023, 2024]),
         ("1-50", list(range(1, 51))),
     ],
 )
@@ -239,8 +242,8 @@ def test_a_season_spec_parses_to_a_sorted_unique_list(text, expected):
         "1,",
         ",2",
         "1 2",
-        "1000",
-        "1-1000",
+        "10000",
+        "1-9999",
         "1-51",
         "0-50",
         "-1",
@@ -257,7 +260,13 @@ def test_a_bad_season_spec_is_refused(text):
 
 
 def test_the_season_field_accepts_the_new_text_and_lists():
-    assert parse_metadata({**SERIES, "season": "1-3,5"}).seasons == [1, 2, 3, 5]
+    # No episode: several seasons plus one episode is refused (see the test below).
+    assert parse_metadata({"type": "series", "title": "T", "season": "1-3,5"}).seasons == [
+        1,
+        2,
+        3,
+        5,
+    ]
     assert parse_metadata({"type": "series", "title": "T", "season": [5, 1, 3]}).seasons == [
         1,
         3,
@@ -269,9 +278,24 @@ def test_the_season_field_accepts_the_new_text_and_lists():
     ]
 
 
-@pytest.mark.parametrize("value", ["", "x", "1000", "0-50", [], ["1"], [1000], [1, True]])
+@pytest.mark.parametrize(
+    "value", ["", "x", "10000", "1-9999", "0-50", [], ["1"], [10000], [1, True]]
+)
 def test_a_bad_season_field_is_a_season_invalid(value):
     assert errors({**SERIES, "season": value}) == [("series.season", "season_invalid")]
+
+
+def test_an_episode_with_several_seasons_is_refused():
+    for season in ("1-3", "1,2,5", [1, 2]):
+        assert errors({"type": "series", "title": "T", "season": season, "episode": 5}) == [
+            ("series.episode", "episode_multi_season")
+        ]
+
+
+def test_an_episode_with_one_season_still_works():
+    for season in ("3", 3, [3]):
+        parsed = parse_metadata({"type": "series", "title": "T", "season": season, "episode": 7})
+        assert (parsed.seasons, parsed.episode) == ([3], 7)
 
 
 def test_a_multi_season_job_stores_the_list_and_no_single_season():

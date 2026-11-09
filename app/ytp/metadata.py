@@ -34,6 +34,8 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    ValidationInfo,
+    field_validator,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -42,7 +44,7 @@ MAX_NAME_LENGTH = 200
 MIN_YEAR = 1870  # the earliest films; anything older is a typo
 MAX_NUMBER = 9999  # seasons are sometimes years ("Formula 1", season 2024)
 MIN_SEASON = 0
-MAX_SEASON = 999
+MAX_SEASON = MAX_NUMBER
 MAX_SEASONS = 50
 MAX_SEASON_SPEC_LENGTH = 1000
 
@@ -124,7 +126,7 @@ _SEASON_PART = re.compile(r"([0-9]+)\s*(?:-\s*([0-9]+))?")
 def parse_seasons(text: str) -> list[int]:
     """Parse `2`, `1-3`, `1,2,5` or `1-3,5` into a sorted list of unique seasons (#52).
 
-    Spaces around a comma or a hyphen are allowed. Every season must be 0..999 and a list may
+    Spaces around a comma or a hyphen are allowed. Every season must be 0..9999 and a list may
     contain at most 50 seasons. Raises `SeasonSpecError` with a text a person can read.
     """
     if not isinstance(text, str):
@@ -242,6 +244,18 @@ class SeriesMetadata(_Metadata):
             data = dict(data)
             data["season"] = data.pop("seasons")
         return data
+
+    @field_validator("episode")
+    @classmethod
+    def _episode_needs_one_season(cls, value: int | None, info: ValidationInfo) -> int | None:
+        """An episode number names one episode of one season; several seasons are a pack (#52)."""
+        seasons = info.data.get("season")
+        if value is not None and isinstance(seasons, list) and len(seasons) > 1:
+            raise PydanticCustomError(
+                "episode_multi_season",
+                "an episode number cannot be combined with several seasons",
+            )
+        return value
 
     @property
     def seasons(self) -> list[int]:
