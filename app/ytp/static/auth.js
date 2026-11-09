@@ -43,6 +43,7 @@
         note.hidden = !why;
       }
       renderTools();
+      renderAccountResolution();
     }
 
     function check() {
@@ -87,6 +88,12 @@
 
     function isIn() { return state === "in"; }
     function isAdmin() { return !!account && account.role === "admin"; }
+
+    /* The admin's resolution right (#65): admins may always choose, everyone else only when the
+       admin ticked it. A missing field (an old cached page) means the right is there. */
+    function canChooseResolution() {
+      return !!account && (account.role === "admin" || account.can_set_resolution !== false);
+    }
 
     function focusLogin() { if ($("login-user")) $("login-user").focus(); }
 
@@ -138,14 +145,15 @@
       }
     }
 
-    function passwordMessage(text, ok) {
+    function accountMessage(text, ok) {
       $("account-result").textContent = text;
       $("account-result").className = "result " + (ok ? "ok" : "bad");
     }
 
     function openAccount() {
-      passwordMessage("", true);
+      accountMessage("", true);
       var dialog = $("account");
+      renderAccountResolution();
       if (typeof dialog.showModal === "function") {
         if (!dialog.open) dialog.showModal();
       } else {
@@ -159,31 +167,63 @@
       else dialog.removeAttribute("open");
     }
 
+    /* The own default resolution (#65): only an account with the right sees the field; an admin
+       always has it. The select's empty value means the server default. */
+    function renderAccountResolution() {
+      var row = $("account-resolution-row");
+      if (!row) return;
+      row.hidden = !canChooseResolution();
+      var select = $("account-resolution");
+      if (!select) return;
+      select.value = account && account.default_max_height != null
+        ? String(account.default_max_height) : "";
+    }
+
+    function onChangeResolution() {
+      var select = $("account-resolution");
+      if (!select || !account) return;
+      var value = select.value === "" ? null : Number(select.value);
+      accountMessage("", true);
+      ctx.request("PATCH", "/api/me/settings", { default_max_height: value }).then(function (reply) {
+        if (reply.status === 200) {
+          account = reply.data.account;
+          renderAccountResolution();
+          accountMessage(t("account.resolution_saved"), true);
+        } else if (reply.status === 403) {
+          accountMessage(t("account.resolution_forbidden"), false);
+        } else {
+          accountMessage(t("account.resolution_failed"), false);
+        }
+      }).catch(function () {
+        accountMessage(t("account.resolution_failed") + " " + t("result.network"), false);
+      });
+    }
+
     function onChangePassword(event) {
       event.preventDefault();
       var currentPw = $("account-current").value;
       var next = $("account-new").value;
-      if (!currentPw || !next) { passwordMessage(t("login.required"), false); return; }
-      if (next !== $("account-repeat").value) { passwordMessage(t("account.mismatch"), false); return; }
-      if (next.length < MIN_PASSWORD) { passwordMessage(t("account.too_short", { n: MIN_PASSWORD }), false); return; }
+      if (!currentPw || !next) { accountMessage(t("login.required"), false); return; }
+      if (next !== $("account-repeat").value) { accountMessage(t("account.mismatch"), false); return; }
+      if (next.length < MIN_PASSWORD) { accountMessage(t("account.too_short", { n: MIN_PASSWORD }), false); return; }
       $("account-change").disabled = true;
       ctx.post("/api/auth/password", { current: currentPw, "new": next }).then(function (reply) {
         $("account-change").disabled = false;
         if (reply.status === 200) {
           ["account-current", "account-new", "account-repeat"].forEach(function (id) { $(id).value = ""; });
-          passwordMessage(t("account.changed"), true);
+          accountMessage(t("account.changed"), true);
         } else if (reply.status === 403) {
-          passwordMessage(t("account.wrong_current"), false);
+          accountMessage(t("account.wrong_current"), false);
         } else if (reply.status === 429) {
-          passwordMessage(t("login.wait", { n: 30 }), false);
+          accountMessage(t("login.wait", { n: 30 }), false);
         } else if (reply.status === 422) {
-          passwordMessage(t("account.too_short", { n: MIN_PASSWORD }), false);
+          accountMessage(t("account.too_short", { n: MIN_PASSWORD }), false);
         } else {
-          passwordMessage(t("account.change_failed"), false);
+          accountMessage(t("account.change_failed"), false);
         }
       }).catch(function () {
         $("account-change").disabled = false;
-        passwordMessage(t("account.change_failed") + " " + t("result.network"), false);
+        accountMessage(t("account.change_failed") + " " + t("result.network"), false);
       });
     }
 
@@ -259,6 +299,45 @@
       return b;
     }
 
+    /* The resolution settings of one account (#65): the personal default and the right. An empty
+       select value means "server default"; every change is sent at once (like the buttons). */
+    function accountResolutionRow(row) {
+      var wrap = el("div", "row account-resolution-row");
+      var label = el("label", "field", t("accounts.resolution"));
+      var select = el("select");
+      select.id = "accounts-resolution-" + row.id;
+      label.setAttribute("for", select.id);
+      [["", "accounts.resolution_default"], ["0", "yt.resolution_best"]]
+        .concat([2160, 1440, 1080, 720, 480, 360].map(function (height) {
+          return [String(height), "yt.resolution_" + height];
+        }))
+        .forEach(function (choice) {
+          var option = el("option", null, t(choice[1]));
+          option.value = choice[0];
+          select.appendChild(option);
+        });
+      select.value = row.default_max_height == null ? "" : String(row.default_max_height);
+      select.addEventListener("change", function () {
+        change(row.id, {
+          default_max_height: select.value === "" ? null : Number(select.value),
+        });
+      });
+      wrap.appendChild(label);
+      wrap.appendChild(select);
+      var allowed = el("label", "checkbox");
+      var tick = el("input");
+      tick.type = "checkbox";
+      tick.id = "accounts-can-choose-" + row.id;
+      tick.checked = row.can_set_resolution !== false;
+      tick.addEventListener("change", function () {
+        change(row.id, { can_set_resolution: tick.checked });
+      });
+      allowed.appendChild(tick);
+      allowed.appendChild(el("span", null, t("accounts.can_choose")));
+      wrap.appendChild(allowed);
+      return wrap;
+    }
+
     function accountRow(row) {
       var me = account && row.id === account.id;
       var li = el("li", "job" + (row.disabled ? " job-failed" : ""));
@@ -269,6 +348,7 @@
       li.appendChild(el("div", "job-meta", row.last_login
         ? t("accounts.last_login", { when: ctx.timeText(row.last_login) || row.last_login })
         : t("accounts.never")));
+      li.appendChild(accountResolutionRow(row));
       if (rowMessages[row.id]) {
         li.appendChild(el("p", rowMessages[row.id].ok ? "job-note" : "job-error", rowMessages[row.id].text()));
       }
@@ -426,6 +506,7 @@
       $("account-open").addEventListener("click", openAccount);
       $("account-close").addEventListener("click", closeAccount);
       $("account-form").addEventListener("submit", onChangePassword);
+      $("account-resolution").addEventListener("change", onChangeResolution);
       $("account-logout").addEventListener("click", onLogout);
       $("account").addEventListener("click", function (event) { if (event.target === $("account")) closeAccount(); });
       $("accounts-form").addEventListener("submit", onCreate);
@@ -446,6 +527,7 @@
     /* The language changed: texts built from data are made again. */
     function render() {
       renderTools();
+      renderAccountResolution();
       if (setupNeeded) $("login-setup").textContent = t("login.setup");
       renderAccounts();
       renderCookies();
@@ -453,7 +535,7 @@
 
     return {
       wire: wire, check: check, start: start, render: render, expired: expired,
-      isIn: isIn, isAdmin: isAdmin,
+      isIn: isIn, isAdmin: isAdmin, canChooseResolution: canChooseResolution,
     };
   }
 

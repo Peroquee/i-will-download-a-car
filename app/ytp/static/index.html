@@ -131,6 +131,7 @@
             <option value="480" data-i18n="yt.resolution_480"></option>
             <option value="360" data-i18n="yt.resolution_360"></option>
           </select>
+          <p id="yt-resolution-note" class="note" data-i18n="yt.resolution_locked" hidden></p>
         </div>
         <div id="yt-audio-row" hidden>
           <label class="checkbox" for="yt-audio">
@@ -162,6 +163,20 @@
             <span data-i18n="yt.subscribe"></span>
           </label>
           <p id="yt-subscribe-note" class="note" data-i18n="yt.subscribe_note"></p>
+          <div id="yt-sub-resolution-row" class="row sub-option" hidden>
+            <label class="field" for="yt-sub-resolution" data-i18n="subs.resolution"></label>
+            <select id="yt-sub-resolution">
+              <option value="" data-i18n="subs.resolution_default"></option>
+              <option value="0" data-i18n="yt.resolution_best"></option>
+              <option value="2160" data-i18n="yt.resolution_2160"></option>
+              <option value="1440" data-i18n="yt.resolution_1440"></option>
+              <option value="1080" data-i18n="yt.resolution_1080"></option>
+              <option value="720" data-i18n="yt.resolution_720"></option>
+              <option value="480" data-i18n="yt.resolution_480"></option>
+              <option value="360" data-i18n="yt.resolution_360"></option>
+            </select>
+            <p class="note" data-i18n="subs.resolution_note"></p>
+          </div>
           <div id="yt-backfill-row" class="row sub-option" hidden>
             <label class="field" for="yt-backfill" data-i18n="subs.backfill"></label>
             <input id="yt-backfill" class="narrow" type="text" inputmode="numeric" maxlength="2" value="0" aria-describedby="yt-backfill-note yt-backfill-error">
@@ -474,6 +489,20 @@
 <dialog id="account" class="howto account" aria-labelledby="account-title">
   <h2 id="account-title" data-i18n="account.title"></h2>
   <p id="account-who" class="note"></p>
+  <div id="account-resolution-row" class="row">
+    <label class="field" for="account-resolution" data-i18n="account.resolution"></label>
+    <select id="account-resolution">
+      <option value="" data-i18n="account.resolution_default"></option>
+      <option value="0" data-i18n="yt.resolution_best"></option>
+      <option value="2160" data-i18n="yt.resolution_2160"></option>
+      <option value="1440" data-i18n="yt.resolution_1440"></option>
+      <option value="1080" data-i18n="yt.resolution_1080"></option>
+      <option value="720" data-i18n="yt.resolution_720"></option>
+      <option value="480" data-i18n="yt.resolution_480"></option>
+      <option value="360" data-i18n="yt.resolution_360"></option>
+    </select>
+    <p class="note" data-i18n="account.resolution_note"></p>
+  </div>
   <h3 data-i18n="account.password_title"></h3>
   <form id="account-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
     <div class="row">
@@ -659,6 +688,7 @@
     "yt.resolution_720": "720p (HD)",
     "yt.resolution_480": "480p",
     "yt.resolution_360": "360p",
+    "yt.resolution_locked": "Ein Administrator legt die Auflösung deiner Downloads fest.",
     "yt.artist": "Künstler",
     "yt.track": "Titel des Stücks",
     "yt.album": "Album",
@@ -957,12 +987,21 @@
     "account.change_failed": "Das Ändern hat nicht geklappt.",
     "account.logout": "Abmelden",
     "account.close": "Schließen",
+    "account.resolution": "Meine Standardauflösung",
+    "account.resolution_default": "Server-Standard",
+    "account.resolution_note": "Gilt für Downloads, bei denen du keine andere Auflösung wählst.",
+    "account.resolution_saved": "Die Standardauflösung wurde gespeichert.",
+    "account.resolution_failed": "Das Speichern hat nicht geklappt.",
+    "account.resolution_forbidden": "Du darfst die Auflösung nicht wählen.",
     "role.admin": "Administrator",
     "role.user": "Benutzer",
     "accounts.title": "Konten",
     "accounts.name": "Name",
     "accounts.password": "Passwort (mindestens 12 Zeichen)",
     "accounts.role": "Rolle",
+    "accounts.resolution": "Auflösung",
+    "accounts.resolution_default": "Server-Standard",
+    "accounts.can_choose": "darf Auflösung wählen",
     "accounts.add": "Konto anlegen",
     "accounts.created": "Konto „{name}“ angelegt.",
     "accounts.exists": "Der Name ist schon vergeben.",
@@ -1019,6 +1058,12 @@
     "subs.confirm": "Wirklich entfernen?",
     "subs.remove_failed": "Das Entfernen hat nicht geklappt.",
     "subs.removed_note": "Bereits geladene Dateien bleiben erhalten.",
+    "subs.resolution": "Auflösung",
+    "subs.resolution_default": "Server-Standard",
+    "subs.resolution_note": "Gilt für neue Videos dieses Abonnements.",
+    "subs.resolution_meta": "Auflösung: {value}",
+    "subs.resolution_saved": "Die Auflösung wurde gespeichert.",
+    "subs.resolution_failed": "Die Auflösung konnte nicht geändert werden.",
     "err.int_out_of_range": "Eine Zahl von 0 bis 15.",
     "howto.button": "Anleitung",
     "howto.title": "Anleitung",
@@ -1135,6 +1180,7 @@
     "yt.resolution_720": "720p (HD)",
     "yt.resolution_480": "480p",
     "yt.resolution_360": "360p",
+    "yt.resolution_locked": "An admin decides the resolution of your downloads.",
     "yt.artist": "Artist",
     "yt.track": "Track title",
     "yt.album": "Album",
@@ -1433,12 +1479,21 @@
     "account.change_failed": "Changing the password did not work.",
     "account.logout": "Sign out",
     "account.close": "Close",
+    "account.resolution": "My default resolution",
+    "account.resolution_default": "Server default",
+    "account.resolution_note": "Used for downloads where you do not choose another resolution.",
+    "account.resolution_saved": "The default resolution was saved.",
+    "account.resolution_failed": "Saving did not work.",
+    "account.resolution_forbidden": "You may not choose the resolution.",
     "role.admin": "Administrator",
     "role.user": "User",
     "accounts.title": "Accounts",
     "accounts.name": "Name",
     "accounts.password": "Password (at least 12 characters)",
     "accounts.role": "Role",
+    "accounts.resolution": "Resolution",
+    "accounts.resolution_default": "Server default",
+    "accounts.can_choose": "may choose resolution",
     "accounts.add": "Create account",
     "accounts.created": "Account \"{name}\" created.",
     "accounts.exists": "That name is already taken.",
@@ -1495,6 +1550,12 @@
     "subs.confirm": "Really remove?",
     "subs.remove_failed": "Removing did not work.",
     "subs.removed_note": "Files that were already downloaded stay.",
+    "subs.resolution": "Resolution",
+    "subs.resolution_default": "Server default",
+    "subs.resolution_note": "Applies to new videos of this subscription.",
+    "subs.resolution_meta": "Resolution: {value}",
+    "subs.resolution_saved": "The resolution was saved.",
+    "subs.resolution_failed": "The resolution could not be changed.",
     "err.int_out_of_range": "A number from 0 to 15.",
     "howto.button": "How to",
     "howto.title": "How to",

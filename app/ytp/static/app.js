@@ -14,7 +14,8 @@
   var auth = null;   // sign-in, account menu, accounts page (auth.js, #44)
   var catalogue = null;       // what "all episodes" would do for the feed in the form (#45)
   var allConfirmed = false;   // the question "download N episodes?" has been shown
-  var ytDefaultMaxHeight = null;   // the server's default resolution (#47)
+  var ytDefaultMaxHeight = null;   // the account's effective default resolution (#47, #65)
+  var ytCanChoose = true;          // the admin's resolution right for this account (#65)
 
   /* A form of this page is NEVER submitted natively (it would send the pasted link in the address
      and create no job): whatever else fails, this guard is the first thing that runs. */
@@ -336,12 +337,14 @@
     });
   }
 
-  /* The server's default resolution (YOUTUBE_MAX_HEIGHT) and the fixed choices the API accepts
-     (#47). The page preselects; it never fetches formats from YouTube. */
+  /* The account's effective default resolution and the fixed choices the API accepts (#47, #65).
+     The page preselects; it never fetches formats from YouTube. Without the resolution right
+     (can_choose false) the dropdown is disabled and a short note says an admin decides. */
   function loadYoutubeOptions() {
     getJson("/api/youtube/options").then(function (data) {
       if (!data || typeof data.max_height !== "number") return;
       ytDefaultMaxHeight = data.max_height;
+      ytCanChoose = data.can_choose !== false;
       var select = $("yt-resolution");
       var value = String(data.max_height);
       var known = Array.prototype.some.call(select.options, function (option) {
@@ -354,6 +357,10 @@
         select.appendChild(option);
       }
       select.value = value;
+      select.disabled = !ytCanChoose;
+      $("yt-resolution-note").hidden = ytCanChoose;
+      $("yt-sub-resolution").disabled = !ytCanChoose;
+      showBackfill();   // the subscription row depends on the right too
     }).catch(function () { /* keep the first choice; the server default still applies */ });
   }
 
@@ -368,17 +375,33 @@
     return value;
   }
 
+  /* The resolution chosen for a NEW subscription (#65): empty = the server default. Podcast
+     subscriptions have none, and without the right the row is not offered at all. */
+  function ytSubscriptionMaxHeight() {
+    if (ytTarget() !== "video" || !ytCanChoose) return null;
+    var value = String($("yt-sub-resolution").value);
+    return value === "" ? null : Number(value);
+  }
+
   /* ---------------------------------------------------------------- subscribe (#19) */
   /* Subscribing is offered for a video or a podcast episode, not for music (applyTarget). */
   function wantsSubscription() { return ytTarget() !== "music" && $("subscribe").checked; }
 
-  /* "Older videos" only means something while "subscribe" is ticked. */
-  function showBackfill() { $("yt-backfill-row").hidden = !$("subscribe").checked; }
+  /* "Older videos" and the subscription's own resolution only mean something while "subscribe"
+     is ticked. Podcast subscriptions have no resolution (they keep the server default, #47/#65),
+     and an account without the resolution right does not get the field at all. */
+  function showBackfill() {
+    var on = $("subscribe").checked;
+    $("yt-backfill-row").hidden = !on;
+    $("yt-sub-resolution-row").hidden = !on || ytTarget() !== "video" || !ytCanChoose;
+  }
 
   /* Ticked "subscribe" next to a YouTube download: the video's address names the channel, and
      "older videos" says how many of the channel's latest videos to take as well (0 = none). */
-  function subscribeToChannel(link, name, backfill, downloadText) {
-    var body = L.subscribePayload(link, name, backfill, ytTarget(), ytAudioOnly());
+  function subscribeToChannel(link, name, backfill, downloadText, maxHeight) {
+    var body = L.subscribePayload(
+      link, name, backfill, ytTarget(), ytAudioOnly(), maxHeight
+    );
     post("/api/subscriptions", body).then(function (reply) {
       if (reply.status === 201 || reply.status === 200) {
         var key = reply.data.duplicate ? (reply.data.other_followers > 0 ? "sub.joined" : "sub.duplicate") : "sub.created";
@@ -433,10 +456,12 @@
         var wantSubscribe = current === "youtube" && wantsSubscription();
         var channelName = data.channel;
         var backfill = +(String(data.backfill || "").trim() || "0");
+        // Read before resetFields() clears the form (#65); the subscription is sent after it.
+        var subscribeMaxHeight = current === "youtube" ? ytSubscriptionMaxHeight() : null;
         showResult(text, true);
         if (!reply.data.duplicate) resetFields();
         pollJobs();
-        if (wantSubscribe) subscribeToChannel(link, channelName, backfill, text);
+        if (wantSubscribe) subscribeToChannel(link, channelName, backfill, text, subscribeMaxHeight);
         return;
       }
       if (reply.status === 422) {
@@ -553,6 +578,7 @@
     $("high-priority").checked = false;
     $("subscribe").checked = false;
     $("yt-backfill").value = "0";
+    $("yt-sub-resolution").value = "";
     showBackfill();
     $("yt-target").value = "video";
     shownTarget = "video";
@@ -723,7 +749,7 @@
       .then(function () { subsLoading = false; renderSubs(); });
   }
 
-  function subsRequest(method, path) { return request(method, path, null); }
+  function subsRequest(method, path, body) { return request(method, path, body); }
 
   function failureText(reply, fallbackKey) {
     var kind = reply.data && reply.data.kind;
@@ -760,6 +786,74 @@
     return details;
   }
 
+  /* The resolution of a channel subscription (#65): what new videos use, or the server default.
+     Everyone who follows it sees the value; only an account with the resolution right gets a
+     working dropdown (a subscription is shared, so the value applies to all followers). */
+  function resolutionLabel(value) {
+    if (value === null || value === undefined) return t("subs.resolution_default");
+    if (value === 0) return t("yt.resolution_best");
+    var key = "yt.resolution_" + value;
+    var label = t(key);
+    return label === key ? value + "p" : label;
+  }
+
+  function addResolutionChoices(select) {
+    [[ "", "subs.resolution_default" ], [ "0", "yt.resolution_best" ]]
+      .concat([2160, 1440, 1080, 720, 480, 360].map(function (height) {
+        return [String(height), "yt.resolution_" + height];
+      }))
+      .forEach(function (choice) {
+        var option = document.createElement("option");
+        option.value = choice[0];
+        option.textContent = t(choice[1]);
+        select.appendChild(option);
+      });
+    return select;
+  }
+
+  function subResolutionRow(sub) {
+    var row = document.createElement("div");
+    row.className = "row";
+    var label = document.createElement("label");
+    label.className = "field";
+    label.textContent = t("subs.resolution");
+    var select = addResolutionChoices(document.createElement("select"));
+    select.id = "subs-resolution-" + sub.id;
+    label.setAttribute("for", select.id);
+    select.value = sub.max_height == null ? "" : String(sub.max_height);
+    if (!auth || !auth.canChooseResolution()) {
+      select.disabled = true;
+    } else {
+      select.addEventListener("change", function () { changeSubResolution(sub, select); });
+    }
+    row.appendChild(label);
+    row.appendChild(select);
+    return row;
+  }
+
+  function changeSubResolution(sub, select) {
+    var key = subKey(sub);
+    var value = select.value === "" ? null : Number(select.value);
+    subsBusy[key] = "resolution";
+    delete subsMessages[key];
+    renderSubs();
+    subsRequest("PATCH", subPath(sub), { max_height: value }).then(function (reply) {
+      if (reply.status === 200) {
+        subsMessages[key] = { ok: true, text: function () { return t("subs.resolution_saved"); } };
+      } else {
+        subsMessages[key] = {
+          ok: false,
+          text: function () { return failureText(reply, "subs.resolution_failed"); },
+        };
+      }
+    }).catch(function () {
+      subsMessages[key] = {
+        ok: false,
+        text: function () { return t("subs.resolution_failed") + " " + t("result.network"); },
+      };
+    }).then(function () { delete subsBusy[key]; loadSubs(); renderSubs(); });
+  }
+
   function subRow(sub) {
     var li = document.createElement("li");
     li.className = "job" + (sub.last_error ? " job-failed" : "");
@@ -780,8 +874,12 @@
     if (sub.target === "podcast") {
       metaText = t(sub.audio_only ? "subs.target_audio" : "subs.target_podcast") + " \u00b7 " + metaText;
     }
+    if (sub.kind !== "podcast") {
+      metaText += " \u00b7 " + t("subs.resolution_meta", { value: resolutionLabel(sub.max_height) });
+    }
     meta.textContent = metaText;
     li.appendChild(meta);
+    if (sub.kind !== "podcast") li.appendChild(subResolutionRow(sub));
     var others = (sub.follower_count || 0) - (sub.following ? 1 : 0);
     if (sub.followers && sub.followers.length) {   // an admin sees who follows
       var who = document.createElement("div");

@@ -744,6 +744,7 @@ def test_the_page_can_read_the_default_resolution(client):
     assert response.json() == {
         "max_height": 1080,
         "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+        "can_choose": True,  # the test admin may always choose (#65)
     }
 
 

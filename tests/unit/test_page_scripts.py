@@ -47,6 +47,7 @@ ANSWERS = {
     "/api/youtube/options": {
         "max_height": 1080,
         "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+        "can_choose": True,
     },
     "/api/dashboard": {
         "active": [],
@@ -509,6 +510,17 @@ ACCOUNTS = {
 
 def requests_made(out) -> list[str]:
     return [url for _, url in out["fetched"]]
+
+
+def sent_body(out, method, url):
+    """The JSON body of the last request to method+url (the harness keeps it as text)."""
+    bodies = [
+        json.loads(item["body"])
+        for item in out["sent"]
+        if item["method"] == method and item["url"] == url
+    ]
+    assert bodies, f"no {method} {url}"
+    return bodies[-1]
 
 
 @needs_node
@@ -1463,3 +1475,267 @@ def test_a_dismissed_failed_job_does_not_colour_the_input_line_red():
     ])  # fmt: skip
     assert "failed: 1" in out["reads"]["#jobs-mini-text"]["text"]
     assert "jobs-mini-has-failed" in out["reads"]["#jobs-mini"]["cls"]
+
+
+# --- the resolution right (#65) -----------------------------------------------------------------
+
+
+def options(max_height=1080, can_choose=True):
+    return {
+        "max_height": max_height,
+        "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+        "can_choose": can_choose,
+    }
+
+
+@needs_node
+def test_the_download_resolution_dropdown_is_disabled_with_a_note_without_the_right():
+    out = page(
+        "/",
+        answers={"/api/youtube/options": options(720, can_choose=False)},
+        steps=[{"read": "#yt-resolution"}, {"read": "#yt-resolution-note"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-resolution"]["value"] == "720"
+    assert out["reads"]["#yt-resolution"]["disabled"] is True
+    assert out["reads"]["#yt-resolution-note"]["hidden"] is False
+    assert "admin decides" in out["reads"]["#yt-resolution-note"]["text"]
+
+
+@needs_node
+def test_the_download_resolution_dropdown_is_usable_with_the_right():
+    out = page(
+        "/",
+        answers={"/api/youtube/options": options(720)},
+        steps=[{"read": "#yt-resolution"}, {"read": "#yt-resolution-note"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-resolution"]["disabled"] is False
+    assert out["reads"]["#yt-resolution-note"]["hidden"] is True
+
+
+@needs_node
+def test_the_subscription_resolution_field_is_offered_when_subscribing_to_a_channel():
+    out = page(
+        "/",
+        steps=[
+            {"check": "#subscribe", "value": True},
+            {"fire": "#subscribe", "type": "change"},
+            {"read": "#yt-sub-resolution-row"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-sub-resolution-row"]["hidden"] is False
+    assert "Resolution" in out["reads"]["#yt-sub-resolution-row"]["text"]
+
+
+@needs_node
+def test_a_podcast_subscription_has_no_resolution_field():
+    out = page(
+        "/",
+        steps=[
+            {"set": "#yt-target", "value": "podcast"},
+            {"fire": "#yt-target", "type": "change"},
+            {"check": "#subscribe", "value": True},
+            {"fire": "#subscribe", "type": "change"},
+            {"read": "#yt-sub-resolution-row"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-sub-resolution-row"]["hidden"] is True
+
+
+@needs_node
+def test_without_the_right_the_subscription_resolution_field_is_not_offered():
+    out = page(
+        "/",
+        answers={"/api/youtube/options": options(can_choose=False)},
+        steps=[
+            {"check": "#subscribe", "value": True},
+            {"fire": "#subscribe", "type": "change"},
+            {"read": "#yt-sub-resolution-row"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#yt-sub-resolution-row"]["hidden"] is True
+
+
+@needs_node
+def test_the_accounts_page_offers_a_resolution_dropdown_and_the_right_checkbox():
+    out = page(
+        "/accounts",
+        answers={
+            "/api/accounts": {
+                "accounts": [
+                    {**ACCOUNT, "default_max_height": None, "can_set_resolution": True},
+                    {**USER_ACCOUNT, "default_max_height": 720, "can_set_resolution": False},
+                ]
+            },
+            "/api/youtube/cookies": {"present": False, "updated_at": None, "cookie_count": 0},
+        },
+        steps=[
+            {"read": "#accounts-resolution-1"},
+            {"read": "#accounts-can-choose-1"},
+            {"read": "#accounts-resolution-2"},
+            {"read": "#accounts-can-choose-2"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert out["reads"]["#accounts-resolution-1"]["value"] == ""
+    assert out["reads"]["#accounts-can-choose-1"]["checked"] is True
+    assert out["reads"]["#accounts-resolution-2"]["value"] == "720"
+    assert out["reads"]["#accounts-can-choose-2"]["checked"] is False
+
+
+@needs_node
+def test_changing_a_users_resolution_on_the_accounts_page_sends_a_patch():
+    out = page(
+        "/accounts",
+        answers={
+            "/api/accounts": {
+                "accounts": [
+                    {**USER_ACCOUNT, "default_max_height": None, "can_set_resolution": True}
+                ]
+            },
+            "/api/youtube/cookies": {"present": False, "updated_at": None, "cookie_count": 0},
+            "PATCH /api/accounts/2": {
+                "account": {**USER_ACCOUNT, "default_max_height": 720, "can_set_resolution": True}
+            },
+        },
+        steps=[
+            {"set": "#accounts-resolution-2", "value": "720"},
+            {"fire": "#accounts-resolution-2", "type": "change"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["PATCH", "/api/accounts/2"] in out["fetched"]
+    assert sent_body(out, "PATCH", "/api/accounts/2") == {"default_max_height": 720}
+
+
+SUB_WITH_RESOLUTION = {
+    "id": 5,
+    "channel_id": "UCSMOQeBJ2RAnuFungnQOxLg",
+    "channel_name": "Blender",
+    "channel_url": "https://www.youtube.com/channel/UCSMOQeBJ2RAnuFungnQOxLg",
+    "enabled": True,
+    "backfill": 0,
+    "created_at": "2026-10-01T00:00:00.000Z",
+    "last_checked": None,
+    "last_error": None,
+    "target": "video",
+    "audio_only": False,
+    "max_height": 720,
+    "following": True,
+    "follower_count": 1,
+    "skipped": {"count": 0, "by_reason": {}, "recent": []},
+}
+
+
+@needs_node
+def test_a_subscription_row_shows_its_resolution():
+    out = page(
+        "/",
+        answers={"/api/subscriptions": {"subscriptions": [SUB_WITH_RESOLUTION]}},
+        steps=[{"read": "#subs-youtube-list"}, {"read": "#subs-resolution-5"}],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert "Resolution: 720p (HD)" in out["reads"]["#subs-youtube-list"]["text"]
+    assert out["reads"]["#subs-resolution-5"]["value"] == "720"
+
+
+@needs_node
+def test_changing_a_subscription_resolution_sends_a_patch():
+    out = page(
+        "/",
+        answers={
+            "/api/subscriptions": {"subscriptions": [SUB_WITH_RESOLUTION]},
+            "PATCH /api/subscriptions/5": SUB_WITH_RESOLUTION,
+        },
+        steps=[
+            {"set": "#subs-resolution-5", "value": ""},
+            {"fire": "#subs-resolution-5", "type": "change"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["PATCH", "/api/subscriptions/5"] in out["fetched"]
+    assert sent_body(out, "PATCH", "/api/subscriptions/5") == {"max_height": None}
+
+
+@needs_node
+def test_the_own_default_resolution_is_offered_only_with_the_right():
+    without = page(
+        "/",
+        answers={
+            "/api/auth/me": {
+                "account": {**USER_ACCOUNT, "can_set_resolution": False, "default_max_height": 720}
+            }
+        },
+        steps=[{"read": "#account-resolution-row"}, {"read": "#account-resolution"}],
+    )
+    assert without["errors"] == [], without["errors"]
+    assert without["reads"]["#account-resolution-row"]["hidden"] is True
+
+    with_right = page(
+        "/",
+        answers={
+            "/api/auth/me": {
+                "account": {**USER_ACCOUNT, "can_set_resolution": True, "default_max_height": 720}
+            }
+        },
+        steps=[
+            {"click": "#account-open"},
+            {"read": "#account-resolution-row"},
+            {"read": "#account-resolution"},
+        ],
+    )
+    assert with_right["errors"] == [], with_right["errors"]
+    assert with_right["reads"]["#account-resolution-row"]["hidden"] is False
+    assert with_right["reads"]["#account-resolution"]["value"] == "720"
+
+
+@needs_node
+def test_changing_the_own_default_resolution_sends_a_patch():
+    out = page(
+        "/",
+        answers={
+            "/api/auth/me": {
+                "account": {
+                    **USER_ACCOUNT,
+                    "can_set_resolution": True,
+                    "default_max_height": None,
+                }
+            },
+            "PATCH /api/me/settings": {
+                "account": {
+                    **USER_ACCOUNT,
+                    "can_set_resolution": True,
+                    "default_max_height": 720,
+                }
+            },
+        },
+        steps=[
+            {"click": "#account-open"},
+            {"set": "#account-resolution", "value": "720"},
+            {"fire": "#account-resolution", "type": "change"},
+            {"read": "#account-result"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    assert ["PATCH", "/api/me/settings"] in out["fetched"]
+    assert out["reads"]["#account-result"]["text"] == "The default resolution was saved."
+
+
+@needs_node
+def test_the_subscription_resolution_is_sent_with_the_subscription():
+    out = page(
+        "/",
+        answers=SUBSCRIBED,
+        steps=probe_steps(
+            {"check": "#subscribe", "value": True},
+            {"fire": "#subscribe", "type": "change"},
+            {"set": "#yt-sub-resolution", "value": "720"},
+            {"submit": "#form"},
+        ),
+    )
+    assert out["errors"] == [], out["errors"]
+    assert sent_body(out, "POST", "/api/subscriptions")["max_height"] == 720

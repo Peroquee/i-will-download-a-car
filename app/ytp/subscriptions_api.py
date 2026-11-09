@@ -3,7 +3,7 @@
 POST /api/subscriptions
     {"channel": "<channel id | @handle | channel address | video address>",
      "name": "<folder name, optional>", "backfill": 0,
-     "target": "video", "audio_only": false}
+     "target": "video", "audio_only": false, "max_height": null}
 
     Resolves the channel once (the RSS feed needs its id, not the handle), stores id and name and
     answers 201 with the subscription (`duplicate: false`), or 200 `duplicate: true` if the
@@ -16,12 +16,21 @@ POST /api/subscriptions
     audio, tagged, with the thumbnail as cover. Subscribing again to a channel that is already
     subscribed changes nothing, the target included.
 
+    `max_height` (#65): the cap for the channel's new videos, 0 (best) or one of 2160, 1440, 1080,
+    720, 480, 360; missing/null = the server default. Setting it needs `can_set_resolution` (an
+    admin always may): otherwise 403, and a value outside the list is a 400.
+
     422 invalid input (field-level)   409 the limit of 200 subscriptions
     404/403/502/504/429 {"detail", "kind"}: the lookup failed (see POST /api/youtube/probe)
 
+PATCH /api/subscriptions/{id}
+    {"max_height": 720|null}: change the channel's cap for new videos (#65); null = the server
+    default. The caller must follow the subscription (or be an admin) and may set a resolution
+    (see above): otherwise 404 / 403. 200 with the subscription; 400 for a bad value.
+
 GET /api/subscriptions
     {"subscriptions": [{id, channel_id, channel_name, channel_url, enabled, backfill, created_at,
-                        last_checked, last_error, target, audio_only,
+                        last_checked, last_error, target, audio_only, max_height,
                         skipped: {count, by_reason: {live, premiere, short},
                                   recent: [{video_id, reason, title, published, skipped_at}]}},
                        ...]}
@@ -49,7 +58,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import accounts, seen_videos, skipped_videos, subscriptions
+from . import accounts, resolution, seen_videos, skipped_videos, subscriptions
 from .apiutil import PROBE_STATUS, followed_view, may_use, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
 from .feeds import FeedError
@@ -68,6 +77,9 @@ class SubscribeRequest(BaseModel):
     backfill: int = Field(default=0, ge=0, le=subscriptions.MAX_BACKFILL, strict=True)
     target: Literal["video", "podcast"] = "video"
     audio_only: StrictBool = False
+    # The cap for the channel's new videos (#65); validated in the handler so a bad value is a
+    # clear 400. Missing/null = the server default.
+    max_height: object = None
 
     @model_validator(mode="after")
     def _audio_needs_a_target(self) -> SubscribeRequest:
@@ -92,6 +104,14 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
     resolver: ChannelResolver | None = request.app.state.channels
     if db is None or resolver is None:
         return problem(503, "The database is not available; see /health.")
+    max_height = body.max_height
+    if max_height is not None and not resolution.valid(max_height):
+        return problem(400, resolution.DETAIL)
+    account = request.state.account
+    if max_height is not None and not resolution.may_choose(
+        account.is_admin, account.can_set_resolution
+    ):
+        return problem(403, resolution.NOT_ALLOWED)
     ref = parse_channel_ref(body.channel)
     try:
         channel = await resolver.resolve(ref)
@@ -110,6 +130,7 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
             body.backfill,
             body.target,
             body.audio_only,
+            max_height,
         )
     except subscriptions.TooManySubscriptions:
         return problem(
@@ -117,7 +138,6 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
         )
     # One channel is one subscription however many people follow it: asking again only adds the
     # asker as a follower (the settings stay those of the first one).
-    account = request.state.account
     joined = await asyncio.to_thread(accounts.follow, db, "channel", subscription.id, account.id)
     if joined and not created:
         # the next poll walks the list again, so the videos already queued become theirs too
@@ -133,6 +153,36 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
         },
         status_code=201 if created else 200,
     )
+
+
+async def update_subscription(subscription_id: int, request: Request) -> JSONResponse:
+    """PATCH /api/subscriptions/{id} {"max_height": 720|null}: the channel's new-video cap (#65).
+
+    Only a follower (or an admin) may change it, and only with the resolution right (an admin
+    always has it). A subscription is shared: the value applies to everyone who follows it.
+    """
+    db = request.app.state.db
+    if db is None:
+        return problem(503, "The database is not available; see /health.")
+    account = request.state.account
+    if not await may_use(db, "channel", subscription_id, account):
+        return problem(404, "no such subscription")
+    try:
+        data = await request.json()
+    except ValueError:
+        return problem(422, "the request is not JSON")
+    if not isinstance(data, dict) or set(data) != {"max_height"}:
+        return problem(422, "send max_height")
+    value = data["max_height"]
+    if value is not None and not resolution.valid(value):
+        return problem(400, resolution.DETAIL)
+    if not resolution.may_choose(account.is_admin, account.can_set_resolution):
+        return problem(403, resolution.NOT_ALLOWED)
+    fresh = await asyncio.to_thread(subscriptions.set_max_height, db, subscription_id, value)
+    if fresh is None:
+        return problem(404, "no such subscription")
+    logger.info("subscription resolution changed", extra={"subscription_id": subscription_id})
+    return JSONResponse(fresh.as_dict())
 
 
 async def list_subscriptions(request: Request) -> JSONResponse:
@@ -196,5 +246,8 @@ async def poll_now(subscription_id: int, request: Request) -> JSONResponse:
 def register(app: FastAPI) -> None:
     app.add_api_route("/api/subscriptions", subscribe, methods=["POST"])
     app.add_api_route("/api/subscriptions", list_subscriptions, methods=["GET"])
+    app.add_api_route(
+        "/api/subscriptions/{subscription_id}", update_subscription, methods=["PATCH"]
+    )
     app.add_api_route("/api/subscriptions/{subscription_id}", unsubscribe, methods=["DELETE"])
     app.add_api_route("/api/subscriptions/{subscription_id}/poll", poll_now, methods=["POST"])

@@ -53,8 +53,7 @@ VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov")
 AUDIO_EXTENSIONS = (".m4a", ".opus", ".ogg", ".aac", ".mp3")
 AUDIO_FORMAT = "ba[ext=m4a]/ba[acodec^=mp4a]/ba"  # AAC first, then whatever audio is best
 THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
-# The resolutions the input form offers and the API accepts. 0 = best, no cap (#47).
-MAX_HEIGHTS = (0, 2160, 1440, 1080, 720, 480, 360)
+# The resolutions the input form offers and the API accepts live in `ytp.resolution` (#47, #65).
 INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
     "upload_date", "description", "tags", "categories", "width", "height", "fps",

@@ -129,15 +129,22 @@ logged as `login` / `login failed` with the account id and the client address.
 | `POST /api/auth/logout` | logged in | ends this session |
 | `GET /api/auth/me` | anyone | `200 {account}` or `401` |
 | `POST /api/auth/password` | logged in | `{current, new}`; `403` if `current` is wrong |
+| `PATCH /api/me/settings` | logged in | `{default_max_height}`; `403` without the resolution right (#65) |
 | `GET /api/accounts` | admin | list |
 | `POST /api/accounts` | admin | `{username, password, role?}` → `201`; `409` exists; `422` |
-| `PATCH /api/accounts/{id}` | admin | `{role?, disabled?}` |
+| `PATCH /api/accounts/{id}` | admin | `{role?, disabled?, default_max_height?, can_set_resolution?}` (#65) |
 | `POST /api/accounts/{id}/password` | admin | `{password}` |
 | `DELETE /api/accounts/{id}` | admin | removes its follows; a channel nobody follows ends; its jobs stay |
 
 There must always be one active admin: demoting, disabling or deleting the last one answers
 `409 last_admin`. A name is 3 to 64 characters of letters, digits, `.`, `_`, `-`, not starting
 with a symbol, and is unique regardless of case.
+
+**Resolution right (#65):** every account has `default_max_height` (the resolution its downloads
+use when a request sends none; empty = `YOUTUBE_MAX_HEIGHT`) and `can_set_resolution` (whether it
+may pick a resolution at all; admins always may). Existing accounts start with the right; an admin
+changes both with `PATCH /api/accounts/{id}`, and a user with the right sets its own default with
+`PATCH /api/me/settings`. The values are `0` (best) or 2160, 1440, 1080, 720, 480, 360, or null.
 
 ## In the browser
 

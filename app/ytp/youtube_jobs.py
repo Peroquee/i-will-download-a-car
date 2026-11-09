@@ -54,9 +54,9 @@ from .jobs import Job
 from .metadata import Name
 from .music import place_track
 from .podcasts import PodcastError, place_episode
+from .resolution import MAX_HEIGHTS
 from .youtube import ProbeError, VideoRef, parse_video_url
 from .youtube_download import (
-    MAX_HEIGHTS,
     Downloaded,
     DownloadFailed,
     YoutubeDownloader,

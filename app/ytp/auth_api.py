@@ -11,11 +11,16 @@ GET  /api/auth/me           200 {"account": {...}} or 401 (no valid session); th
                             "setup": true when no account exists at all (nobody could sign in)
 POST /api/auth/password     {"current", "new"}: 200 and the account's OTHER sessions end; 403 if
                             the current password is wrong (counts for the brake like a login)
+PATCH /api/me/settings      {"default_max_height": 0|2160|...|null}: the account's own default
+                            resolution (#65); 403 without `can_set_resolution` (admins always may),
+                            400 for a value outside the list
 
 Admins only:
 GET    /api/accounts                          {"accounts": [{id, username, role, disabled, ...}]}
 POST   /api/accounts                          {"username", "password", "role"}: 201 {"account"}
-PATCH  /api/accounts/{id}                     {"role"?, "disabled"?}: 200 {"account"}
+PATCH  /api/accounts/{id}                     {"role"?, "disabled"?, "default_max_height"?,
+                                              "can_set_resolution"?}: 200 {"account"}; a bad
+                                              resolution value or type is a 400
 POST   /api/accounts/{id}/password            {"password"}: 200; ends that account's sessions
 DELETE /api/accounts/{id}                     200; its follows end, a channel nobody follows ends
     409 `last_admin`: there must always be one active admin; 409 `exists`; 422 `invalid`.
@@ -34,7 +39,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import accounts, passwords
+from . import accounts, passwords, resolution
 from .accounts import Account, AccountError
 from .apiutil import problem
 from .auth import COOKIE, LoginLimiter, client_address
@@ -149,6 +154,39 @@ async def me(request: Request) -> JSONResponse:
     return JSONResponse({"account": account.as_dict()}, headers={"Cache-Control": "no-store"})
 
 
+async def own_settings(request: Request) -> JSONResponse:
+    """PATCH /api/me/settings {"default_max_height": 720|null}: the account's own default (#65).
+
+    Only an account an admin allowed to choose resolutions may change it (an admin always may);
+    without the right the attempt is a 403. Changing `can_set_resolution` itself is the admin
+    API's job: 403 here.
+    """
+    db, failure = _db(request)
+    if failure is not None:
+        return failure
+    try:
+        data = await request.json()
+    except ValueError:
+        return problem(422, "the request is not JSON")
+    if not isinstance(data, dict):
+        return problem(422, "the request must be a JSON object")
+    if "can_set_resolution" in data:
+        return problem(403, "only an admin may change can_set_resolution")
+    account: Account = request.state.account
+    if not resolution.may_choose(account.is_admin, account.can_set_resolution):
+        return problem(403, resolution.NOT_ALLOWED)
+    if set(data) != {"default_max_height"}:
+        return problem(422, "send default_max_height")
+    value = data["default_max_height"]
+    if value is not None and not resolution.valid(value):
+        return problem(400, resolution.DETAIL)
+    try:
+        fresh = await asyncio.to_thread(accounts.set_default_max_height, db, account.id, value)
+    except AccountError as error:
+        return _error(error)
+    return JSONResponse({"account": fresh.as_dict()})
+
+
 async def change_password(request: Request) -> JSONResponse:
     db, failure = _db(request)
     if failure is not None:
@@ -225,8 +263,19 @@ async def update_account(account_id: int, request: Request) -> JSONResponse:
         data = await request.json()
     except ValueError:
         return problem(422, "the request is not JSON")
-    if not isinstance(data, dict) or not data or set(data) - {"role", "disabled"}:
-        return problem(422, "send role and/or disabled")
+    fields = {"role", "disabled", "default_max_height", "can_set_resolution"}
+    if not isinstance(data, dict) or not data or set(data) - fields:
+        return problem(422, "send role, disabled, default_max_height and/or can_set_resolution")
+    settings: dict[str, Any] = {}
+    if "default_max_height" in data:
+        value = data["default_max_height"]
+        if value is not None and not resolution.valid(value):
+            return problem(400, resolution.DETAIL)
+        settings["default_max_height"] = value
+    if "can_set_resolution" in data:
+        if not isinstance(data["can_set_resolution"], bool):
+            return problem(400, "can_set_resolution must be true or false")
+        settings["can_set_resolution"] = data["can_set_resolution"]
     try:
         result: Account | None = None
         if "role" in data:
@@ -238,6 +287,10 @@ async def update_account(account_id: int, request: Request) -> JSONResponse:
                 return problem(422, "disabled must be true or false")
             result = await asyncio.to_thread(
                 accounts.set_disabled, db, account_id, data["disabled"]
+            )
+        if settings:
+            result = await asyncio.to_thread(
+                accounts.set_resolution_settings, db, account_id, **settings
             )
     except AccountError as error:
         return _error(error)
@@ -275,6 +328,7 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/auth/logout", logout, methods=["POST"])
     app.add_api_route("/api/auth/me", me, methods=["GET"])
     app.add_api_route("/api/auth/password", change_password, methods=["POST"])
+    app.add_api_route("/api/me/settings", own_settings, methods=["PATCH"])
     app.add_api_route("/api/accounts", list_accounts, methods=["GET"])
     app.add_api_route("/api/accounts", create_account, methods=["POST"])
     app.add_api_route("/api/accounts/{account_id}", update_account, methods=["PATCH"])

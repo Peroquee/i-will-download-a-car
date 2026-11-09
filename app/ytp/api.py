@@ -43,6 +43,7 @@ from . import (
     jobs,
     jobs_api,
     podcasts_api,
+    resolution,
     subscriptions_api,
     youtube_cookies_api,
 )
@@ -54,15 +55,10 @@ from .magnet import InvalidMagnet, infohash_from_magnet
 from .metadata import Metadata, Name, metadata_to_json
 from .netstatus import watchdog_view
 from .youtube import InvalidVideoUrl, ProbeError, YoutubeProbe, parse_video_url
-from .youtube_download import MAX_HEIGHTS
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
 from .youtube_jobs import YoutubeJobMetadata, YoutubeWorker, job_external_id
 
 logger = logging.getLogger(__name__)
-
-MAX_HEIGHT_DETAIL = "max_height must be 0 (best) or one of " + ", ".join(
-    str(height) for height in MAX_HEIGHTS[1:]
-)
 
 
 class MagnetRequest(BaseModel):
@@ -221,23 +217,33 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
     artist/album/title tags and the cover when audio only.
 
     Optional `max_height` (#47): 0 (best) or one of 2160, 1440, 1080, 720, 480, 360. It caps the
-    video stream of THIS job; missing = the server default (`YOUTUBE_MAX_HEIGHT`), and audio-only
-    downloads ignore it. Any other value is a 400.
+    video stream of THIS job; missing = the account's `default_max_height`, else the server
+    default (`YOUTUBE_MAX_HEIGHT`); audio-only downloads ignore it. Any other value is a 400.
+
+    The resolution right (#65): without `can_set_resolution` (and not an admin) the account may
+    not send a value other than the one that already applies to it; that is a 403 with a clear
+    message, never silently ignored. Admins may always choose.
 
     Optional `high_priority` (#51): true starts this job before normal queued downloads and holds
     normal work back while it runs.
     """
-    max_height = body.max_height
-    if max_height is not None and (
-        isinstance(max_height, bool)
-        or not isinstance(max_height, int)
-        or max_height not in MAX_HEIGHTS
-    ):
-        return problem(400, MAX_HEIGHT_DETAIL)
+    chosen = body.max_height
+    if chosen is not None and not resolution.valid(chosen):
+        return problem(400, resolution.DETAIL)
     db: Database | None = request.app.state.db
     worker: YoutubeWorker | None = request.app.state.youtube_worker
     if db is None or worker is None:
         return problem(503, "The database is not available; see /health.")
+    account = request.state.account
+    try:
+        max_height = resolution.for_download(
+            allowed=resolution.may_choose(account.is_admin, account.can_set_resolution),
+            default_max_height=account.default_max_height,
+            chosen=chosen,
+            server_default=request.app.state.settings.youtube_max_height,
+        )
+    except resolution.NotAllowed as error:
+        return problem(403, str(error))
     ref = parse_video_url(body.url)
     metadata = YoutubeJobMetadata(
         video_id=ref.video_id,
@@ -274,15 +280,26 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
 
 
 async def youtube_options(request: Request) -> JSONResponse:
-    """GET /api/youtube/options: the default resolution and the choices the form offers (#47).
+    """GET /api/youtube/options: the resolution of the logged-in account and the fixed choices.
 
-    200 {"max_height": 1080, "choices": [0, 2160, 1440, 1080, 720, 480, 360]}
+    200 {"max_height": 1080, "choices": [0, 2160, 1440, 1080, 720, 480, 360], "can_choose": true}
 
-    Read-only: `max_height` is `YOUTUBE_MAX_HEIGHT` from the environment (0 = best), and the page
-    preselects it. The list is fixed; no formats are fetched from YouTube.
+    `max_height` is the account's effective default (#65): its `default_max_height` when set,
+    else `YOUTUBE_MAX_HEIGHT` from the environment (0 = best). `can_choose` says whether the
+    account may pick a resolution at all (an admin always may); the page disables the dropdown
+    when it is false. The list is fixed; no formats are fetched from YouTube.
     """
+    account = request.state.account
     settings = request.app.state.settings
-    return JSONResponse({"max_height": settings.youtube_max_height, "choices": list(MAX_HEIGHTS)})
+    return JSONResponse(
+        {
+            "max_height": resolution.effective_default(
+                account.default_max_height, settings.youtube_max_height
+            ),
+            "choices": list(resolution.MAX_HEIGHTS),
+            "can_choose": resolution.may_choose(account.is_admin, account.can_set_resolution),
+        }
+    )
 
 
 async def vpn_status(request: Request) -> JSONResponse:
