@@ -274,6 +274,34 @@ def _abort(sock: socket.socket) -> None:
         sock.shutdown(socket.SHUT_RDWR)
 
 
+class _BodyDeadline:
+    """The overall deadline for reading a body, enforced in real time.
+
+    Checking the clock between reads is not enough: one `response.read(CHUNK)` waits until the
+    whole chunk has arrived, and each byte only has to beat the per-read timeout, so a server
+    that trickles its body a byte at a time could hold the thread for days. When the deadline
+    passes, a timer shuts the socket down, which ends the blocked read; `expired` then says why
+    (after a shutdown the read may look like a normal end of the answer).
+    """
+
+    def __init__(self, sock: socket.socket, seconds: float):
+        self.expired = threading.Event()
+
+        def expire() -> None:
+            self.expired.set()
+            _abort(sock)
+
+        self._timer = threading.Timer(max(0.0, seconds), expire)
+        self._timer.daemon = True
+
+    def __enter__(self) -> _BodyDeadline:
+        self._timer.start()
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._timer.cancel()
+
+
 def make_dialer(proxy: str = "", ssl_context: ssl.SSLContext | None = None) -> Dialer:
     """The real way to reach a checked address: directly, or through an HTTP proxy tunnel."""
     proxy_parts = urlsplit(proxy) if proxy else None
@@ -390,7 +418,7 @@ class SafeFetcher:
 
     def _request(
         self, target: Target, ip: str
-    ) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
+    ) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse, socket.socket]:
         sock = self._dial(target, ip)
         conn = http.client.HTTPConnection(target.host, target.port, timeout=READ_TIMEOUT)
         conn.sock = sock  # already connected (and TLS-wrapped for https) to the checked address
@@ -416,7 +444,7 @@ class SafeFetcher:
         timer.start()
         try:
             conn.request("GET", request_target, headers=headers)
-            return conn, conn.getresponse()
+            return conn, conn.getresponse(), sock
         except BaseException:
             conn.close()
             raise
@@ -424,19 +452,20 @@ class SafeFetcher:
             timer.cancel()
 
     def _open(self, url: str, kind: str):
-        """Follow redirects (each hop fully checked); returns (conn, response, final Target)."""
+        """Follow redirects (each hop fully checked); returns (conn, response, final Target,
+        content type, the connected socket)."""
         target = check_url(url)
         for _hop in range(MAX_REDIRECTS + 1):
             addresses = resolve_public(target, self._resolver, self._blocked_networks())
-            conn = response = None
+            conn = response = sock = None
             last_error: Exception | None = None
             for ip in addresses[:MAX_ADDRESSES_TRIED]:
                 try:
-                    conn, response = self._request(target, ip)
+                    conn, response, sock = self._request(target, ip)
                     break
                 except (OSError, http.client.HTTPException, ssl.SSLError) as error:
                     last_error = error
-            if response is None or conn is None:
+            if response is None or conn is None or sock is None:
                 logger.info(
                     "fetch failed",
                     extra={"host": target.host, "error": type(last_error).__name__},
@@ -470,7 +499,7 @@ class SafeFetcher:
                     "bad_response",
                     f"unexpected content type {content_type.split(';')[0][:60]!r}",
                 )
-            return conn, response, target, content_type
+            return conn, response, target, content_type, sock
         raise FetchError("bad_response", f"more than {MAX_REDIRECTS} redirects")
 
     @staticmethod
@@ -485,27 +514,33 @@ class SafeFetcher:
         self, url: str, *, kind: str, max_bytes: int, deadline_seconds: float = SMALL_DEADLINE
     ) -> Fetched:
         """A small answer (feed, cover) in memory, within `deadline_seconds` altogether."""
-        conn, response, target, content_type = self._open(url, kind)
+        conn, response, target, content_type, sock = self._open(url, kind)
         started = self._clock()
         chunks: list[bytes] = []
         size = 0
+        too_slow = FetchError("network", f"{target.host} answered too slowly")
         try:
             self._declared_size(response, max_bytes)
-            while True:
-                if self._clock() - started > deadline_seconds:
-                    raise FetchError("network", f"{target.host} answered too slowly")
-                try:
-                    chunk = response.read(CHUNK)
-                except (OSError, http.client.HTTPException):
-                    raise FetchError("network", f"{target.host} stopped answering") from None
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > max_bytes:
-                    raise FetchError(
-                        "too_large", f"the answer is larger than {max_bytes // 1024} KiB"
-                    )
-                chunks.append(chunk)
+            with _BodyDeadline(sock, deadline_seconds) as deadline:
+                while True:
+                    if deadline.expired.is_set() or self._clock() - started > deadline_seconds:
+                        raise too_slow
+                    try:
+                        chunk = response.read(CHUNK)
+                    except (OSError, http.client.HTTPException):
+                        if deadline.expired.is_set():
+                            raise too_slow from None
+                        raise FetchError("network", f"{target.host} stopped answering") from None
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise FetchError(
+                            "too_large", f"the answer is larger than {max_bytes // 1024} KiB"
+                        )
+                    chunks.append(chunk)
+                if deadline.expired.is_set():  # the "end" was the shutdown: a cut-off answer
+                    raise too_slow
         finally:
             conn.close()
         return Fetched(target.url, content_type, b"".join(chunks), size)
@@ -521,8 +556,9 @@ class SafeFetcher:
         progress: Callable[[int, int | None], None] | None = None,
     ) -> Fetched:
         """Stream a big answer into `destination` (which must not exist yet)."""
-        conn, response, target, content_type = self._open(url, kind)
+        conn, response, target, content_type, sock = self._open(url, kind)
         started = self._clock()
+        too_slow = FetchError("network", "the download took too long and was stopped")
         total_text = response.getheader("Content-Length")
         total = int(total_text) if total_text and total_text.isdigit() else None
         written = 0
@@ -533,13 +569,15 @@ class SafeFetcher:
             conn.close()
             raise
         try:
-            with out:
+            with out, _BodyDeadline(sock, deadline_seconds) as deadline:
                 while True:
-                    if self._clock() - started > deadline_seconds:
-                        raise FetchError("network", "the download took too long and was stopped")
+                    if deadline.expired.is_set() or self._clock() - started > deadline_seconds:
+                        raise too_slow
                     try:
                         chunk = response.read(CHUNK)
                     except (OSError, http.client.HTTPException):
+                        if deadline.expired.is_set():
+                            raise too_slow from None
                         raise FetchError(
                             "network", f"{target.host} stopped answering during the download"
                         ) from None
@@ -557,6 +595,8 @@ class SafeFetcher:
                     out.write(chunk)
                     if progress is not None:
                         progress(written, total)
+                if deadline.expired.is_set():  # the "end" was the shutdown: a cut-off file
+                    raise too_slow
             if total is not None and written < total:
                 raise FetchError("network", "the download ended early")
             if written == 0:
