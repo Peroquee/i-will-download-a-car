@@ -327,6 +327,49 @@ def test_a_season_in_the_file_name_wins_over_the_metadata(world):
     assert world.tree("Serien") == ["Tatort/Season 04/Tatort - S04E01.mkv"]
 
 
+# --- several seasons in one pack (#52) ----------------------
+
+
+def test_a_multi_season_pack_files_each_file_into_its_own_season(world):
+    world.make("pack/Tatort.S01E01.mkv", 1000)
+    world.make("pack/Tatort.S02E01.mkv", 1000)
+    world.run({"type": "series", "title": "Tatort", "season": "1-2"}, "pack")
+    assert world.tree("Serien") == [
+        "Tatort/Season 01/Tatort - S01E01.mkv",
+        "Tatort/Season 02/Tatort - S02E01.mkv",
+    ]
+
+
+def test_a_multi_season_pack_keeps_files_from_other_seasons(world):
+    """Packs often carry extras: a parsed season outside the chosen list is filed, not dropped."""
+    world.make("pack/Tatort.S01E01.mkv", 1000)
+    world.make("pack/Tatort.S04E01.mkv", 1000)
+    world.run({"type": "series", "title": "Tatort", "seasons": [1, 2]}, "pack")
+    assert world.tree("Serien") == [
+        "Tatort/Season 01/Tatort - S01E01.mkv",
+        "Tatort/Season 04/Tatort - S04E01.mkv",
+    ]
+
+
+def test_a_multi_season_pack_reads_the_season_from_a_folder(world):
+    world.make("pack/Season 1/E01.mkv", 1000)
+    world.make("pack/Season 2/E02.mkv", 1000)
+    world.run({"type": "series", "title": "Tatort", "seasons": [1, 2]}, "pack")
+    assert world.tree("Serien") == [
+        "Tatort/Season 01/Tatort - S01E01.mkv",
+        "Tatort/Season 02/Tatort - S02E02.mkv",
+    ]
+
+
+@pytest.mark.parametrize("name", ["pack/Bonus featurette.mkv", "pack/E01.mkv"])
+def test_a_multi_season_pack_never_guesses_a_missing_season(world, name):
+    world.make("pack/Tatort.S01E01.mkv", 1000)
+    world.make(name, 1000)
+    with pytest.raises(OrganizeError, match="could not find episode numbers"):
+        world.run({"type": "series", "title": "Tatort", "season": "1-2"}, "pack")
+    assert world.tree("Serien") == [], "nothing is filed from a pack whose season is unclear"
+
+
 def test_files_without_an_episode_number_are_skipped_and_none_at_all_is_an_error(world):
     world.make("pack/Tatort.S03E01.mkv", 1000)
     world.make("pack/Bonus featurette.mkv", 1000)

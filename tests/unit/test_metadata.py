@@ -21,10 +21,12 @@ from ytp.metadata import (
     Metadata,
     MovieMetadata,
     MusicMetadata,
+    SeasonSpecError,
     SeriesMetadata,
     metadata_from_json,
     metadata_to_json,
     parse_metadata,
+    parse_seasons,
     safe_path_component,
 )
 
@@ -55,7 +57,7 @@ def test_a_movie():
 def test_an_episode_and_a_season_pack():
     episode = parse_metadata(SERIES)
     assert isinstance(episode, SeriesMetadata)
-    assert (episode.season, episode.episode) == (3, 7)
+    assert (episode.seasons, episode.episode) == ([3], 7)
     pack = parse_metadata({k: v for k, v in SERIES.items() if k != "episode"})
     assert pack.episode is None
     assert parse_metadata({**SERIES, "episode": None}).episode is None
@@ -184,7 +186,7 @@ def test_true_is_not_a_year_or_a_season():
 @pytest.mark.parametrize("value", [1, 2, 99, 2024, 9999])
 def test_season_and_episode_in_range(value):
     parsed = parse_metadata({**SERIES, "season": value, "episode": value})
-    assert (parsed.season, parsed.episode) == (value, value)
+    assert (parsed.seasons, parsed.episode) == ([value], value)
 
 
 @pytest.mark.parametrize("value", [0, -1, 10000])
@@ -200,6 +202,117 @@ def _range(value: int) -> str:
 def test_episode_zero_is_not_a_season_pack():
     """A season pack has no episode (None); 0 is a mistake, not 'all of them'."""
     assert errors({**SERIES, "episode": 0}) == [("series.episode", "greater_than_equal")]
+
+
+# --- several seasons in one job (#52) ----------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("2", [2]),
+        (" 2 ", [2]),
+        ("1-3", [1, 2, 3]),
+        ("1,2,5", [1, 2, 5]),
+        ("1-3,5", [1, 2, 3, 5]),
+        (" 1 - 3 , 5 ", [1, 2, 3, 5]),
+        ("3,1,3", [1, 3]),
+        ("0", [0]),
+        ("999", [999]),
+        ("1000", [1000]),
+        ("2024", [2024]),
+        ("2020-2024", [2020, 2021, 2022, 2023, 2024]),
+        ("1-50", list(range(1, 51))),
+    ],
+)
+def test_a_season_spec_parses_to_a_sorted_unique_list(text, expected):
+    assert parse_seasons(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+        "x",
+        "1-",
+        "-2",
+        "3-1",
+        "1..3",
+        "1,",
+        ",2",
+        "1 2",
+        "10000",
+        "1-9999",
+        "1-51",
+        "0-50",
+        "-1",
+        "1.5",
+        "1;2",
+        "1" + chr(0x2013) + "3",  # an en dash is not the ASCII hyphen the spec uses
+        None,
+        5,
+    ],
+)
+def test_a_bad_season_spec_is_refused(text):
+    with pytest.raises(SeasonSpecError):
+        parse_seasons(text)
+
+
+def test_the_season_field_accepts_the_new_text_and_lists():
+    # No episode: several seasons plus one episode is refused (see the test below).
+    assert parse_metadata({"type": "series", "title": "T", "season": "1-3,5"}).seasons == [
+        1,
+        2,
+        3,
+        5,
+    ]
+    assert parse_metadata({"type": "series", "title": "T", "season": [5, 1, 3]}).seasons == [
+        1,
+        3,
+        5,
+    ]
+    assert parse_metadata({"type": "series", "title": "T", "seasons": [2, 1]}).seasons == [
+        1,
+        2,
+    ]
+
+
+@pytest.mark.parametrize(
+    "value", ["", "x", "10000", "1-9999", "0-50", [], ["1"], [10000], [1, True]]
+)
+def test_a_bad_season_field_is_a_season_invalid(value):
+    assert errors({**SERIES, "season": value}) == [("series.season", "season_invalid")]
+
+
+def test_an_episode_with_several_seasons_is_refused():
+    for season in ("1-3", "1,2,5", [1, 2]):
+        assert errors({"type": "series", "title": "T", "season": season, "episode": 5}) == [
+            ("series.episode", "episode_multi_season")
+        ]
+
+
+def test_an_episode_with_one_season_still_works():
+    for season in ("3", 3, [3]):
+        parsed = parse_metadata({"type": "series", "title": "T", "season": season, "episode": 7})
+        assert (parsed.seasons, parsed.episode) == ([3], 7)
+
+
+def test_a_multi_season_job_stores_the_list_and_no_single_season():
+    text = metadata_to_json(parse_metadata({"type": "series", "title": "T", "season": "1-3"}))
+    assert json.loads(text)["seasons"] == [1, 2, 3]
+    assert "season" not in json.loads(text)
+
+
+def test_old_and_new_stored_season_forms_read_the_same():
+    old = metadata_from_json('{"type":"series","title":"T","season":3}')
+    new = metadata_from_json('{"type":"series","title":"T","season":3,"seasons":[3]}')
+    multi = metadata_from_json('{"type":"series","title":"T","seasons":[1,2]}')
+    assert old.seasons == new.seasons == [3]
+    assert multi.seasons == [1, 2]
+    assert "season" not in json.loads(
+        metadata_to_json(parse_metadata({"type": "series", "title": "T", "season": "1-2"}))
+    )
 
 
 # --- names: one function decides ----------------------
@@ -306,7 +419,7 @@ def test_json_round_trip(data):
 def test_a_season_pack_has_no_episode_key_and_umlauts_stay_readable():
     pack = parse_metadata({"type": "series", "title": "Über uns", "season": 2})
     text = metadata_to_json(pack)
-    assert text == '{"season":2,"title":"Über uns","type":"series"}'
+    assert text == '{"season":2,"seasons":[2],"title":"Über uns","type":"series"}'
     assert metadata_from_json(text).episode is None
 
 

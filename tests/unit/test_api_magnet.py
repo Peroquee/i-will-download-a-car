@@ -109,7 +109,68 @@ def test_the_stored_metadata_is_the_normalised_json(client):
         "type": "series",
         "title": "Tatort",
         "season": 3,
+        "seasons": [3],
     }
+
+
+# --- several seasons in one series job (#52) ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("season", "expected", "single"),
+    [
+        ("1-3", [1, 2, 3], None),
+        ("1,2,5", [1, 2, 5], None),
+        ("1-3,5", [1, 2, 3, 5], None),
+        (" 1 - 3 ", [1, 2, 3], None),
+        ([1, 2, 5], [1, 2, 5], None),
+        ("2", [2], 2),
+        ([2], [2], 2),
+        ("0", [0], 0),
+        ("2024", [2024], 2024),
+        ("2020-2024", [2020, 2021, 2022, 2023, 2024], None),
+    ],
+)
+def test_a_season_spec_is_accepted_and_stored(client, fake, season, expected, single):
+    response = post(client, metadata={"type": "series", "title": "Tatort", "season": season})
+    assert response.status_code == 201
+    stored = json.loads(rows(client)[0]["metadata"])
+    assert stored["seasons"] == expected
+    assert stored.get("season") == single
+    assert ("season" in stored) is (single is not None)
+
+
+@pytest.mark.parametrize(
+    "season", ["", "x", "1-", "3-1", "0-50", "10000", "1-9999", "1,", [1, "x"], [10000], []]
+)
+def test_a_bad_season_spec_is_a_400_and_queues_nothing(client, fake, season):
+    response = post(client, metadata={"type": "series", "title": "Tatort", "season": season})
+    assert response.status_code == 400
+    assert "season" in response.json()["detail"].lower()
+    assert rows(client) == []
+    assert fake.calls("torrents/add") == []
+
+
+def test_an_episode_with_several_seasons_is_a_400_and_queues_nothing(client, fake):
+    response = post(
+        client,
+        metadata={"type": "series", "title": "Tatort", "season": "1-3", "episode": 7},
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"].lower()
+    assert "episode" in detail
+    assert "season" in detail
+    assert rows(client) == []
+    assert fake.calls("torrents/add") == []
+
+
+def test_a_single_season_with_an_episode_is_still_accepted(client, fake):
+    response = post(
+        client,
+        metadata={"type": "series", "title": "Tatort", "season": "3", "episode": 7},
+    )
+    assert response.status_code == 201
+    assert json.loads(rows(client)[0]["metadata"])["seasons"] == [3]
 
 
 # --- validation: field-level 422, nothing stored or sent ----------------------------------------

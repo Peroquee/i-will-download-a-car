@@ -42,12 +42,42 @@
     return /^\d+$/.test(value) ? parseInt(value, 10) : value;
   }
 
+  /* Seasons (#52): "2", "1-3", "1,2,5" or "1-3,5" -> sorted unique list, or null. Mirrors
+     ytp.metadata.parse_seasons; the server stays the judge. */
+  var MAX_SEASONS = 50;
+  function parseSeasons(text) {
+    var spec = String(text == null ? "" : text).trim();
+    if (spec === "") return null;
+    if (spec.length > 1000) return null;
+    var seen = {};
+    var count = 0;
+    var parts = spec.split(",");
+    for (var i = 0; i < parts.length; i++) {
+      var token = parts[i].trim();
+      var match = /^([0-9]+)\s*(?:-\s*([0-9]+))?$/.exec(token);
+      if (!match) return null;
+      var start = parseInt(match[1], 10);
+      var end = match[2] === undefined ? start : parseInt(match[2], 10);
+      if (start > end) return null;
+      for (var season = start; season <= end; season++) {
+        if (season > MAX_NUMBER) return null;
+        if (!seen[season]) {
+          seen[season] = true;
+          count += 1;
+          if (count > MAX_SEASONS) return null;
+        }
+      }
+    }
+    return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
+  }
+
   /* values: {title, year, season, episode, pack, author, artist, album} */
   function magnetMetadata(type, values) {
     var text = function (key) { return String(values[key] == null ? "" : values[key]).trim(); };
     if (type === "movies") return { type: type, title: text("title"), year: toNumber(values.year) };
     if (type === "series") {
-      var meta = { type: type, title: text("title"), season: toNumber(values.season) };
+      /* The season stays text here: it may be a range or a list, and the server parses it. */
+      var meta = { type: type, title: text("title"), season: text("season") };
       if (!values.pack && text("episode") !== "") meta.episode = toNumber(values.episode);
       return meta;
     }
@@ -147,11 +177,21 @@
     (REQUIRED[type] || []).forEach(function (key) {
       if (!String(values[key] == null ? "" : values[key]).trim()) errors[key] = "err.required";
     });
+    if (type === "series") {
+      var seasonSpec = String(values.season == null ? "" : values.season).trim();
+      var seasons = seasonSpec === "" ? null : parseSeasons(seasonSpec);
+      if (seasonSpec !== "" && !seasons) errors.season = "err.season_invalid";
+      /* An episode number names one episode of one season; several seasons are a pack. */
+      var episode = String(values.episode == null ? "" : values.episode).trim();
+      if (!values.pack && seasons && seasons.length > 1 && episode !== "") {
+        errors.episode = "err.episode_multi_season";
+      }
+    }
     var year = String(values.year == null ? "" : values.year).trim();
     if (type === "movies" && year !== "" && /^\d+$/.test(year) && (+year < MIN_YEAR || +year > nowYear + 1)) {
       errors.year = "err.year_out_of_range";
     }
-    ["year", "season", "episode"].forEach(function (key) {
+    ["year", "episode"].forEach(function (key) {
       var v = String(values[key] == null ? "" : values[key]).trim();
       if (v !== "" && !/^\d+$/.test(v) && !errors[key]) errors[key] = "err.int_parsing";
     });
@@ -324,6 +364,7 @@
     MAX_PODCAST_BACKFILL: MAX_PODCAST_BACKFILL,
     MAX_CHANNEL_BACKFILL: MAX_CHANNEL_BACKFILL,
     format: format,
+    parseSeasons: parseSeasons,
     magnetPayload: magnetPayload,
     youtubePayload: youtubePayload,
     subscribePayload: subscribePayload,
