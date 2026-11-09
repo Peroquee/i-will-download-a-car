@@ -761,6 +761,85 @@ def test_a_body_that_trickles_in_is_cut_off_by_the_deadline(world, server):
     assert "too slowly" in error.value.message
 
 
+def _trickling_server(head: bytes) -> tuple[int, threading.Event, socket.socket]:
+    """A server that sends `head` at once, then its body one byte every 0.1 s, for a long time."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    done = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        conn.recv(4096)
+        try:
+            conn.sendall(head)
+            for _ in range(600):  # a minute of trickle: far beyond the deadlines below
+                conn.sendall(b"x")
+                if done.wait(0.1):
+                    break
+        except OSError:
+            pass
+        conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return listener.getsockname()[1], done, listener
+
+
+@pytest.mark.security
+def test_a_real_body_trickle_is_cut_off_at_the_deadline_not_after_it():
+    """Regression (#67): the deadline was only checked between 64 KiB reads, and one read waits
+    for the whole chunk, so a byte-by-byte body held the thread far beyond the deadline. Without
+    a Content-Length the cut-off answer must not count as a complete feed either."""
+    port, done, listener = _trickling_server(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nConnection: close\r\n\r\n<rss>"
+    )
+    fetcher = SafeFetcher(
+        resolver=lambda h, p: [PUBLIC],
+        dialer=lambda target, ip: socket.create_connection(("127.0.0.1", port)),
+    )
+    started = time.monotonic()
+    try:
+        with pytest.raises(FetchError) as error:
+            fetcher.fetch_bytes(
+                "http://podcast.example/x", kind="feed", max_bytes=10**6, deadline_seconds=0.5
+            )
+    finally:
+        done.set()
+        listener.close()
+    assert error.value.kind == "network"
+    assert "too slowly" in error.value.message
+    assert time.monotonic() - started < 5
+
+
+@pytest.mark.security
+def test_a_real_download_trickle_is_cut_off_at_the_deadline_and_leaves_no_file(tmp_path):
+    port, done, listener = _trickling_server(
+        b"HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 100000\r\n\r\nID3"
+    )
+    fetcher = SafeFetcher(
+        resolver=lambda h, p: [PUBLIC],
+        dialer=lambda target, ip: socket.create_connection(("127.0.0.1", port)),
+    )
+    target = tmp_path / "e.mp3"
+    started = time.monotonic()
+    try:
+        with pytest.raises(FetchError) as error:
+            fetcher.download(
+                "http://podcast.example/e.mp3",
+                target,
+                kind="media",
+                max_bytes=10**6,
+                deadline_seconds=0.5,
+            )
+    finally:
+        done.set()
+        listener.close()
+    assert error.value.kind == "network"
+    assert "took too long" in error.value.message
+    assert time.monotonic() - started < 5
+    assert not target.exists()
+
+
 # --- the home network's own global addresses (DS-Lite: native global IPv6 on the LAN) ----------
 
 HOME_V6 = ipaddress.ip_network("2003:abcd:1200::/56")
