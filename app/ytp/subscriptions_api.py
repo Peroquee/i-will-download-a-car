@@ -24,13 +24,25 @@ POST /api/subscriptions
     404/403/502/504/429 {"detail", "kind"}: the lookup failed (see POST /api/youtube/probe)
 
 PATCH /api/subscriptions/{id}
-    {"max_height": 720|null}: change the channel's cap for new videos (#65); null = the server
-    default. The caller must follow the subscription (or be an admin) and may set a resolution
-    (see above): otherwise 404 / 403. 200 with the subscription; 400 for a bad value.
+    One or more of {"max_height": 720|null, "poll_minutes": 120|0|null, "poll_at": "06:00"|""|null}
+    (#65, #79); null = follow the server default (`GET /api/settings/defaults`).
+    * `max_height`: the cap for new videos (see above).
+    * `poll_minutes`: how often the channel's feed is looked at; 0 = paused (only "check now"
+      looks at it), otherwise 15..1440 minutes.
+    * `poll_at`: an optional start time of day, "HH:MM" in the server's time zone, that anchors
+      the interval; "" = none (even if the server has one). Every local day restarts at the start
+      time and steps by the interval until the next start time: "every 6 h from 06:00" is 06:00,
+      12:00, 18:00 and 00:00, "every 5 h from 06:00" is 06:00, 11:00, 16:00, 21:00, 02:00 and then
+      06:00 again. Without a start time the channel is due once the interval has passed since its
+      last check. A paused channel ignores it. See `ytp.poll_schedule`.
+    The caller must follow the subscription (or be an admin) and may set a resolution (see above;
+    the same right covers the interval): otherwise 404 / 403. 200 with the subscription; 400 for
+    a bad value. Subscriptions are shared: the values apply to everyone who follows it.
 
 GET /api/subscriptions
     {"subscriptions": [{id, channel_id, channel_name, channel_url, enabled, backfill, created_at,
                         last_checked, last_error, target, audio_only, max_height,
+                        poll_minutes, poll_at,
                         skipped: {count, by_reason: {live, premiere, short},
                                   recent: [{video_id, reason, title, published, skipped_at}]}},
                        ...]}
@@ -58,7 +70,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import accounts, resolution, seen_videos, skipped_videos, subscriptions
+from . import accounts, poll_schedule, resolution, seen_videos, skipped_videos, subscriptions
 from .apiutil import PROBE_STATUS, followed_view, may_use, problem
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
 from .feeds import FeedError
@@ -156,11 +168,9 @@ async def subscribe(body: SubscribeRequest, request: Request) -> JSONResponse:
 
 
 async def update_subscription(subscription_id: int, request: Request) -> JSONResponse:
-    """PATCH /api/subscriptions/{id} {"max_height": 720|null}: the channel's new-video cap (#65).
-
-    Only a follower (or an admin) may change it, and only with the resolution right (an admin
-    always has it). A subscription is shared: the value applies to everyone who follows it.
-    """
+    """PATCH /api/subscriptions/{id}: the channel's resolution cap, check interval and check time
+    (#65, #79); see the module description. Only a follower (or an admin) may change them, and
+    only with the resolution right (an admin always has it)."""
     db = request.app.state.db
     if db is None:
         return problem(503, "The database is not available; see /health.")
@@ -171,17 +181,33 @@ async def update_subscription(subscription_id: int, request: Request) -> JSONRes
         data = await request.json()
     except ValueError:
         return problem(422, "the request is not JSON")
-    if not isinstance(data, dict) or set(data) != {"max_height"}:
-        return problem(422, "send max_height")
-    value = data["max_height"]
-    if value is not None and not resolution.valid(value):
-        return problem(400, resolution.DETAIL)
+    if (
+        not isinstance(data, dict)
+        or not data
+        or not set(data) <= set(subscriptions.SETTINGS_COLUMNS)
+    ):
+        return problem(422, "send max_height, poll_minutes and/or poll_at")
+    changes: dict[str, object] = {}
+    if "max_height" in data:
+        if data["max_height"] is not None and not resolution.valid(data["max_height"]):
+            return problem(400, resolution.DETAIL)
+        changes["max_height"] = data["max_height"]
+    try:
+        changes.update(poll_schedule.check_poll_fields("channel", data))
+    except ValueError as error:
+        return problem(400, str(error))
     if not resolution.may_choose(account.is_admin, account.can_set_resolution):
-        return problem(403, resolution.NOT_ALLOWED)
-    fresh = await asyncio.to_thread(subscriptions.set_max_height, db, subscription_id, value)
+        return problem(
+            403,
+            resolution.NOT_ALLOWED if "max_height" in changes else resolution.SETTINGS_NOT_ALLOWED,
+        )
+    fresh = await asyncio.to_thread(subscriptions.update_settings, db, subscription_id, changes)
     if fresh is None:
         return problem(404, "no such subscription")
-    logger.info("subscription resolution changed", extra={"subscription_id": subscription_id})
+    logger.info(
+        "subscription settings changed",
+        extra={"subscription_id": subscription_id, "fields": sorted(changes)},
+    )
     return JSONResponse(fresh.as_dict())
 
 

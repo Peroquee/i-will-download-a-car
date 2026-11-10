@@ -63,6 +63,7 @@ def test_the_admin_only_routes_are_exactly_the_ones_that_manage_things():
         "/api/accounts/{account_id}",
         "/api/accounts/{account_id}/password",
         "/api/youtube/cookies",
+        "/api/settings/defaults",  # PATCH; reading the defaults is for every account (#79)
     }
 
 

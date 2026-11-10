@@ -22,7 +22,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -46,7 +46,7 @@ from .podcasts import (
     save_cover,
 )
 from .safefetch import FetchError
-from .subscription_poller import SubscriptionPoller, new_entries, spread_interval
+from .subscription_poller import SubscriptionPoller, new_entries
 
 logger = logging.getLogger(__name__)
 
@@ -302,8 +302,10 @@ class PodcastPoller(SubscriptionPoller):
     def _all(self) -> list[PodcastSubscription]:  # type: ignore[override]
         return podcast_subscriptions.list_all(self.db)
 
-    def _interval(self, sub: PodcastSubscription) -> timedelta:  # type: ignore[override]
-        return spread_interval(sub.feed_url, sub.last_error, self.poll_minutes)
+    kind = "podcast"
+
+    def _key(self, sub: PodcastSubscription) -> str:  # type: ignore[override]
+        return sub.feed_url
 
     def _record(self, sub: PodcastSubscription, error: str | None) -> None:  # type: ignore[override]
         podcast_subscriptions.record_poll(self.db, sub.id, error, self._now())

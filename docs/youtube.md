@@ -180,10 +180,13 @@ after that is the normal download path: job list, retry, filing, Jellyfin refres
   title and the publication time are taken; the feed must name the channel that was asked for.
   Titles are made safe as folder/file names (`/` and `\` become `-`, control characters go; the
   video id if nothing is left).
-- **How often:** `SUBSCRIPTION_POLL_MINUTES` (default **60**, 15 to 1440, `0` = never poll). Each
-  channel gets its own interval between 0.8 and 1.2 times that (fixed per channel, derived from
-  its id), so they drift apart, and the run pauses 3 to 8 seconds between two channels and takes at
-  most 20 per minute. After an error a channel is tried again after 10 minutes instead.
+- **How often:** the channel's own interval, else the server default (`SUBSCRIPTION_POLL_MINUTES`
+  is its initial value: default **60**, 15 to 1440, `0` = never poll; an admin can change it in the
+  app, see [Check interval and check time](#check-interval-and-check-time-79)). Without a check
+  time each channel gets its own interval between 0.8 and 1.2 times that (fixed per channel,
+  derived from its id), so they drift apart, and the run pauses 3 to 8 seconds between two channels
+  and takes at most 20 per minute. After an error a channel is tried again after 10 minutes
+  instead.
 - **First subscribe:** only videos published **after** subscribing are downloaded; the back
   catalogue never is. `backfill` (see Subscriptions above) is the exception, for the first poll
   only. A video published before the subscription never counts, however late it shows up.
@@ -380,3 +383,48 @@ The update cadence belongs to #30.
 
 The thumbnail is a YouTube address (`i.ytimg.com`): a browser that shows it contacts YouTube.
 Whether the form shows it that way or the app proxies it is a decision for the form (#25).
+
+## Check interval and check time (#79)
+
+How often a feed is looked at, per subscription and server-wide. Channels and podcasts work the
+same way; only the limits differ.
+
+| Setting | Values | Where |
+|---|---|---|
+| **Interval** (`poll_minutes`) | `0` = **paused**, or 15 to 1440 minutes for a channel, **30** to 1440 for a podcast (podcast hosts get the longer minimum, as `PODCAST_POLL_MINUTES` always had) | per subscription: `PATCH /api/subscriptions/{id}` and `PATCH /api/podcasts/{id}`; server-wide: `PATCH /api/settings/defaults` (`subscription_poll_minutes`, `podcast_poll_minutes`) |
+| **Check time** (`poll_at`) | optional start time of day `HH:MM`; `""` = none | the same places (`subscription_poll_at`, `podcast_poll_at` server-wide) |
+| **Resolution** (`max_height`, channels only) | `0` = best, or 2160, 1440, 1080, 720, 480, 360 | as before (#65); server-wide: `max_height` |
+
+- **Whose value counts:** the subscription's own value; `null` follows the server-wide default;
+  the server-wide default is what an admin saved, and until then the value from `.env`
+  (`YOUTUBE_MAX_HEIGHT`, `SUBSCRIPTION_POLL_MINUTES`, `PODCAST_POLL_MINUTES`), so an existing install
+  keeps working unchanged. A saved default takes effect at once, without a restart. For `poll_at`,
+  `""` on a subscription means "no start time" even when the server has one.
+- **Who may change them:** the interval and check time of a subscription: followers (and admins)
+  whose account may set resolutions (`can_set_resolution`, #65; an admin always may), like the
+  resolution. The server-wide defaults: admins only. Everyone signed in can read them
+  (`GET /api/settings/defaults`), so the Settings window can say what "server default" means now.
+- **Paused (`0`):** the schedule never looks at the subscription and ignores its check time. "Check
+  now" still works. Polling is paused for everything by a server default of `0`; a subscription's
+  own interval overrides that.
+- **Without a check time** a feed is due once its interval has passed since the last check (times a
+  fixed per-feed factor between 0.8 and 1.2, so feeds drift apart). A new subscription is checked
+  at once.
+- **With a check time** the due times are fixed clock times in the server's time zone (the
+  container's `TZ`; the API reports it as `timezone`). **Every local day restarts at the check
+  time and steps by the interval until the next check time.**
+  - Every 6 h from 06:00: 06:00, 12:00, 18:00 and 00:00.
+  - Every 24 h from 18:00: once a day at 18:00.
+  - Every 5 h from 06:00 (does not divide 24 h): 06:00, 11:00, 16:00, 21:00, 02:00, and then 06:00
+    again (the last step of the day is shorter), so a day's times never depend on the day before.
+  - A feed is due when such a time has passed since its last check (if several passed, for example
+    after a restart, it is checked once). Checking late never shifts the later times.
+  - **Daylight-saving days:** the steps are clock steps, so on the days the clocks change the times
+    stay 06:00/12:00/18:00/00:00 on the clock. A clock time that does not exist that day (02:30
+    when the clocks jump from 02:00 to 03:00) is taken as 03:30; one that exists twice is taken at
+    its first occurrence; either way it fires once.
+- **After an error** a feed is tried again after 10 minutes (or its interval, if that is shorter),
+  with or without a check time.
+- **Where the decision lives:** `app/ytp/poll_schedule.py` (`decide()`, a pure function of the
+  settings, the last check and "now"); the poller only calls it. The server-wide values are in
+  `app/ytp/server_defaults.py` (stored in `app_state`).

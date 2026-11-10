@@ -3,3 +3,6 @@
 2b8b9530139bf3f01dede4e63544599acc089e18:tests/helpers/installer.py:generic-api-key:26
 2b8b9530139bf3f01dede4e63544599acc089e18:tests/unit/test_installer_logic.py:generic-api-key:202
 2b8b9530139bf3f01dede4e63544599acc089e18:tests/unit/test_installer_flow.py:generic-api-key:169
+# A channel id used as a test value (a variable that was called KEY; the same id is public and used
+# all over the tests as CID). Renamed in the next commit; the first commit stays in the history.
+e9264abdb89b3351329dd20bcab6f1b956a866f2:tests/unit/test_poll_schedule.py:generic-api-key:15
