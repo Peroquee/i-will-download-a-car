@@ -568,6 +568,116 @@ def the_storage_bar_draws_its_segments_in_a_real_browser(ctx):
         page.goto(BASE + "/dashboard")
 
 
+def border_width(page, selector: str, side: str) -> float:
+    """The computed border width of an element, in px (0 if it has no such border)."""
+    prop = "borderTopWidth" if side == "top" else "borderBottomWidth"
+    return page.eval_on_selector(selector, f"el => parseFloat(getComputedStyle(el).{prop}) || 0")
+
+
+RUNNING_JOB = {
+    "id": 9001,
+    "label": "A running download",
+    "status": "downloading",
+    "kind": "youtube",
+    "progress": 42,
+    "done_bytes": 1000,
+    "total_bytes": 2000,
+    "speed": 100,
+    "eta": 10,
+    "high_priority": False,
+}
+
+FINISHED_JOBS = {
+    "jobs": [{
+        "id": 9000, "label": "An old download", "status": "done", "kind": "youtube",
+        "updated_at": "2026-11-02T08:00:00Z", "dismissed": False, "note": None,
+        "can_retry": False, "high_priority": False,
+    }],
+    "counts": {"queued": 0, "downloading": 0, "organizing": 0, "done": 1, "failed": 0,
+               "dismissed": 0},
+}  # fmt: skip
+
+
+def dashboard_answer(active: list) -> dict:
+    return {
+        "active": active,
+        "recent": [],
+        "dismissed": 0,
+        "vpn": {"current": {"state": "ok", "since": "2026-11-02T08:00:00Z"}, "history": []},
+        "disk": None,
+        "deploy": None,
+        "backlogs": [],
+    }
+
+
+@check
+def separator_lines_only_sit_between_sections(ctx):
+    """Issue #83: a line separates two sections. It never starts the input form or a dashboard
+    tab, never ends a list, and never doubles next to an element that has its own border (the
+    status rail). Measured as computed border widths, with a faked dashboard with and without a
+    running job (as in the storage-bar check above)."""
+    page = ctx.page
+    state = {"active": [RUNNING_JOB]}
+    page.route(
+        "**/api/dashboard*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(dashboard_answer(state["active"])),
+        ),
+    )
+    page.route(
+        "**/api/jobs*",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(FINISHED_JOBS)
+        ),
+    )
+    try:
+        # Jobs tab with a running job: exactly one line between Running and Finished, from the
+        # Finished section; the last running and the last finished job carry none themselves.
+        page.goto(BASE + "/dashboard#jobs")
+        expect(page.locator("#dash-active-list li")).to_have_count(1, timeout=15000)
+        expect(page.locator("#dash-recent-list li")).to_have_count(1, timeout=15000)
+        assert border_width(page, "#dash-jobs-view > section:first-child", "top") == 0
+        assert border_width(page, "#dash-active-list li:last-child", "bottom") == 0
+        assert border_width(page, "#dash-jobs-view > section:last-of-type", "top") > 0
+        assert border_width(page, "#dash-recent-list li:last-child", "bottom") == 0
+
+        # Jobs tab without a running job: the same one line (the empty note adds none).
+        state["active"] = []
+        expect(page.locator("#dash-active-empty")).to_be_visible(timeout=15000)
+        expect(page.locator("#dash-active-list li")).to_have_count(0)
+        assert border_width(page, "#dash-active-empty", "bottom") == 0
+        assert border_width(page, "#dash-jobs-view > section:last-of-type", "top") > 0
+
+        # Overview: no line under the tab bar and none before the Alerts section; the rail keeps
+        # its own card border, and the summaries after it keep their separating lines.
+        page.goto(BASE + "/dashboard#overview")
+        expect(page.locator("#dash-status")).to_be_visible(timeout=15000)
+        assert border_width(page, "#dash-tabs", "bottom") == 0
+        assert border_width(page, "#dash-status", "top") > 0
+        assert border_width(page, "#dash-alert-summary", "top") == 0
+        assert border_width(page, "#dash-jobs-summary", "top") > 0
+        assert border_width(page, "#dash-storage", "top") > 0
+
+        # The first section of the VPN and Alerts tabs starts without a line too.
+        for anchor, selector in (("#vpn", "#dash-vpn"), ("#alerts", "#alerts")):
+            page.goto(BASE + "/dashboard" + anchor)
+            expect(page.locator(selector)).to_be_visible(timeout=15000)
+            assert border_width(page, selector, "top") == 0, selector
+
+        # Input page: the visible field panel is the first section, so it starts without a line;
+        # separators are borders only, never an <hr>.
+        page.goto(BASE + "/")
+        expect(page.locator("#youtube-fields")).to_be_visible(timeout=15000)
+        assert border_width(page, "#youtube-fields", "top") == 0
+        assert page.evaluate("document.querySelectorAll('hr').length") == 0
+    finally:
+        page.unroute("**/api/dashboard*")
+        page.unroute("**/api/jobs*")
+        page.goto(BASE + "/dashboard")
+
+
 @check
 def no_script_errors_failed_requests_or_bad_static_answers(ctx):
     assert not ctx.problems, "; ".join(ctx.problems)

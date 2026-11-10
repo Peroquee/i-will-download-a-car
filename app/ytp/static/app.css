@@ -125,8 +125,10 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus, button:foc
   border-color: rgba(201, 162, 39, 0.55);
 }
 input[aria-invalid="true"] { border-color: var(--bad); }
-/* Sections are separated by a line, not framed with a rounded outline (#53). */
+/* Sections are separated by a line, not framed with a rounded outline (#53). The field panels
+   of the input form are the first section there: nothing above them needs a line (#83). */
 .panel { display: grid; gap: 12px; padding: 14px 0 0; border-top: 1px solid var(--line); }
+form > .panel { border-top: 0; }
 .type-fields { display: grid; gap: 12px; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
@@ -174,7 +176,10 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .result:empty { display: none; }
 .result.ok { color: var(--good); }
 .result.bad { color: var(--bad); }
-.jobs { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
+/* A job list is a section: the line separates it from the section above, never starts a tab
+   and never ends the last item (#83). */
+.jobs { margin-top: 22px; padding-top: 16px; }
+.jobs + .jobs { border-top: 1px solid var(--line); }
 .jobs-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .jobs-title { font-size: 17px; font-weight: 600; margin: 0; }
 /* The name of the page, about twice the size of the section headings (#58). */
@@ -189,6 +194,8 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 }
 .job-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 0; }
 .job { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+/* Nothing ends a list with a line (#83). */
+.job:last-child { border-bottom: 0; }
 /* A failed job gets a red flag on the left; the red status and the reason already say it (#53). */
 .job-failed { border-left: 3px solid var(--bad); padding-left: 10px; }
 .job-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
@@ -319,7 +326,7 @@ body.modal-open { overflow: hidden; }
 .dashboard { margin-top: 8px; }
 
 /* The dashboard has tabs for overview, jobs, VPN details and the alert log (#62). */
-.dash-tabs { display: flex; gap: 4px; margin: 4px 0 18px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.dash-tabs { display: flex; gap: 4px; margin: 4px 0 18px; overflow-x: auto; }
 .dash-tab { flex: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; font-size: 14px; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; }
 .dash-tab:hover { color: var(--ink); }
 .dash-tab[aria-current="page"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--gold); }
@@ -337,6 +344,12 @@ body.modal-open { overflow: hidden; }
 .status-state { display: block; font-size: 21px; line-height: 1.2; font-weight: 650; overflow-wrap: anywhere; }
 .status-detail { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .dash-summary { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+/* The status rail is its own bordered band; a second line right below it is noise (#83). For
+   an admin the Alerts summary comes first; a user does not have it (data-admin-only hides it
+   in CSS), so their first summary is the Jobs one. Either way the first summary gets no line. */
+.dash-status + .dash-summary,
+.dash-summary[hidden] + .dash-summary,
+body:not([data-role="admin"]) .dash-status + .dash-summary + .dash-summary { border-top: 0; }
 .summary-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .summary-link { font-size: 13px; color: var(--gold); text-decoration: none; }
 .summary-link:hover { text-decoration: underline; }

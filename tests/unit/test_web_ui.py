@@ -360,6 +360,36 @@ def test_the_page_is_flat_and_a_failed_job_is_flagged_not_framed():
     assert "background" not in failed
 
 
+def test_separator_lines_only_sit_between_sections():
+    """Issue #83: no line starts the input form or a dashboard tab, none ends a list, and the
+    status rail's own border never doubles with a separator next to it."""
+    first_fields = re.search(r"form > \.panel \{[^}]*\}", CSS).group(0)
+    assert "border-top: 0" in first_fields
+    jobs = re.search(r"\.jobs \{[^}]*\}", CSS).group(0)
+    assert "border" not in jobs, "a tab's first section must not start with a line"
+    between = re.search(r"\.jobs \+ \.jobs \{[^}]*\}", CSS).group(0)
+    assert "border-top: 1px solid var(--line)" in between
+    trailing = re.search(r"\.job:last-child \{[^}]*\}", CSS).group(0)
+    assert "border-bottom: 0" in trailing
+    tabs = re.search(r"\.dash-tabs \{[^}]*\}", CSS).group(0)
+    assert "border" not in tabs, "the status rail below already brings its own border"
+    summaries = re.search(
+        r"\.dash-status \+ \.dash-summary,\s*\.dash-summary\[hidden\] \+ \.dash-summary,\s*"
+        r'body:not\(\[data-role="admin"\]\) \.dash-status \+ \.dash-summary \+ \.dash-summary '
+        r"\{[^}]*\}",
+        CSS,
+    ).group(0)
+    assert "border-top: 0" in summaries
+    # the rail itself is a bordered card, not a separator: its border stays
+    rail = re.search(r"\.dash-status \{[^}]*\}", CSS).group(0)
+    assert "border-top: 1px solid var(--line)" in rail
+    assert "border-bottom: 1px solid var(--line)" in rail
+    # separators are drawn by CSS only: no <hr>, and the lists are empty in the markup
+    assert not re.search(r"<hr\b", HTML)
+    for list_id in ("dash-active-list", "dash-recent-list"):
+        assert re.search(rf'<ul id="{list_id}"[^>]*></ul>', HTML), list_id
+
+
 def test_every_input_has_a_label():
     ids = re.findall(r'<(?:input|select)[^>]*\bid="([\w-]+)"', HTML)
     for input_id in ids:
