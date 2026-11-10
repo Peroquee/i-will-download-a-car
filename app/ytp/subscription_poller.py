@@ -166,12 +166,15 @@ class SubscriptionPoller:
         """What spreads the intervals: the same subscription always gets the same factor."""
         return sub.channel_id
 
-    def schedule_of(self, sub: Subscription) -> Schedule:
-        """The effective interval and start time: the subscription's own, else the server's."""
+    def default_schedule(self) -> Schedule:
+        """The server-wide interval and start time for this kind (read from the database)."""
         if self.defaults is not None:
-            default = self.defaults.schedule(self.kind)
-        else:
-            default = Schedule(self.poll_minutes)
+            return self.defaults.schedule(self.kind)
+        return Schedule(self.poll_minutes)
+
+    def schedule_of(self, sub: Subscription, default: Schedule | None = None) -> Schedule:
+        """The effective interval and start time: the subscription's own, else the server's."""
+        default = default or self.default_schedule()
         return effective(sub.poll_minutes, sub.poll_at, default.minutes, default.at)
 
     def _record(self, sub: Subscription, error: str | None) -> None:
@@ -182,6 +185,7 @@ class SubscriptionPoller:
     def due(self) -> list[Subscription]:
         """Enabled subscriptions that are due; never-checked first, then the longest ago."""
         now = self._now()
+        default = self.default_schedule()  # read once per tick, not once per subscription
         result: list[tuple[datetime, Subscription]] = []
         for sub in self._all():
             if not sub.enabled:
@@ -191,7 +195,7 @@ class SubscriptionPoller:
                 now=now,
                 last_checked=checked,
                 last_error=sub.last_error,
-                schedule=self.schedule_of(sub),
+                schedule=self.schedule_of(sub, default),
                 key=self._key(sub),
                 zone=self.zone,
             )
