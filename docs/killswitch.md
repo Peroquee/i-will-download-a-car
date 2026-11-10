@@ -81,7 +81,7 @@ torrents it paused.
 | `HOME IP LEAK` | the network setup is wrong (qBittorrent not in gluetun's namespace, firewall rule changed) | **stop downloading**, `docker compose stop qbittorrent`, compare `docker-compose.yml` with the repository, fix, re-run |
 | step 3 never recovers | netwatch did not restart qBittorrent | `docker restart qbittorrent`; check `docker compose logs qbittorrent` for netwatch lines; `docker compose ps` shows qBittorrent `unhealthy` while its namespace is dead |
 | exit 2, "stack not ready" | gluetun or the watchdog is not healthy | `docker compose ps`; the VPN credentials or `make vpn-config` are the usual cause ([host-setup.md](host-setup.md)) |
-| abuse test: watchdog never `down` | no read-only key, or `QBIT_PASSWORD` empty | `make watchdog-key`, set `QBIT_PASSWORD` in `.env`, `docker compose up -d --force-recreate gluetun watchdog` |
+| abuse test: watchdog never `down` | no read-only key, or `QBIT_PASSWORD` empty | `make watchdog-key`, set `QBIT_PASSWORD` in `.env`, `docker compose up -d --force-recreate gluetun qbittorrent watchdog` |
 | abuse test: `no connection` never seen in a cycle | the outage was shorter than the probe interval, so the window was not really observed | lower `AB_PROBE_INTERVAL` (default 0.5 s); the probe is `curl` run inside the qBittorrent container |
 
 Settings of both scripts (all optional) are environment variables listed in

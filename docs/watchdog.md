@@ -29,10 +29,18 @@ watchdog ──every second──► gluetun:8000  GET /v1/vpn/status, GET /v1/p
    VPN blocks all traffic). Mode 600, never in Git, never printed. Re-running keeps the key, adds
    routes a file written by an older version lacks, and `--rotate` makes a new key. After an
    update of a running install: `make watchdog-key`, then the `--force-recreate` below.
-3. `docker compose up -d --force-recreate gluetun watchdog` (gluetun reads its auth file only at
-   start; `up -d` builds the watchdog from the app image).
-4. `docker compose ps`: the watchdog must be `healthy`. If it says `unhealthy`, look at
-   `docker compose logs watchdog`.
+3. `docker compose up -d --force-recreate gluetun qbittorrent watchdog` (gluetun reads its auth file
+   only at start; `up -d` builds the watchdog from the app image). **qBittorrent must be in the
+   list:** it runs inside gluetun's network namespace (`network_mode: service:gluetun`), and a
+   recreated gluetun is a new container with a new namespace, so a qBittorrent that is not
+   recreated with it exits and stays down. (A plain `docker restart gluetun` is different: the
+   container stays the same and qBittorrent re-attaches by itself, see `netwatch`.)
+4. `docker compose ps`: gluetun, qbittorrent and the watchdog must be `healthy`. If the watchdog
+   says `unhealthy`, look at `docker compose logs watchdog`.
+
+`make watchdog-key` keeps the owner, group and mode of `.env` and of the auth file when it rewrites
+them (also under `sudo`: `.env` stays readable by the VM user); a file it creates is mode 600 and
+belongs to the owner of its folder.
 
 Gluetun's control server stays private: all its routes need authentication, the port is not
 published, and only containers on the stack's bridge network can reach it.

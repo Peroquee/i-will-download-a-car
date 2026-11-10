@@ -95,7 +95,9 @@ services:
       WEBUI_PORT: "8080"
     # Unhealthy while the container's network namespace is dead (gluetun was restarted
     # as the same container). The watcher below then stops the container so that
-    # `restart: unless-stopped` re-attaches it to gluetun's new namespace.
+    # `restart: unless-stopped` re-attaches it to gluetun's new namespace. A RECREATED gluetun
+    # (docker compose up --force-recreate gluetun) is a new container: qbittorrent has to be
+    # recreated with it (list it in the command), or it stays down.
     healthcheck:
       test: ["CMD", "/custom-services.d/netwatch", "--check"]
       interval: 30s

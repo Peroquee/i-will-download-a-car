@@ -18,12 +18,14 @@ Usage:
 Safe to re-run: an existing key in .env is kept (the TOML file is rewritten from it, so they
 cannot drift apart, and a file written by an older version gains new routes); --rotate
 makes a new one. The key is never printed. Gluetun reads the file only at start: run
-`docker compose up -d --force-recreate gluetun watchdog` afterwards.
+`docker compose up -d --force-recreate gluetun qbittorrent watchdog` afterwards (qBittorrent lives
+in gluetun's network namespace and must be recreated with it, or it stays down).
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import secrets
@@ -68,15 +70,45 @@ def apply_setting(text: str, key: str, value: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _nearest_existing(path: Path) -> Path:
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return path
+
+
+def _copy_owner(path: Path, reference: os.stat_result) -> None:
+    """Give `path` the owner and group of `reference`. Only root can give a file to somebody else;
+    for everyone else (who writes files they own anyway) a refusal is fine."""
+    with contextlib.suppress(OSError):
+        os.chown(path, reference.st_uid, reference.st_gid)
+
+
 def write_private(path: Path, text: str) -> None:
-    """Write via a temp file in the same folder; keep an existing mode, else 600."""
+    """Write via a temp file in the same folder; keep an existing file's mode, owner and group.
+
+    Run with sudo, a rewrite must not turn `.env` into root's file: the VM user could not read it
+    any more and `docker compose` without sudo would fail (#81). A NEW file gets mode 600 and the
+    owner and group of the folder it is created in (so do the folders this creates)."""
+    if path.exists():
+        reference = path.stat()
+        mode = reference.st_mode & 0o777
+    else:
+        reference = _nearest_existing(path.parent).stat()
+        mode = 0o600
+    missing = []
+    folder = path.parent
+    while not folder.exists() and folder.parent != folder:
+        missing.append(folder)
+        folder = folder.parent
     path.parent.mkdir(parents=True, exist_ok=True)
-    mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
+    for made in missing:
+        _copy_owner(made, reference)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
     tmp.chmod(mode)
+    _copy_owner(tmp, reference)  # before the rename: the file is never visible with another owner
     tmp.replace(path)
 
 
@@ -104,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     write_private(args.auth_file, TOML.format(key=key))
     write_private(args.env_file, apply_setting(existing, KEY_NAME, key))
     print(f"{action}; wrote {args.auth_file} (mode 600) and {KEY_NAME} in {args.env_file}")
-    print("Apply it: docker compose up -d --force-recreate gluetun watchdog")
+    print("Apply it: docker compose up -d --force-recreate gluetun qbittorrent watchdog")
     return 0
 
 
