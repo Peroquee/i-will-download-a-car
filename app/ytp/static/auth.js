@@ -307,9 +307,10 @@
       var select = el("select");
       select.id = "accounts-resolution-" + row.id;
       label.setAttribute("for", select.id);
-      [["", "accounts.resolution_default"], ["0", "yt.resolution_best"]]
-        .concat([2160, 1440, 1080, 720, 480, 360].map(function (height) {
-          return [String(height), "yt.resolution_" + height];
+      var choices = typeof ctx.resolutionChoices === "function" ? ctx.resolutionChoices() : [];
+      [["", "accounts.resolution_default"]]
+        .concat(choices.map(function (height) {
+          return [String(height), height === 0 ? "yt.resolution_best" : "yt.resolution_" + height];
         }))
         .forEach(function (choice) {
           var option = el("option", null, t(choice[1]));

@@ -928,6 +928,31 @@ def test_a_tunnel_that_is_not_connected_is_shown_as_such_not_as_running(
 
 @needs_node
 @pytest.mark.parametrize(
+    "status",
+    [
+        {"state": "ok"},
+        {"state": "ok", "egress": "ok", "tunnel": "connected"},
+        {"state": "ok", "egress": "mismatch"},
+        {"state": "unknown", "egress": "mismatch"},
+        {"state": "weird", "egress": "mismatch"},
+        {"state": "down", "egress": "mismatch"},
+        {"state": "down", "cause": "tunnel", "tunnel": "reconnecting"},
+        {"state": "blind"},
+        {"state": "starting"},
+        {"state": "weird"},
+        {"state": "ok", "tunnel": "reconnecting"},
+        {},
+    ],
+)
+def test_the_vpn_bar_rule_matches_the_server(status):
+    """#75: monitor.vpn_view and Logic.vpnView answer the same, so the two copies cannot drift."""
+    from ytp.monitor import vpn_view
+
+    assert run_node(f"L.vpnView({json.dumps(status)}).view") == vpn_view(status)
+
+
+@needs_node
+@pytest.mark.parametrize(
     ("view", "cause", "key"),
     [
         ("down", "tunnel", "vpn.d.tunnel"), ("down", "stopped", "vpn.d.down"),
@@ -1248,13 +1273,32 @@ def test_the_page_has_the_target_choice_and_the_audio_checkbox():
     assert 'id="yt-audio-row" hidden' in HTML, "audio only is offered only for podcast episodes"
 
 
-def test_the_page_has_the_fixed_resolution_choices():
+def test_the_resolution_choices_come_from_the_server_not_the_markup():
+    """#75: /api/youtube/options sends the fixed choices; every list on the page is built from
+    them, so a new height is a server change and no page file keeps its own copy."""
     select = re.search(r'<select id="yt-resolution".*?</select>', HTML, re.S)
     assert select
-    assert re.findall(r'<option value="(\d+)"', select.group(0)) == [
-        "0", "2160", "1440", "1080", "720", "480", "360",
-    ]  # fmt: skip
+    assert "<option" not in select.group(0), "the markup has no built-in choices"
     assert 'id="yt-resolution-row"' in HTML
+    for source in (APP_JS, AUTH_JS):
+        assert "2160, 1440, 1080" not in source, "a hardcoded resolution list came back"
+    assert '<option value="2160"' not in HTML
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("choices", "expected"),
+    [
+        ([0, 2160, 1440, 1080, 720, 480, 360], [0, 2160, 1440, 1080, 720, 480, 360]),
+        ([0, 720], [0, 720]),
+        ([0, "2160", -1, 1.5, 720], [0, 720]),
+        ([], []),
+        (None, []),
+        ("0, 720", []),
+    ],
+)
+def test_the_resolution_choices_are_taken_from_the_server(choices, expected):
+    assert run_node(f"L.resolutionChoices({json.dumps(choices)})") == expected
 
 
 @needs_node

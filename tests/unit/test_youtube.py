@@ -467,6 +467,24 @@ def test_a_bad_address_is_a_field_level_422_and_ytdlp_is_not_called(tmp_path, ur
     assert seen == []
 
 
+@pytest.mark.parametrize("url", ["https://vimeo.com/1", "not a url", ""])
+def test_probe_and_download_share_the_same_video_url_check(url):
+    """#75: one validator for both request bodies; the two cannot drift apart."""
+    from pydantic import ValidationError
+
+    from ytp.api import DownloadRequest, ProbeRequest
+
+    for model, extra in (
+        (ProbeRequest, {}),
+        (DownloadRequest, {"channel": "Kanal", "title": "Titel"}),
+    ):
+        with pytest.raises(ValidationError) as raised:
+            model(url=url, **extra)
+        (error,) = raised.value.errors()
+        assert error["loc"] == ("url",)
+        assert error["type"] == "video_url_invalid"
+
+
 @pytest.mark.parametrize(
     "body", [{}, {"url": 5}, {"url": f"https://youtu.be/{ID}", "extra": 1}, []]
 )

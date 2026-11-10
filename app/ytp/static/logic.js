@@ -452,6 +452,14 @@
     return (Array.isArray(alerts) ? alerts : []).filter(function (a) { return a && !a.acknowledged; }).slice(0, max);
   }
 
+  /* The resolution choices `/api/youtube/options` sends (#75): whole numbers, 0 = best, in the
+     server's order. Anything that is not one is dropped, never invented. */
+  function resolutionChoices(choices) {
+    return (Array.isArray(choices) ? choices : []).filter(function (value) {
+      return typeof value === "number" && value >= 0 && Math.floor(value) === value;
+    });
+  }
+
   return {
     formatBytes: formatBytes,
     formatSpeed: formatSpeed,
@@ -461,6 +469,7 @@
     alertIdFromHash: alertIdFromHash,
     alertTexts: alertTexts,
     stripAlerts: stripAlerts,
+    resolutionChoices: resolutionChoices,
     age: age,
     kindKey: kindKey,
     jobsSummary: jobsSummary,

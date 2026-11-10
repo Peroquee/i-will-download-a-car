@@ -27,13 +27,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import PydanticCustomError
 
 from . import (
@@ -114,27 +121,28 @@ async def add_magnet(body: MagnetRequest, request: Request) -> JSONResponse:
     return JSONResponse({**summary, "duplicate": False}, status_code=201)
 
 
+def _video_url(value: str) -> str:
+    """A single-video YouTube address, as the API takes it (probe and download, #75)."""
+    try:
+        parse_video_url(value)
+    except InvalidVideoUrl as exc:
+        raise PydanticCustomError("video_url_invalid", "{reason}", {"reason": str(exc)}) from exc
+    return value
+
+
+VideoUrl = Annotated[str, AfterValidator(_video_url)]
+
+
 class ProbeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    url: str
-
-    @field_validator("url")
-    @classmethod
-    def _video_url(cls, value: str) -> str:
-        try:
-            parse_video_url(value)
-        except InvalidVideoUrl as exc:
-            raise PydanticCustomError(
-                "video_url_invalid", "{reason}", {"reason": str(exc)}
-            ) from exc
-        return value
+    url: VideoUrl
 
 
 class DownloadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    url: str
+    url: VideoUrl
     # The names the user confirmed (the probe suggests them): they become folder and file names.
     # For target "podcast" `channel` is the podcast and `title` the episode (issue #35).
     channel: Name
@@ -159,17 +167,6 @@ class DownloadRequest(BaseModel):
         if self.album is not None and self.target != "music":
             raise PydanticCustomError("album_invalid", "An album is only for music")
         return self
-
-    @field_validator("url")
-    @classmethod
-    def _video_url(cls, value: str) -> str:
-        try:
-            parse_video_url(value)
-        except InvalidVideoUrl as exc:
-            raise PydanticCustomError(
-                "video_url_invalid", "{reason}", {"reason": str(exc)}
-            ) from exc
-        return value
 
 
 async def youtube_probe(body: ProbeRequest, request: Request) -> JSONResponse:

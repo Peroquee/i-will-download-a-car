@@ -76,6 +76,23 @@ def test_app_state_is_a_key_value_store_with_upsert(database):
     assert database.query("SELECT COUNT(*) FROM app_state")[0][0] == 1
 
 
+def test_the_app_state_helpers_live_in_the_database_module():
+    """#75: one copy serves every module; the scheduler no longer owns them."""
+    from ytp import db as db_module
+    from ytp import scheduler
+
+    assert scheduler.get_state is db_module.get_state
+    assert scheduler.set_state is db_module.set_state
+
+
+def test_no_module_imports_app_state_from_the_scheduler():
+    from ytp import accounts, jobs, monitor, reconciler, storage
+
+    for module in (accounts, jobs, monitor, reconciler, storage):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "from .scheduler import" not in source, module.__name__
+
+
 def test_the_migration_creates_app_state_without_touching_the_first_tables(database):
     names = {r[0] for r in database.query("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"jobs", "subscriptions", "app_state", "schema_migrations"} <= names

@@ -311,6 +311,25 @@ def test_without_a_database_the_list_is_a_503(tmp_path):
 # --- the retry ---
 
 
+@pytest.mark.parametrize(
+    ("job_type", "external_id", "metadata"),
+    [
+        ("youtube", VIDEO, YT),
+        ("podcast", "episode-1", {"type": "podcast", "podcast": "Cast", "title": "One"}),
+    ],
+)
+def test_retrying_a_download_job_takes_the_same_path_for_both_types(
+    client, job_type, external_id, metadata
+):
+    """#75: one {job type: worker} lookup; a third download type must not copy the block."""
+    db = client.app.state.db
+    job, _ = jobs.submit_job(db, job_type, external_id, json.dumps(metadata))
+    jobs.mark_failed(db, job.id, "boom")
+    response = client.post(f"/api/jobs/{job.id}/retry")
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+
+
 def test_retrying_a_failed_magnet_queues_it_again_and_hands_it_to_qbittorrent(client, fake):
     job = add_magnet_job(client, status="failed", error="qBittorrent was down")
     response = client.post(f"/api/jobs/{job.id}/retry")

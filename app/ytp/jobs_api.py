@@ -238,8 +238,13 @@ async def retry_job(job_id: int, request: Request):
     if job.status != "failed":
         return problem(409, "only a failed job can be retried", job.id)
     metadata_json = json.dumps(job.metadata)
-    if job.type == YOUTUBE_JOB_TYPE:
-        worker = request.app.state.youtube_worker
+    # The download queues look the same from here; only the worker is different (#75).
+    download_workers = {
+        YOUTUBE_JOB_TYPE: request.app.state.youtube_worker,
+        PODCAST_JOB_TYPE: request.app.state.podcast_worker,
+    }
+    if job.type in download_workers:
+        worker = download_workers[job.type]
         if worker is None:
             return problem(503, "the download worker is not running", job.id)
         queued, outcome = await asyncio.to_thread(
@@ -248,17 +253,6 @@ async def retry_job(job_id: int, request: Request):
         if outcome != "requeued":
             return problem(409, "only a failed job can be retried", job.id)
         worker.wake()
-        return summarize(queued, {}, {})
-    if job.type == PODCAST_JOB_TYPE:
-        podcast_worker = request.app.state.podcast_worker
-        if podcast_worker is None:
-            return problem(503, "the download worker is not running", job.id)
-        queued, outcome = await asyncio.to_thread(
-            jobs.submit_job, db, job.type, job.external_id, metadata_json
-        )
-        if outcome != "requeued":
-            return problem(409, "only a failed job can be retried", job.id)
-        podcast_worker.wake()
         return summarize(queued, {}, {})
     if job.type != "magnet":
         return problem(409, "this kind of job cannot be retried", job.id)

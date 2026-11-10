@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from .db import Database
+from .timeutil import now_text
 
 MAX_PODCASTS = 100
 MAX_BACKFILL = 20
@@ -148,9 +149,7 @@ def record_poll(
     reason (None clears it)."""
     message = None if error is None else error[:MAX_ERROR_LENGTH]
     moment = when or datetime.now(UTC)
-    stamp = (
-        moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
-    )
+    stamp = now_text(moment)
     with db.transaction() as conn:
         conn.execute(
             "UPDATE podcast_subscriptions SET last_checked = ?, last_error = ?, "

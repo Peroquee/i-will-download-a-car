@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote, urlsplit
 
-from . import __version__
+from . import __version__, timeutil
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 YT = "{http://www.youtube.com/xml/schemas/2015}"
@@ -84,11 +84,7 @@ class FeedEntry:
 
 def parse_time(text: str) -> datetime | None:
     """An ISO 8601 time (`...Z` or with an offset) as aware UTC; None if it is not one."""
-    try:
-        value = datetime.fromisoformat(text.strip())
-    except (ValueError, AttributeError):
-        return None
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return timeutil.parse_time_or_none(text)
 
 
 def read_xml(data: bytes, max_bytes: int) -> ET.Element:

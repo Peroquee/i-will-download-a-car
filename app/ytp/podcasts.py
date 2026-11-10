@@ -34,6 +34,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import timeutil
 from .feeds import FeedError, read_xml
 from .metadata import sanitize_name
 from .safefetch import FetchError, SafeFetcher, check_url, is_jpeg, is_png
@@ -123,10 +124,7 @@ def parse_date(text: str) -> datetime | None:
     try:
         parsed = parsedate_to_datetime(value)
     except (TypeError, ValueError, IndexError):
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            return None
+        return timeutil.parse_time_or_none(value)
     if parsed is None:
         return None
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)

@@ -29,7 +29,7 @@ import shutil
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ from .config import Settings
 from .db import Database
 from .podcast_jobs import JOB_TYPE, PodcastWorker, episode_metadata
 from .podcasts import Podcast, episode_filename
+from .timeutil import now_text
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ _COPY = re.compile(r" \(\d+\)$")
 def on_disk(stems: set[str], published: str, title: str) -> bool:
     """Is there a file for this episode in the podcast's folder? The name is the one the app gives
     (`<date> - <title>`, shortened, with ` (2)` for a clash); the extension does not matter."""
-    wanted = episode_filename(datetime.fromisoformat(published).date(), title, "")
+    wanted = episode_filename(date.fromisoformat(published), title, "")
     return any(stem == wanted or _COPY.sub("", stem) == wanted for stem in stems)
 
 
@@ -453,7 +454,7 @@ class BacklogFeeder:
                 )
 
     def _forget_old(self) -> None:
-        cutoff = (self._now() - timedelta(days=KEEP_FINISHED_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+        cutoff = now_text(self._now() - timedelta(days=KEEP_FINISHED_DAYS))
         with self.db.transaction() as conn:
             conn.execute(
                 "DELETE FROM podcast_backlogs WHERE state IN ('done', 'cancelled') "

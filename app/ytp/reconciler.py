@@ -52,9 +52,9 @@ from pathlib import Path
 
 from . import jobs
 from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError, QbitUnavailable, Torrent
-from .db import Database
+from .db import Database, get_state, set_state
 from .jobs import Job
-from .scheduler import get_state, set_state
+from .timeutil import now_text, parse_time, parse_time_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ class Reconciler:
                 logger.exception(
                     "reconciler: job could not be reconciled", extra={"job_id": job.id}
                 )
-        set_state(self.db, KEY_LAST_OK, self._now().strftime("%Y-%m-%dT%H:%M:%SZ"))
+        set_state(self.db, KEY_LAST_OK, now_text(self._now()))
         return result
 
     # ------------------------------------------------------------------ one job
@@ -205,7 +205,7 @@ class Reconciler:
         if self._previous_ok is False:
             stored = get_state(self.db, KEY_LAST_OK)
             try:
-                self._previous_ok = _parse(stored) if stored else None
+                self._previous_ok = parse_time(stored) if stored else None
             except ValueError:
                 self._previous_ok = None
         previous = self._previous_ok
@@ -218,7 +218,7 @@ class Reconciler:
         if self._stall_seconds is None:
             return
         now = self._now()
-        since = _parse_or_none(job.progress_at)
+        since = parse_time_or_none(job.progress_at)
         done = torrent.bytes_done
         age = (now - since).total_seconds() if since is not None else None
         if since is None or self._after_gap:
@@ -233,7 +233,7 @@ class Reconciler:
             self._give_up(job, torrent, result)
 
     def _remember(self, job: Job, done: int, now: datetime) -> None:
-        jobs.record_progress(self.db, job.id, done, now.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+        jobs.record_progress(self.db, job.id, done, now_text(now))
 
     def _give_up(self, job: Job, torrent: Torrent, result: RunResult) -> None:
         days = max(1, round(self._stall_seconds / 86400))
@@ -275,7 +275,7 @@ class Reconciler:
 
     def _missing(self, job: Job, result: RunResult) -> None:
         if job.status == "queued":
-            age = (self._now() - _parse(job.created_at)).total_seconds()
+            age = (self._now() - parse_time(job.created_at)).total_seconds()
             if age < self._queued_grace:
                 return  # being added right now
             self._fail(
@@ -337,15 +337,3 @@ class Reconciler:
                 "job failed",
                 extra={"job_id": job.id, "infohash": job.external_id, "reason": reason},
             )
-
-
-def _parse_or_none(timestamp: str | None) -> datetime | None:
-    try:
-        return _parse(timestamp) if timestamp else None
-    except ValueError:
-        return None
-
-
-def _parse(timestamp: str) -> datetime:
-    """The UTC ISO text SQLite stores ('2026-11-01T05:00:00.123Z')."""
-    return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))

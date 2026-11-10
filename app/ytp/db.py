@@ -273,3 +273,20 @@ class Database:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+def get_state(db: Database, key: str) -> str | None:
+    """A value of the small `app_state` key/value store (used by the scheduler, #12, #75)."""
+    rows = db.query("SELECT value FROM app_state WHERE key = ?", (key,))
+    return rows[0]["value"] if rows else None
+
+
+def set_state(db: Database, key: str, value: str) -> None:
+    """Write a value to `app_state` together with the time it was written."""
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO app_state (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            (key, value),
+        )

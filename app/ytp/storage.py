@@ -30,18 +30,13 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .db import Database
-from .scheduler import get_state, set_state
+from .db import Database, get_state, set_state
+from .timeutil import now_text
 
 logger = logging.getLogger(__name__)
 
 CACHE_KEY = "storage.sizes"
 DEBOUNCE_SECONDS = 5.0  # a burst of finished downloads is one walk
-
-
-def _iso(moment: datetime) -> str:
-    moment = moment.astimezone(UTC)
-    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
 def _tree_size(root: Path, seen: set[tuple[int, int]]) -> int:
@@ -99,7 +94,12 @@ def compute_sizes(
         )
         used = sum(categories.values()) + downloads  # "other" unknown: do not invent it
     other = max(0, used - sum(categories.values()) - downloads)
-    return {"at": _iso(started), "categories": categories, "downloads": downloads, "other": other}
+    return {
+        "at": now_text(started),
+        "categories": categories,
+        "downloads": downloads,
+        "other": other,
+    }
 
 
 def cached(db: Database) -> dict[str, Any] | None:

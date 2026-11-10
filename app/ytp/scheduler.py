@@ -40,7 +40,8 @@ from apscheduler.events import (
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .db import Database
+from .db import Database, get_state, set_state
+from .timeutil import now_text
 
 logger = logging.getLogger(__name__)
 
@@ -49,25 +50,6 @@ HEARTBEAT_JOB_ID = "heartbeat"
 STALE_AFTER_HEARTBEATS = 3  # health turns red after this many missed heartbeats
 KEY_LAST_HEARTBEAT = "scheduler.last_heartbeat"
 KEY_STARTED_AT = "scheduler.started_at"
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-
-def set_state(db: Database, key: str, value: str) -> None:
-    with db.transaction() as conn:
-        conn.execute(
-            "INSERT INTO app_state (key, value) VALUES (?, ?) "
-            "ON CONFLICT (key) DO UPDATE SET value = excluded.value, "
-            "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-            (key, value),
-        )
-
-
-def get_state(db: Database, key: str) -> str | None:
-    rows = db.query("SELECT value FROM app_state WHERE key = ?", (key,))
-    return rows[0]["value"] if rows else None
 
 
 class AppScheduler:
@@ -106,7 +88,7 @@ class AppScheduler:
             raise RuntimeError("a stopped AppScheduler cannot be started again; make a new one")
         self.previous_heartbeat = get_state(self.db, KEY_LAST_HEARTBEAT)
         self._started_at = self._clock()
-        set_state(self.db, KEY_STARTED_AT, _now_iso())
+        set_state(self.db, KEY_STARTED_AT, now_text())
         self.add_interval_job(
             self._heartbeat, job_id=HEARTBEAT_JOB_ID, seconds=self.heartbeat_seconds,
             run_immediately=True,
@@ -164,7 +146,7 @@ class AppScheduler:
         return [job.id for job in self._scheduler.get_jobs()]
 
     def _heartbeat(self) -> None:
-        set_state(self.db, KEY_LAST_HEARTBEAT, _now_iso())
+        set_state(self.db, KEY_LAST_HEARTBEAT, now_text())
         self._last_heartbeat = self._clock()
 
     # -- health ----------------------------------------------------------------------------

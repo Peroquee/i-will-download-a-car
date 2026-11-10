@@ -18,6 +18,7 @@ from ytp.monitor import (
     AlertMonitor,
     disk_summary,
     vpn_condition,
+    vpn_view,
 )
 from ytp.scheduler import get_state, set_state
 
@@ -72,15 +73,40 @@ def kinds(db):
         ({"state": "ok"}, "ok"),
         ({"state": "ok", "egress": "mismatch"}, "mismatch"),
         ({"state": "unknown", "egress": "mismatch"}, "mismatch"),
+        # an unreadable state counts as unknown, so the egress probe still wins (#75)
+        ({"state": "weird", "egress": "mismatch"}, "mismatch"),
         ({"state": "down", "egress": "mismatch"}, "down"),
         ({"state": "blind"}, "blind"),
         ({"state": "starting"}, "starting"),
         ({"state": "weird"}, "unknown"),
+        # a reconnecting tunnel is no condition change for the alerts (#81; the bar shows it)
+        ({"state": "ok", "tunnel": "reconnecting"}, "ok"),
         ({}, "unknown"),
     ],
 )
 def test_the_condition_follows_the_vpn_bar(status, expected):
     assert vpn_condition(status) == expected
+    assert vpn_condition(status) in ("ok", "down", "blind", "mismatch", "starting", "unknown")
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ({"state": "ok"}, "ok"),
+        ({"state": "ok", "egress": "mismatch"}, "mismatch"),
+        ({"state": "unknown", "egress": "mismatch"}, "mismatch"),
+        ({"state": "weird", "egress": "mismatch"}, "mismatch"),
+        ({"state": "down", "egress": "mismatch"}, "down"),
+        ({"state": "blind"}, "blind"),
+        ({"state": "starting"}, "starting"),
+        ({"state": "weird"}, "unknown"),
+        ({"state": "ok", "tunnel": "reconnecting"}, "reconnecting"),
+        ({"state": "down", "tunnel": "reconnecting"}, "down"),
+        ({}, "unknown"),
+    ],
+)
+def test_the_bar_view_adds_reconnecting_to_the_conditions(status, expected):
+    assert vpn_view(status) == expected
 
 
 def history(db):

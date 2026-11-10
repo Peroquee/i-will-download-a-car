@@ -143,6 +143,44 @@ def test_the_resolution_dropdown_follows_a_configured_default():
 
 
 @needs_node
+def test_every_resolution_list_is_built_from_the_server_choices():
+    choices = [0, 1080, 720]
+    options = {"max_height": 720, "choices": choices, "can_choose": True}
+    input_page = page(
+        "/",
+        answers={"/api/youtube/options": options},
+        steps=[
+            {"read": "#yt-resolution"},
+            {"read": "#yt-sub-resolution"},
+            {"click": "#account-open"},
+            {"read": "#account-resolution"},
+        ],
+    )
+    assert input_page["errors"] == [], input_page["errors"]
+    assert input_page["reads"]["#yt-resolution"]["value"] == "720"
+    for selector in ("#yt-resolution", "#yt-sub-resolution", "#account-resolution"):
+        text = input_page["reads"][selector]["text"]
+        assert "1080p (Full HD)" in text, (selector, text)
+        assert "720p (HD)" in text, (selector, text)
+        for gone in ("2160", "1440", "480", "360"):
+            assert gone not in text, (selector, gone, text)
+    accounts_page = page(
+        "/accounts",
+        answers={
+            "/api/youtube/options": options,
+            "/api/accounts": {"accounts": [ACCOUNT, {**USER_ACCOUNT, "last_login": None}]},
+        },
+        steps=[{"read": "#accounts-resolution-2"}],
+    )
+    assert accounts_page["errors"] == [], accounts_page["errors"]
+    text = accounts_page["reads"]["#accounts-resolution-2"]["text"]
+    assert "1080p (Full HD)" in text, text
+    assert "720p (HD)" in text, text
+    for gone in ("2160", "1440", "480", "360"):
+        assert gone not in text, (gone, text)
+
+
+@needs_node
 def test_the_resolution_dropdown_is_hidden_for_podcast_and_audio_only():
     video = page("/", steps=[{"read": "#yt-resolution-row"}])
     assert video["errors"] == [], video["errors"]
