@@ -99,6 +99,7 @@ class Reconciler:
         qbit: QbitClient,
         organize: Organizer | None = None,
         *,
+        on_organized: Callable[[], None] | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         queued_grace_seconds: float = QUEUED_GRACE_SECONDS,
         stall_seconds: float | None = None,
@@ -108,6 +109,7 @@ class Reconciler:
         self.db = db
         self.qbit = qbit
         self.organize = organize
+        self._on_organized = on_organized  # the dashboard's storage sizes want a new walk (#82)
         self._now = now
         self._queued_grace = queued_grace_seconds
         self._stall_seconds = stall_seconds if stall_seconds and stall_seconds > 0 else None
@@ -318,6 +320,8 @@ class Reconciler:
             if jobs.transition(self.db, job.id, "done", expected=("organizing",), note=note):
                 result.done.append(job.id)
                 logger.info("job done", extra={"job_id": job.id, "infohash": job.external_id})
+                if self._on_organized is not None:
+                    self._on_organized()
 
     def _fail(
         self,

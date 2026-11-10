@@ -401,7 +401,7 @@ def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
     expect(page.locator("#dash-tab-alerts")).to_be_hidden()
     page.click("#dash-tab-vpn")
     expect(page.locator("#dash-vpn")).to_be_visible()
-    expect(page.locator("#dash-disk")).to_be_hidden()
+    expect(page.locator("#dash-storage")).to_be_hidden()
     expect(page.locator("#dash-vpn-list")).to_be_hidden()
     expect(page.locator("#dash-error")).to_have_text("")
     page.goto(BASE + "/accounts")

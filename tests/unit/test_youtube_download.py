@@ -498,6 +498,15 @@ def test_jobs_run_one_at_a_time_oldest_first(world):
     assert world.status(second.id)[0] == "queued"
 
 
+def test_a_finished_download_asks_for_new_storage_sizes(world):
+    """The dashboard's storage bar is recomputed after every finished download (#82)."""
+    calls = []
+    world.submit()
+    world.worker(on_done=lambda: calls.append(1)).run_one()
+    assert world.status()[0] == "done"
+    assert calls == [1]
+
+
 def test_a_library_folder_that_is_missing_fails_the_job_readably(world):
     world.submit()
     (world.data / "Youtube").rmdir()
