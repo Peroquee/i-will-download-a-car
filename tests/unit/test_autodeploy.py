@@ -951,9 +951,17 @@ def test_migrations_only_add_in_one_release():
     (it keeps every row and id, tested in test_podcast_migration); a new exception must be added
     here on purpose, with a reason. 0013 has a DELETE FROM only inside a trigger that clears the
     new job_dismissals table: it touches no existing data, and the previous version never reads
-    that table, so it still runs on the new schema."""
-    allowed = {"0005_podcasts.sql"}
-    allowed_words = {"0013_job_dismissals.sql": {"DELETE FROM"}}
+    that table, so it still runs on the new schema. 0018 (#72) rebuilds jobs, alerts,
+    podcast_backlog_items and vpn_events to add CHECK constraints: it keeps every column (same
+    names, types, defaults and order), row and id, and only adds CHECKs that the previous
+    release already satisfies (priority is written as 0/1 only, params/metadata are json.dumps
+    of a dict, vpn events only carry the fixed condition set); it also drops two indexes that
+    the previous release never names. Its DELETE FROM is the re-created trigger from 0013."""
+    allowed = {"0005_podcasts.sql", "0018_indexes_and_constraints.sql"}
+    allowed_words = {
+        "0013_job_dismissals.sql": {"DELETE FROM"},
+        "0018_indexes_and_constraints.sql": {"DELETE FROM"},
+    }
     risky = ("DROP TABLE", "DROP COLUMN", "DROP INDEX", "RENAME TO", "RENAME COLUMN", "DELETE FROM")
     offenders = []
     for path in sorted((ROOT / "app/ytp/migrations").glob("*.sql")):
