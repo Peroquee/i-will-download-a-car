@@ -488,6 +488,32 @@ def test_the_vpn_status_card_uses_the_state_colour(state, tone):
 
 
 @needs_node
+def test_the_status_card_says_when_the_tunnel_is_not_connected_although_gluetun_runs():
+    base = {"last_poll": "2026-11-10T13:37:00Z", "egress": "ok", "paused": True}
+    down = smoke(
+        "/dashboard",
+        "",
+        vpn={**base, "state": "down", "cause": "tunnel", "tunnel": "down",
+             "tunnel_since": "2026-11-10T13:33:00Z"},
+    )  # fmt: skip
+    card = down["nodes"]["status-vpn"]
+    assert "state-bad" in card["cls"]
+    assert "down - downloads paused" in down["nodes"]["status-vpn-state"]["text"]
+    detail = down["nodes"]["status-vpn-detail"]["text"]
+    assert "nothing goes through the tunnel" in detail
+    assert "Downloads are paused until the VPN is back." not in detail, "not the stopped-VPN text"
+    reconnecting = smoke(
+        "/dashboard",
+        "",
+        vpn={**base, "state": "ok", "paused": False, "tunnel": "reconnecting",
+             "tunnel_since": "2026-11-10T13:33:00Z"},
+    )  # fmt: skip
+    assert "state-warn" in reconnecting["nodes"]["status-vpn"]["cls"]
+    assert reconnecting["nodes"]["status-vpn-state"]["text"] == "VPN reconnecting"
+    assert "tunnel is not connected yet" in reconnecting["nodes"]["status-vpn-detail"]["text"]
+
+
+@needs_node
 def test_the_subscriptions_tab_is_the_current_one_when_its_anchor_is_open():
     out = smoke("/", "#subscriptions")
     assert out["nodes"]["nav-subs"]["attrs"].get("aria-current") == "page"

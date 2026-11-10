@@ -70,6 +70,13 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | `WATCHDOG_INTERVAL` | `1` | no | Seconds between polls of the VPN status (0.2 to 60). |
 | `WATCHDOG_THRESHOLD` | `3` | no | Failed polls in a row before torrents are paused (1 to 60). |
 | `WATCHDOG_RESUME_AFTER` | `0` | no | Seconds the VPN must stay up before paused torrents are resumed; `0` = never automatically, you resume them. |
+| `WATCHDOG_TUNNEL_GRACE` | `180` | no | Seconds a tunnel that is not connected while gluetun says `running` may take to come back before it counts as an outage (0 to 3600; #81). |
+| `TUNNEL_PROBE_PROXY` | `http://gluetun:8888` | no | The proxy the tunnel probe goes through. **Set but empty** = no probe. |
+| `TUNNEL_PROBE_TARGETS` | `1.1.1.1:443,8.8.8.8:443` | no | `host:port` list the probe tries in turn (TCP connect only); one success is enough. |
+| `TUNNEL_PROBE_INTERVAL` | `10` | no | Seconds between probes (5 to 3600); `0` = off. |
+| `TUNNEL_PROBE_CONFIRM` | `2` | no | Failed probes in a row before the probe counts (1 to 10). |
+| `WATCHDOG_RESTART_AFTER` | `900` | no | Seconds of dead tunnel (gluetun says `running`) before the watchdog restarts the VPN through gluetun's control server; `0` = never, otherwise at least 120. Needs the PUT route in the key (`make watchdog-key`). |
+| `WATCHDOG_RESTART_MAX` | `5` | no | Restarts per outage, the wait doubling each time (1 to 50). |
 | `ALERT_URL` | empty | no, **secret** | Where alerts go (an ntfy topic URL or a webhook). **Empty = no alerts**; nothing leaves the LAN unless you set it. |
 | `ALERT_TOKEN` | empty | no, **secret** | Optional, sent as `Authorization: Bearer ...`. |
 | `ALERT_FORMAT` | `ntfy` | no | `ntfy` or `webhook`. |
@@ -133,7 +140,7 @@ All optional; they only change how the scripts behave, never the stack.
 | Variable | Used by | Meaning |
 |---|---|---|
 | `KS_COMPOSE`, `KS_IP_URL`, `KS_POLL_SECONDS`, `KS_HEALTHY_TIMEOUT`, `KS_RECOVERY_TIMEOUT` | `make killswitch-test` | Compose command, the "what is my IP" URL, poll pause and timeouts ([killswitch.md](killswitch.md)). |
-| `AB_COMPOSE`, `AB_PROBE_URL`, `AB_PROBE_INTERVAL`, `AB_POLL_SECONDS`, `AB_DETECT_TIMEOUT`, `AB_HEALTHY_TIMEOUT`, `AB_RECOVERY_TIMEOUT` | `make vpn-abuse-test` | The same for the abuse test. |
+| `AB_COMPOSE`, `AB_PROBE_URL`, `AB_PROBE_INTERVAL`, `AB_POLL_SECONDS`, `AB_DETECT_TIMEOUT`, `AB_HEALTHY_TIMEOUT`, `AB_RECOVERY_TIMEOUT`, `AB_OUTER_IF`, `AB_TUNNEL_DETECT_TIMEOUT`, `AB_TUNNEL_RECOVERY_TIMEOUT`, `AB_RESTART_EXTRA` | `make vpn-abuse-test`, `make tunnel-test` | The same for the abuse test and the tunnel scenario (#81). |
 | `RT_COMPOSE`, `RT_IP_URL` | `make recovery-prepare` / `recovery-verify` | The compose command (default `docker compose`) and the "what is my IP" URL asked from the host for the home address (default `https://api.ipify.org`; never printed). |
 | `YTP_BACKUP_DIR` | `make backup`, `create-layout.sh`, `check-host.sh` | Folder for the archives. Default `<DATA_ROOT>/.youtube-premium-backups` (on the media drive, mode 700; see [operations.md](operations.md#where-the-backups-go-decided-on-the-media-drive)). Can also be set in `.env`. |
 | `YTP_PYPI_JSON` | `make update-check` | Another JSON source than PyPI (tests). |

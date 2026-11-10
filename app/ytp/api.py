@@ -309,6 +309,13 @@ async def vpn_status(request: Request) -> JSONResponse:
     `state` is ok, down, blind (the watchdog cannot read the VPN status), starting, or unknown
     (the watchdog does not answer). Always 200: "unknown" is an answer, not an error.
 
+    Since #81 the watchdog's own answer also says WHY and whether the tunnel is connected, besides
+    gluetun's "running": `cause` (stopped | unreachable | tunnel, empty while up), `tunnel`
+    (connected | reconnecting | down | unknown), `tunnel_since`, `probe` (off | unknown | ok |
+    failing), `restart` (off | armed | denied) and `restarts`. `reconnecting` is still `state: ok`
+    (a few minutes' grace); `state: down` with `cause: tunnel` is the process running while the
+    tunnel is dead. None of it holds an address.
+
     The dashboard's two independent signals are added next to the unchanged watchdog fields
     (issue #63):
 

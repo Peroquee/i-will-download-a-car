@@ -48,10 +48,16 @@ def test_creates_a_key_in_both_places_and_they_match(files):
 
 
 @pytest.mark.security
-def test_the_role_may_read_the_vpn_status_and_the_public_address_and_nothing_else(files):
+def test_the_role_has_exactly_the_three_routes_it_needs_and_nothing_else(files):
+    """Status and public address are reads; the PUT only stops or starts the VPN (#81 restart)."""
     run(files)
     (role,) = tomllib.loads(files[1].read_text())["roles"]
-    assert role["routes"] == ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+    assert role["routes"] == [
+        "GET /v1/vpn/status",
+        "GET /v1/publicip/ip",
+        "PUT /v1/vpn/status",
+    ]
+    assert not [r for r in role["routes"] if "settings" in r or "dns" in r or "updater" in r]
 
 
 def test_modes_the_env_keeps_and_the_auth_file_is_private(files):
@@ -136,5 +142,74 @@ def test_an_auth_file_from_an_older_version_gains_the_new_route_on_rerun(files):
     )
     run(files)
     role = tomllib.loads(auth.read_text())["roles"][0]
-    assert role["routes"] == ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+    assert role["routes"] == [
+        "GET /v1/vpn/status",
+        "GET /v1/publicip/ip",
+        "PUT /v1/vpn/status",
+    ]
     assert role["apikey"] == key == key_in_env(env)
+
+
+# --- owner, group and mode survive a rewrite (#81: sudo made .env root's file) -----------------
+
+
+def test_a_rewrite_gives_the_new_file_the_owner_and_group_of_the_old_one(files, monkeypatch):
+    env, auth = files
+    run(files)  # the auth file now exists too
+    chowned = []
+    monkeypatch.setattr(
+        mod.os, "chown", lambda path, uid, gid: chowned.append((Path(path), uid, gid))
+    )
+    old = env.stat()
+    run(files)
+    by_name = {path.name: (uid, gid) for path, uid, gid in chowned}
+    assert by_name[".env.tmp"] == (old.st_uid, old.st_gid), "set before the rename"
+    assert by_name["config.toml.tmp"] == (auth.stat().st_uid, auth.stat().st_gid)
+    assert stat.S_IMODE(env.stat().st_mode) == 0o640, "the mode of the old file, not 600"
+
+
+def test_the_owner_is_copied_before_the_file_replaces_the_old_one(files, monkeypatch):
+    env, _ = files
+    seen = []
+
+    def fake_chown(path, uid, gid):
+        seen.append((Path(path).name, env.read_text()))  # what .env holds at this moment
+
+    monkeypatch.setattr(mod.os, "chown", fake_chown)
+    run(files)
+    env_step = next(text for name, text in seen if name == ".env.tmp")
+    assert "GLUETUN_CONTROL_APIKEY=changeme" in env_step, "still the old file when the owner is set"
+    assert key_in_env(env) != "changeme", "and replaced afterwards"
+
+
+def test_a_new_auth_file_and_its_folders_take_the_owner_of_the_folder_above(files, monkeypatch):
+    _, auth = files
+    chowned = []
+    monkeypatch.setattr(
+        mod.os, "chown", lambda path, uid, gid: chowned.append((Path(path), uid, gid))
+    )
+    run(files)
+    parent = auth.parents[2].stat()  # tmp_path: the folder that existed
+    made = {path.name: (uid, gid) for path, uid, gid in chowned}
+    for name in ("config", "gluetun", "auth", "config.toml.tmp"):
+        assert made[name] == (parent.st_uid, parent.st_gid), name
+    assert stat.S_IMODE(auth.stat().st_mode) == 0o600, "a new file is private"
+
+
+def test_a_refused_chown_is_not_an_error(files, monkeypatch):
+    """A user who is not root cannot give a file away; the rewrite must still work."""
+
+    def refuse(path, uid, gid):
+        raise PermissionError("not allowed")
+
+    monkeypatch.setattr(mod.os, "chown", refuse)
+    assert run(files) == 0
+    assert key_in_env(files[0]) != "changeme"
+
+
+def test_the_apply_hint_names_qbittorrent_because_it_is_recreated_with_gluetun(files, capsys):
+    run(files)
+    assert "--force-recreate gluetun qbittorrent watchdog" in capsys.readouterr().out
+    docs = (SCRIPT.parents[2] / "docs" / "watchdog.md").read_text()
+    assert "--force-recreate gluetun qbittorrent watchdog" in docs
+    assert "must be in the\n   list" in docs or "qBittorrent must be in the" in docs
