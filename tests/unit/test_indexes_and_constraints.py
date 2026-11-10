@@ -221,6 +221,46 @@ def test_the_unique_job_key_and_the_id_sequence_survive_the_rebuild(tmp_path):
     conn.close()
 
 
+def test_the_autoincrement_counter_survives_the_rebuild(tmp_path):
+    """Jobs are AUTOINCREMENT, so a deleted top id is never handed out again.
+
+    Production had seq 344 but MAX(id) 342 (the two newest jobs were deleted); a rebuild that
+    only copies the rows resets the counter to 342 and reuses 343 and 344. Mirrored here: ids
+    6..9 are used and gone before the migration, so the next id must be 10.
+    """
+    conn, migrations = old_database(tmp_path)
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("INSERT INTO jobs (id, type, external_id) VALUES (9, 'youtube', 'zzzzzzzzzzz')")
+    conn.execute("DELETE FROM jobs WHERE id = 9")
+    conn.execute("COMMIT")
+    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'jobs'").fetchone()[0]
+    assert seq == 9, "the counter remembers the deleted id"
+
+    assert dbmod.migrate(conn, migrations) == ["0018_indexes_and_constraints.sql"]
+    assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'jobs'").fetchone()[0] == 9
+    new_id = conn.execute(
+        "INSERT INTO jobs (type, external_id) VALUES ('youtube', 'hhhhhhhhhhh')"
+    ).lastrowid
+    assert new_id == 10, "ids 6..9 were handed out before the rebuild and must not be reused"
+    conn.close()
+
+
+def test_the_counter_is_carried_when_the_jobs_table_is_empty(tmp_path):
+    """The empty table creates no jobs_new counter row of its own; the old one must still move."""
+    conn, migrations = old_database(tmp_path)
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("DELETE FROM jobs")
+    conn.execute("COMMIT")
+    assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'jobs'").fetchone()[0] == 5
+
+    assert dbmod.migrate(conn, migrations) == ["0018_indexes_and_constraints.sql"]
+    new_id = conn.execute(
+        "INSERT INTO jobs (type, external_id) VALUES ('youtube', 'iiiiiiiiiii')"
+    ).lastrowid
+    assert new_id == 6, "not 1: the counter of the old table moved over"
+    conn.close()
+
+
 def test_the_triggers_still_work_after_the_rebuild(tmp_path):
     conn = migrated(tmp_path)
     conn.execute("BEGIN IMMEDIATE")

@@ -14,7 +14,8 @@
 --      account_id alone, and the primary key starts with backlog_id.
 --
 -- 2. CHECK constraints. SQLite cannot add a CHECK to an existing table, so the four tables are
---    rebuilt (same columns, defaults and rows; every index and trigger is created again).
+--    rebuilt (same columns, defaults and rows; every index and trigger is created again, and
+--    the jobs AUTOINCREMENT counter is carried over so no job id is ever reused).
 --    The runner switches foreign keys off while a file runs, so dropping a referenced table
 --    does not cascade into its children; `PRAGMA foreign_key_check` must pass before COMMIT
 --    (see ytp/db.py). All existing rows come from writers that always store valid values
@@ -61,6 +62,21 @@ SELECT
     id, type, external_id, metadata, status, error, created_at, updated_at, source,
     progress_bytes, progress_at, priority, note
 FROM jobs;
+
+-- Jobs are AUTOINCREMENT: an id is never handed out twice. The copy above only sets the new
+-- table's counter to MAX(id), losing ids that were deleted at the top (production: the old
+-- counter is 344 while MAX(id) is 342, so 343 and 344 are free to be reused after a rebuild).
+-- Carry the old counter over while both sqlite_sequence rows can still exist; the RENAME moves
+-- the row to the new name. When jobs is empty, the copy created no row for jobs_new (and the
+-- old counter may still exist), so that case needs an INSERT instead of an UPDATE.
+INSERT INTO sqlite_sequence (name, seq)
+    SELECT 'jobs_new', seq FROM sqlite_sequence WHERE name = 'jobs'
+    AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'jobs_new');
+
+UPDATE sqlite_sequence
+   SET seq = (SELECT seq FROM sqlite_sequence WHERE name = 'jobs')
+ WHERE name = 'jobs_new'
+   AND seq < (SELECT seq FROM sqlite_sequence WHERE name = 'jobs');
 
 DROP TABLE jobs;  -- drops the old indexes and the two triggers that were ON jobs
 ALTER TABLE jobs_new RENAME TO jobs;
