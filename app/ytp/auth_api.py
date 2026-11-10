@@ -101,7 +101,7 @@ async def login(request: Request) -> JSONResponse:
     if isinstance(body, JSONResponse):
         return body
     limiter: LoginLimiter = request.app.state.limiter
-    address = client_address(request.scope)
+    address = client_address(request.scope, request.app.state.trusted_proxies)
     keys = limiter.keys(body["username"], address)
     wait = limiter.wait(*keys)
     if wait > 0:
@@ -148,7 +148,7 @@ async def me(request: Request) -> JSONResponse:
     if account is None:
         body: dict[str, Any] = {"detail": "login required"}
         db = request.app.state.db
-        if db is not None and not await asyncio.to_thread(accounts.list_all, db):
+        if db is not None and not await asyncio.to_thread(accounts.any_exists, db):
             body["setup"] = True  # no account exists: the page says how to make the first admin
         return JSONResponse(body, status_code=401, headers={"Cache-Control": "no-store"})
     return JSONResponse({"account": account.as_dict()}, headers={"Cache-Control": "no-store"})
@@ -198,7 +198,9 @@ async def change_password(request: Request) -> JSONResponse:
         return body
     account: Account = request.state.account
     limiter: LoginLimiter = request.app.state.limiter
-    key = limiter.keys(account.username, client_address(request.scope))[0]
+    key = limiter.keys(
+        account.username, client_address(request.scope, request.app.state.trusted_proxies)
+    )[0]
     if limiter.wait(key) > 0:
         return problem(429, "too many tries, wait a moment")
     found = await asyncio.to_thread(accounts.find, db, account.username)
@@ -266,35 +268,26 @@ async def update_account(account_id: int, request: Request) -> JSONResponse:
     fields = {"role", "disabled", "default_max_height", "can_set_resolution"}
     if not isinstance(data, dict) or not data or set(data) - fields:
         return problem(422, "send role, disabled, default_max_height and/or can_set_resolution")
-    settings: dict[str, Any] = {}
+    # The resolution values keep their 400; role/disabled are validated by accounts.update()
+    # (422). All of it happens before the single write, so a mixed body is all-or-nothing (#76).
     if "default_max_height" in data:
         value = data["default_max_height"]
         if value is not None and not resolution.valid(value):
             return problem(400, resolution.DETAIL)
-        settings["default_max_height"] = value
-    if "can_set_resolution" in data:
-        if not isinstance(data["can_set_resolution"], bool):
-            return problem(400, "can_set_resolution must be true or false")
-        settings["can_set_resolution"] = data["can_set_resolution"]
+    if "can_set_resolution" in data and not isinstance(data["can_set_resolution"], bool):
+        return problem(400, "can_set_resolution must be true or false")
     try:
-        result: Account | None = None
-        if "role" in data:
-            if not isinstance(data["role"], str):
-                return problem(422, "role must be admin or user")
-            result = await asyncio.to_thread(accounts.set_role, db, account_id, data["role"])
-        if "disabled" in data:
-            if not isinstance(data["disabled"], bool):
-                return problem(422, "disabled must be true or false")
-            result = await asyncio.to_thread(
-                accounts.set_disabled, db, account_id, data["disabled"]
-            )
-        if settings:
-            result = await asyncio.to_thread(
-                accounts.set_resolution_settings, db, account_id, **settings
-            )
+        result = await asyncio.to_thread(
+            accounts.update,
+            db,
+            account_id,
+            role=data.get("role", accounts.UNCHANGED),
+            disabled=data.get("disabled", accounts.UNCHANGED),
+            default_max_height=data.get("default_max_height", accounts.UNCHANGED),
+            can_set_resolution=data.get("can_set_resolution", accounts.UNCHANGED),
+        )
     except AccountError as error:
         return _error(error)
-    assert result is not None
     return JSONResponse({"account": result.as_dict()})
 
 

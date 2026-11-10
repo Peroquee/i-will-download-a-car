@@ -11,6 +11,7 @@ the run instead of silently skipping it.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,6 +23,35 @@ from tests.helpers.compose_cli import compose_cli_available
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LEVELS = ("unit", "ui", "integration", "smoke", "system", "regression")
+
+# --- the test admin (#44, #76) ---------------------------------------------------------------
+# Most tests are about something else, so by default every request counts as a test admin. The
+# hook is `create_app(test_account=...)` and app.state; production has no global switch. Tests
+# import `create_app` from ytp.main at module import time, so it is wrapped here ONCE, before
+# the test modules are imported, and the wrapper reads the account of the running test.
+try:
+    from ytp import main as _ytp_main
+    from ytp.accounts import Account as _Account
+except ModuleNotFoundError:  # the integration job has no app dependencies: no app to build
+    _ytp_main = None
+
+_TEST_ADMIN = (
+    None
+    if _ytp_main is None
+    else _Account(1, "test-admin", "admin", False, "2026-01-01T00:00:00.000Z", None)
+)
+_TEST_ACCOUNT: contextvars.ContextVar = contextvars.ContextVar("test_account", default=None)
+_UNSET = object()
+
+if _ytp_main is not None:
+    _real_create_app = _ytp_main.create_app
+
+    def _create_app_with_test_account(settings=None, *, test_account=_UNSET, **kwargs):
+        if test_account is _UNSET:
+            test_account = _TEST_ACCOUNT.get()
+        return _real_create_app(settings, test_account=test_account, **kwargs)
+
+    _ytp_main.create_app = _create_app_with_test_account
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -77,23 +107,16 @@ def _no_real_channel_listing(monkeypatch: pytest.MonkeyPatch, request: pytest.Fi
 
 @pytest.fixture(autouse=True)
 def _test_admin(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Issue #44: the app now needs a login for nearly everything. Tests of other things should not
-    each have to log in, so by default every request counts as a test admin (a hook that exists
-    only for this: `ytp.auth.TEST_ACCOUNT`, which nothing in the app ever sets). A test of the real
-    login is marked `real_auth` and gets no such account."""
-    try:
-        from ytp import auth
-        from ytp.accounts import Account
-    except ModuleNotFoundError:  # the integration job has no app dependencies: no app to log in to
+    """Issue #44: the app needs a login for nearly everything. Tests of other things should not
+    each have to log in, so by default every request counts as a test admin, injected into the
+    apps the test builds through `create_app(test_account=...)` (#76). A test of the real login
+    is marked `real_auth` and gets no such account."""
+    if _ytp_main is None:
         yield
         return
-
-    previous = auth.TEST_ACCOUNT
-    if request.node.get_closest_marker("real_auth"):
-        auth.TEST_ACCOUNT = None
-    else:
-        auth.TEST_ACCOUNT = Account(
-            1, "test-admin", "admin", False, "2026-01-01T00:00:00.000Z", None
-        )
-    yield
-    auth.TEST_ACCOUNT = previous
+    account = None if request.node.get_closest_marker("real_auth") else _TEST_ADMIN
+    token = _TEST_ACCOUNT.set(account)
+    try:
+        yield
+    finally:
+        _TEST_ACCOUNT.reset(token)

@@ -141,6 +141,9 @@ services:
       QBIT_PASSWORD: ${QBIT_PASSWORD:-}
       # The VPN watchdog's status page, for the UI badge (#22).
       WATCHDOG_STATUS_URL: http://watchdog:8090
+      # The reverse proxy ("proxy" above) is the only peer whose X-Forwarded-For the app
+      # believes, for its login brake (#76). No colon: unset = default, set EMPTY = trust nobody.
+      TRUSTED_PROXY: ${TRUSTED_PROXY-proxy}
       # yt-dlp (YouTube, #17) goes out through gluetun's HTTP proxy, i.e. through the VPN. Set
       # EMPTY in .env to ask YouTube directly from the home line. (No colon: unset = default.)
       YTDLP_PROXY: ${YTDLP_PROXY-http://gluetun:8888}

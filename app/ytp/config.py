@@ -66,6 +66,9 @@ class Settings:
     umask: int = 0o022
     # The watchdog's status page (it lives in its own container; the UI badge reads it, #22).
     watchdog_status_url: str = "http://watchdog:8090"
+    # The reverse proxy (the compose service "proxy") is the only peer whose X-Forwarded-For is
+    # believed, for the login brake (#76). EMPTY = believe no header.
+    trusted_proxy: str = "proxy"
     # Where yt-dlp's requests go out: gluetun's HTTP proxy by default, so YouTube is asked
     # through the VPN. EMPTY = ask directly from the home line. See docs/youtube.md.
     ytdlp_proxy: str = "http://gluetun:8888"
@@ -128,6 +131,7 @@ class Settings:
             "qbit_url": self.qbit_url,
             "qbit_user": self.qbit_user,
             "qbit_configured": self.qbit_configured,
+            "trusted_proxy": self.trusted_proxy or None,
             "fetch_blocked_networks": len(self.fetch_blocked_networks),
             "internet_check": (
                 f"{self.internet_check_host}:{self.internet_check_port}"
@@ -207,6 +211,11 @@ class Settings:
             problems.append(
                 f"WATCHDOG_STATUS_URL must be host[:port] without a path, got {watchdog_url!r}"
             )
+
+        raw_trusted = env.get("TRUSTED_PROXY")  # unset = default, set but empty = trust nobody
+        trusted_proxy = "proxy" if raw_trusted is None else raw_trusted.strip()
+        if trusted_proxy and not valid_host(trusted_proxy):
+            problems.append("TRUSTED_PROXY must be a host name or IP address, or empty")
 
         raw_proxy = env.get("YTDLP_PROXY")  # unset = default, set but empty = no proxy
         proxy = "http://gluetun:8888" if raw_proxy is None else raw_proxy.strip()
@@ -310,6 +319,7 @@ class Settings:
             qbit_password=text("QBIT_PASSWORD"),
             umask=umask,
             watchdog_status_url=watchdog_url,
+            trusted_proxy=trusted_proxy,
             ytdlp_proxy=proxy,
             youtube_probe_timeout=probe_timeout,
             youtube_max_height=max_height,

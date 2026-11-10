@@ -15,9 +15,13 @@
   `SameSite=Strict`.
 * **Guessing is slowed down** (`LoginLimiter`): after 5 failures for a name or 30 for a client
   address within 15 minutes, further tries are refused for a time that doubles with every
-  failure (at most 15 minutes), a right password included. The proxy has no rate limit.
-* `TEST_ACCOUNT` is a hook for the tests only: nothing in the app sets it. When a test sets it,
-  every request counts as that account. A test of the real thing sets it back to None.
+  failure (at most 15 minutes), a right password included. The proxy has no rate limit. The
+  client address comes from `X-Forwarded-For` only when the TCP peer is the configured reverse
+  proxy (`TRUSTED_PROXY`, resolved once and cached, #76), never from just any private address:
+  every container on the compose network is private and could otherwise pick its own key.
+* **Test account.** `create_app(test_account=...)` (tests only) makes every request count as
+  that account; it is an argument and `app.state`, not a module global, and `python -m ytp`
+  never passes one (#76).
 """
 
 from __future__ import annotations
@@ -25,9 +29,10 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import socket
 import threading
 import time
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Collection, MutableMapping
 from http.cookies import SimpleCookie
 from typing import Any
 
@@ -41,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 COOKIE = "ytp_session"
 PUBLIC, USER, ADMIN = "public", "user", "admin"
-TEST_ACCOUNT: Account | None = None
+TRUSTED_PROXY_SECONDS = 300.0  # how long the proxy's resolved address is kept
 
 # (method, route as registered) -> who may call it. HEAD follows GET.
 POLICY: dict[tuple[str, str], str] = {
@@ -137,16 +142,71 @@ def session_cookie(headers: list[tuple[bytes, bytes]]) -> str | None:
     return None
 
 
-def client_address(scope: MutableMapping[str, Any]) -> str:
-    """The client's address for the rate limit. Caddy puts the real one in X-Forwarded-For (it
-    replaces what a client sent); it is only believed when the connection comes from a private or
-    loopback address, i.e. from the proxy on the compose network."""
-    peer = (scope.get("client") or ("", 0))[0] or "unknown"
+def _normalised_address(value: str) -> str | None:
     try:
-        private = ipaddress.ip_address(peer).is_private
+        return str(ipaddress.ip_address(value.split("%", 1)[0]))
     except ValueError:
-        private = False
-    if private:
+        return None
+
+
+def _resolve_host(name: str) -> list[str]:
+    infos = socket.getaddrinfo(name, None, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+class TrustedProxies:
+    """The addresses of the reverse proxy whose X-Forwarded-For may be believed (#76).
+
+    The proxy runs as another container (`TRUSTED_PROXY`, default "proxy"); the compose
+    network hands out its address, so the name is resolved and the answer cached for a few
+    minutes. No name, or a name that does not resolve, trusts nobody: the rate-limit key is
+    then the proxy's own address, which is safe (just coarser than per client).
+    """
+
+    def __init__(
+        self,
+        name: str = "",
+        *,
+        resolver: Callable[[str], list[str]] = _resolve_host,
+        clock: Callable[[], float] = time.monotonic,
+        seconds: float = TRUSTED_PROXY_SECONDS,
+    ):
+        self._name = name
+        self._resolve = resolver
+        self._clock = clock
+        self._seconds = seconds
+        self._addresses: frozenset[str] = frozenset()
+        self._resolved_at: float | None = None
+
+    def __contains__(self, address: object) -> bool:
+        if not isinstance(address, str) or not self._name:
+            return False
+        normalized = _normalised_address(address)
+        if normalized is None:
+            return False  # not a socket address (the test client, for instance)
+        now = self._clock()
+        if self._resolved_at is None or now - self._resolved_at > self._seconds:
+            try:
+                found = self._resolve(self._name)
+            except OSError:
+                found = []
+            self._addresses = frozenset(
+                normalized for normalized in map(_normalised_address, found) if normalized
+            )
+            self._resolved_at = now
+        return normalized in self._addresses
+
+
+def client_address(
+    scope: MutableMapping[str, Any], trusted: Collection[str] | TrustedProxies = ()
+) -> str:
+    """The client's address for the rate limit (#44, #76).
+
+    Caddy replaces X-Forwarded-For with the real address; it is believed only when the TCP
+    peer is the configured proxy (`trusted`), never from just any private address.
+    """
+    peer = (scope.get("client") or ("", 0))[0] or "unknown"
+    if peer in trusted:
         for name, value in scope.get("headers", []):
             if name == b"x-forwarded-for":
                 last = value.decode("latin-1").split(",")[-1].strip()
@@ -240,18 +300,24 @@ class AuthMiddleware:
     """Resolves the session cookie to an account and refuses what the policy does not allow."""
 
     def __init__(
-        self, app: Any, *, routes: Callable[[], list[Any]], database: Callable[[], Database | None]
+        self,
+        app: Any,
+        *,
+        routes: Callable[[], list[Any]],
+        database: Callable[[], Database | None],
+        test_account: Callable[[], Account | None] | None = None,
     ):
         self.app = app
         self._routes = routes
         self._database = database
+        self._test_account = test_account
 
     async def __call__(self, scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         level = classify(self._routes(), scope)
-        account: Account | None = TEST_ACCOUNT
+        account: Account | None = self._test_account() if self._test_account is not None else None
         token = session_cookie(scope.get("headers", []))
         # Public routes do not need to know who asks (static files, the page); "who am I?" does.
         needs_account = level != PUBLIC or scope["path"] == "/api/auth/me"

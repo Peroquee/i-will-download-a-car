@@ -403,11 +403,61 @@ def test_unknown_accounts_are_a_404(app_client):
     assert pw.status_code == 404
 
 
-@pytest.mark.parametrize("body", [{}, {"role": 1}, {"disabled": "yes"}, {"name": "x"}, []])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"role": 1},
+        {"role": None},
+        {"disabled": "yes"},
+        {"disabled": None},
+        {"name": "x"},
+        [],
+    ],
+)
 def test_a_bad_update_is_a_422(app_client, body):
     alice = add_account(app_client, "alice")
     response = client_for(app_client, ADMIN).patch(f"/api/accounts/{alice.id}", json=body)
     assert response.status_code == 422
+
+
+def test_a_mixed_update_that_fails_validation_changes_nothing(app_client):
+    """Regression (#76): the role used to be written before `disabled` was checked."""
+    alice = add_account(app_client, "alice")
+    response = client_for(app_client, ADMIN).patch(
+        f"/api/accounts/{alice.id}", json={"role": "admin", "disabled": "yes"}
+    )
+    assert response.status_code == 422
+    stored = accounts.get(db_of(app_client), alice.id)
+    assert (stored.role, stored.disabled) == ("user", False)
+
+
+def test_a_mixed_update_applies_all_fields_at_once(app_client):
+    alice = add_account(app_client, "alice")
+    response = client_for(app_client, ADMIN).patch(
+        f"/api/accounts/{alice.id}",
+        json={
+            "role": "admin",
+            "disabled": False,
+            "default_max_height": 720,
+            "can_set_resolution": False,
+        },
+    )
+    assert response.status_code == 200
+    stored = accounts.get(db_of(app_client), alice.id)
+    assert (stored.role, stored.disabled) == ("admin", False)
+    assert (stored.default_max_height, stored.can_set_resolution) == (720, False)
+
+
+def test_a_mixed_update_keeps_the_last_admin_rule(app_client):
+    boss = accounts.find(db_of(app_client), ADMIN)[0]
+    response = client_for(app_client, ADMIN).patch(
+        f"/api/accounts/{boss.id}", json={"role": "user", "disabled": True}
+    )
+    assert response.status_code == 409
+    assert response.json()["kind"] == "last_admin"
+    stored = accounts.get(db_of(app_client), boss.id)
+    assert (stored.role, stored.disabled) == ("admin", False)
 
 
 def test_there_is_always_one_active_admin(app_client):

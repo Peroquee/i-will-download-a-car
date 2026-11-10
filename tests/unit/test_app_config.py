@@ -238,6 +238,26 @@ def test_magnet_stall_days_rejects_anything_else(value):
     assert any("MAGNET_STALL_DAYS" in p for p in problems(MAGNET_STALL_DAYS=value))
 
 
+# --- TRUSTED_PROXY (#76) ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["proxy", "caddy", "172.18.0.5", "::1"])
+def test_a_trusted_proxy_name_or_address_is_accepted(name):
+    assert settings(TRUSTED_PROXY=name).trusted_proxy == name
+
+
+def test_an_empty_trusted_proxy_means_no_header_is_believed():
+    assert settings(TRUSTED_PROXY="").trusted_proxy == ""
+    assert settings(TRUSTED_PROXY="   ").trusted_proxy == ""
+    assert settings(TRUSTED_PROXY=None).trusted_proxy == "proxy"
+    assert settings(TRUSTED_PROXY="").summary()["trusted_proxy"] is None
+
+
+@pytest.mark.parametrize("value", ["http://proxy", "proxy:8080", "pro xy", "a/b"])
+def test_a_bad_trusted_proxy_is_refused(value):
+    assert any("TRUSTED_PROXY" in p for p in problems(TRUSTED_PROXY=value))
+
+
 # --- INTERNET_CHECK_HOST / INTERNET_CHECK_PORT (the dashboard's internet card) ---------
 
 
