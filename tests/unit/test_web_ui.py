@@ -1534,9 +1534,10 @@ def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
     assert "torrents paused" in history[1]
     assert out["nodes"]["dash-storage-pending"]["hidden"] is True
     assert out["nodes"]["dash-storage-unknown"]["hidden"] is True
-    assert len(out["nodes"]["dash-storage-bar"]["children"]) == 8, (
-        "six categories plus downloads and other"
-    )
+    segments = out["nodes"]["dash-storage-bar"]["children"]
+    assert len(segments) == 8, "six categories plus downloads and other"
+    widths = [segment["style"].get("width") for segment in segments]
+    assert sum(1 for width in widths if width not in (None, "0%")) == 3, widths
     assert "as of 5 min ago" in out["nodes"]["dash-storage-at"]["text"]
     legend = out["nodes"]["dash-storage-legend"]["text"]
     for text in (

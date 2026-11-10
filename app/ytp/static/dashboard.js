@@ -496,7 +496,8 @@
       var denom = Math.max(total, used, 1);
       parts.forEach(function (part) {
         var seg = el("span", "storage-seg " + part.cls);
-        seg.setAttribute("style", "width:" + storageWidth(part.size, denom));
+        /* CSSOM, not a style attribute: the CSP (`style-src 'self'`) blocks inline styles. */
+        seg.style.width = storageWidth(part.size, denom);
         bar.appendChild(seg);
         legend.appendChild(storageItem(part.cls, part.label, part.size));
       });
