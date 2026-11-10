@@ -233,6 +233,90 @@
     return { unit: "days", n: Math.floor(seconds / 86400) };
   }
 
+  /* ------------------------------------------------ smart check times (#80) */
+
+  var WEEKDAY_NAMES = {
+    en: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    de: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+  };
+  var SLOT_WORDS = { en: { and: "and", daily: "daily", more: "\u2026" }, de: { and: "und", daily: "t\u00e4glich", more: "\u2026" } };
+  var SLOT_GROUPS = 3;      // at most this many "Tue and Fri 5 pm" groups, then an ellipsis
+  var SLOT_TOLERANCE = 20;  // minutes: slots this close on different weekdays share one time
+
+  /* "5 pm" / "5:30 pm" (en), "17 Uhr" / "17:30 Uhr" (de) for a minute of the day. */
+  function clockText(minute, lang) {
+    var h = Math.floor(minute / 60);
+    var m = minute % 60;
+    var pad = m < 10 ? "0" + m : String(m);
+    if (lang === "de") return m === 0 ? h + " Uhr" : h + ":" + pad + " Uhr";
+    var hour12 = h % 12 === 0 ? 12 : h % 12;
+    return hour12 + (m === 0 ? "" : ":" + pad) + (h < 12 ? " am" : " pm");
+  }
+
+  /* "Mon", "Mon and Fri", "Mon, Wed and Fri", "Mon\u2013Fri" (a run of three or more), "daily". */
+  function daysText(days, lang) {
+    var names = WEEKDAY_NAMES[lang] || WEEKDAY_NAMES.en;
+    var words = SLOT_WORDS[lang] || SLOT_WORDS.en;
+    if (days.length === 7) return words.daily;
+    var runs = [];
+    days.forEach(function (day) {
+      var last = runs[runs.length - 1];
+      if (last && last[last.length - 1] === day - 1) last.push(day);
+      else runs.push([day]);
+    });
+    var parts = [];
+    runs.forEach(function (run) {
+      if (run.length >= 3) parts.push(names[run[0]] + "\u2013" + names[run[run.length - 1]]);
+      else run.forEach(function (day) { parts.push(names[day]); });
+    });
+    if (parts.length === 1) return parts[0];
+    return parts.slice(0, -1).join(", ") + " " + words.and + " " + parts[parts.length - 1];
+  }
+
+  /* The learned slots ([{weekday 0=Mon..6=Sun, minute}]) as a phrase in the page language:
+     "Tue and Fri 5 pm", "Mon\u2013Fri 9 am, Sat 11 am", at most three groups, "" for none. Weekdays
+     whose times are within 20 minutes of each other share one time. */
+  function slotsText(slots, lang) {
+    var clean = (Array.isArray(slots) ? slots : []).filter(function (slot) {
+      return slot && typeof slot.weekday === "number" && slot.weekday >= 0 && slot.weekday <= 6
+        && typeof slot.minute === "number" && slot.minute >= 0 && slot.minute < 1440;
+    }).sort(function (a, b) { return a.minute - b.minute || a.weekday - b.weekday; });
+    var groups = [];
+    clean.forEach(function (slot) {
+      var group = groups.filter(function (g) {
+        return Math.abs(g.minute - slot.minute) <= SLOT_TOLERANCE && g.days.indexOf(slot.weekday) < 0;
+      })[0];
+      if (group) group.days.push(slot.weekday);
+      else groups.push({ minute: slot.minute, days: [slot.weekday] });
+    });
+    groups.forEach(function (g) { g.days.sort(function (a, b) { return a - b; }); });
+    groups.sort(function (a, b) { return a.days[0] - b.days[0] || a.minute - b.minute; });
+    var words = SLOT_WORDS[lang] || SLOT_WORDS.en;
+    var text = groups.slice(0, SLOT_GROUPS).map(function (g) {
+      return daysText(g.days, lang) + " " + clockText(g.minute, lang);
+    }).join(", ");
+    return groups.length > SLOT_GROUPS ? text + ", " + words.more : text;
+  }
+
+  /* "Tue 4:50 pm" / "Di 16:50 Uhr" for an ISO time, in the server's time zone (the one the slots
+     are in); "" if the time or the zone is unreadable. */
+  function whenText(iso, zone, lang) {
+    var date = new Date(iso);
+    if (isNaN(date.getTime())) return "";
+    try {
+      var parts = {};
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: zone || undefined, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(date).forEach(function (part) { parts[part.type] = part.value; });
+      var day = WEEKDAY_NAMES.en.indexOf(parts.weekday);
+      if (day < 0) return "";
+      var names = WEEKDAY_NAMES[lang] || WEEKDAY_NAMES.en;
+      return names[day] + " " + clockText(Number(parts.hour) * 60 + Number(parts.minute), lang);
+    } catch (e) {
+      return "";
+    }
+  }
+
   /* The one-line summary of the downloads on the input page, from an /api/jobs answer:
      {running, waiting, failed, progress}. The counts come from the server's totals when it sends
      them (the list holds only the newest jobs); progress is the mean of the downloads that report
@@ -382,6 +466,9 @@
     age: age,
     kindKey: kindKey,
     jobsSummary: jobsSummary,
+    slotsText: slotsText,
+    whenText: whenText,
+    clockText: clockText,
     vpnView: vpnView,
     vpnDetailKey: vpnDetailKey,
     detectMode: detectMode,

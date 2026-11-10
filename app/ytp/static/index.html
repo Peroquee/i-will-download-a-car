@@ -499,6 +499,24 @@
             <label class="field" for="sd-resolution" data-i18n="sd.resolution"></label>
             <select id="sd-resolution"></select>
           </div>
+          <h3 class="sched-kind" data-i18n="sd.smart_title"></h3>
+          <p class="note" data-i18n="sd.smart_help"></p>
+          <div class="row">
+            <label class="field" for="sd-smart_before_minutes" data-i18n="sd.smart_before"></label>
+            <input id="sd-smart_before_minutes" type="number" step="1" inputmode="numeric">
+          </div>
+          <div class="row">
+            <label class="field" for="sd-smart_after_minutes" data-i18n="sd.smart_after"></label>
+            <input id="sd-smart_after_minutes" type="number" step="1" inputmode="numeric">
+          </div>
+          <div class="row">
+            <label class="field" for="sd-smart_step_minutes" data-i18n="sd.smart_step"></label>
+            <input id="sd-smart_step_minutes" type="number" step="1" inputmode="numeric">
+          </div>
+          <div class="row">
+            <label class="field" for="sd-smart_base_minutes" data-i18n="sd.smart_base"></label>
+            <input id="sd-smart_base_minutes" type="number" step="1" inputmode="numeric">
+          </div>
           <h3 class="sched-kind" data-i18n="sd.channels"></h3>
           <div id="sd-channel-schedule"></div>
           <h3 class="sched-kind" data-i18n="sd.podcasts"></h3>
@@ -570,6 +588,7 @@
       <select id="sub-settings-resolution"></select>
     </div>
     <div id="sub-settings-schedule"></div>
+    <p id="sub-settings-learned" class="note"></p>
     <p id="sub-settings-tz" class="note"></p>
     <p id="sub-settings-rule" class="note"></p>
     <p id="sub-settings-error" class="error" role="alert"></p>
@@ -1167,6 +1186,29 @@
     "sd.save": "Standards speichern",
     "sd.saved": "Die Server-Standards wurden gespeichert.",
     "sd.failed": "Die Server-Standards konnten nicht gespeichert werden.",
+    "subs.usually": "Lädt meist {slots} hoch",
+    "subs.usually_checked": "Lädt meist {slots} hoch, zuletzt geprüft {when}",
+    "subs.usually_never": "Lädt meist {slots} hoch, noch nie geprüft",
+    "sched.mode": "Prüfmodus",
+    "sched.mode_smart": "Smart: Veröffentlichungszeiten lernen",
+    "sched.mode_fixed": "Fest: Intervall und Prüfzeit",
+    "sched.mode_short.smart": "smart",
+    "sched.mode_short.fixed": "fest",
+    "sched.smart_note": "Im Smart-Modus prüft die App rund um die Zeiten, zu denen hier meist etwas erscheint, sonst selten. Intervall und Prüfzeit unten gelten, solange noch kein Muster erkannt ist.",
+    "sched.smart_on": "smart",
+    "sched.smart_learning": "smart, lernt noch: {fallback}",
+    "sched.learned_none": "Noch zu wenige regelmäßige Veröffentlichungen, um ein Muster zu erkennen: geprüft wird nach dem Intervall.",
+    "sched.learned_pattern": "Lädt meist {slots} hoch.",
+    "sched.learned_next": "Nächste intensive Prüfung: {when}.",
+    "sched.learned_now": "Jetzt wird intensiv geprüft.",
+    "sd.mode": "Standard-Prüfmodus (Kanäle und Podcasts)",
+    "sd.smart_title": "Smart-Modus",
+    "sd.smart_help": "Intensive Prüfung rund um die gelernte Zeit, sonst selten. Bei zu wenig oder unregelmäßigem Verlauf gelten Intervall und Prüfzeit.",
+    "sd.smart_before": "Intensive Prüfung beginnt (Minuten vor der Zeit)",
+    "sd.smart_after": "Intensive Prüfung endet (Minuten nach der Zeit)",
+    "sd.smart_step": "Prüfung alle (Minuten) im intensiven Fenster",
+    "sd.smart_base": "Prüfung alle (Minuten) außerhalb der Fenster",
+    "sd.err_smart": "Gib ganze Minuten von {min} bis {max} ein.",
     "err.int_out_of_range": "Eine Zahl von 0 bis 15.",
     "howto.button": "Anleitung",
     "howto.title": "Anleitung",
@@ -1708,6 +1750,29 @@
     "sd.save": "Save defaults",
     "sd.saved": "The server defaults were saved.",
     "sd.failed": "The server defaults could not be saved.",
+    "subs.usually": "Usually uploads {slots}",
+    "subs.usually_checked": "Usually uploads {slots}, last checked {when}",
+    "subs.usually_never": "Usually uploads {slots}, never checked",
+    "sched.mode": "Check mode",
+    "sched.mode_smart": "Smart: learn the publishing times",
+    "sched.mode_fixed": "Fixed: interval and check time",
+    "sched.mode_short.smart": "smart",
+    "sched.mode_short.fixed": "fixed",
+    "sched.smart_note": "In smart mode the app checks around the times something usually appears here, and rarely otherwise. The interval and check time below apply until a pattern is known.",
+    "sched.smart_on": "smart",
+    "sched.smart_learning": "smart, still learning: {fallback}",
+    "sched.learned_none": "Not enough regular uploads yet to learn a pattern: it is checked by the interval.",
+    "sched.learned_pattern": "Usually uploads {slots}.",
+    "sched.learned_next": "Next intensive check: {when}.",
+    "sched.learned_now": "Intensive checking is on now.",
+    "sd.mode": "Default check mode (channels and podcasts)",
+    "sd.smart_title": "Smart mode",
+    "sd.smart_help": "Intensive checking around the learned time, rarely otherwise. With too little or irregular history the interval and check time apply.",
+    "sd.smart_before": "Intensive checking starts (minutes before the time)",
+    "sd.smart_after": "Intensive checking ends (minutes after the time)",
+    "sd.smart_step": "Check every (minutes) inside the window",
+    "sd.smart_base": "Check every (minutes) outside the windows",
+    "sd.err_smart": "Enter whole minutes from {min} to {max}.",
     "err.int_out_of_range": "A number from 0 to 15.",
     "howto.button": "How to",
     "howto.title": "How to",
