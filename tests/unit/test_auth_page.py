@@ -52,7 +52,7 @@ def test_the_redundant_help_section_is_gone():
         "nav-accounts",
         "accounts",
         "alerts",
-        "dash-disk",
+        "dash-storage",
         "dash-deploy",
         "dash-vpn-list",
     ],

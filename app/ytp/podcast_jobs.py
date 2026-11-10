@@ -21,6 +21,7 @@ import re
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -103,6 +104,7 @@ class PodcastWorker:
         *,
         idle_seconds: float = 5.0,
         min_free_bytes: int = MIN_FREE_BYTES,
+        on_done: Callable[[], None] | None = None,
     ):
         self.db = db
         self.settings = settings
@@ -110,6 +112,7 @@ class PodcastWorker:
         self.refresher = refresher
         self._idle = idle_seconds
         self._min_free = min_free_bytes
+        self._on_done = on_done  # e.g. the dashboard's storage sizes (#82)
         self._wake = threading.Event()
         self.processed = 0
         # Percent of the running download by job id, for the job list (not persisted).
@@ -228,6 +231,8 @@ class PodcastWorker:
                     self.settings.library_dirs["podcasts"],
                     immediate=job.priority > 0,  # high priority skips the debounce once (#51)
                 )
+                if self._on_done is not None:
+                    self._on_done()
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 

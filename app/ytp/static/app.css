@@ -12,6 +12,16 @@
   --good: #7fc58b;
   --danger-bg: #ba1436;     /* crimson for delete buttons (#56, #58) */
   --danger-ink: #f2e6c9;
+  /* The storage bar's categories (#82). Mid-tone colours with enough contrast on the dark
+     panel and on a light background, so they can stay the same if a light theme comes. */
+  --storage-movies: #c9a227;
+  --storage-series: #e8913a;
+  --storage-audiobooks: #7fc58b;
+  --storage-music: #6fa8dc;
+  --storage-podcasts: #b58bd6;
+  --storage-youtube: #e4806f;
+  --storage-downloads: #4fb3bf;
+  --storage-other: #7d8b99;
   --radius: 4px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
@@ -335,6 +345,24 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 .summary-stat { min-width: 0; }
 .stat-label { display: block; font-size: 12px; color: var(--muted); }
 .stat-value { display: block; margin-top: 2px; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+/* The storage bar (#82): one segment per category, the free space is the empty rest. */
+.storage-bar { display: flex; height: 22px; margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--button); }
+.storage-seg { display: block; flex: none; height: 100%; min-width: 0; }
+.storage-legend { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 18px; font-size: 13px; }
+.storage-item { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.storage-swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--muted); }
+.storage-name { color: var(--muted); overflow-wrap: anywhere; }
+.storage-size { margin-left: auto; color: var(--ink); white-space: nowrap; }
+.storage-free .storage-swatch { background: transparent; border: 1px solid var(--line); }
+.storage-free .storage-name { color: var(--ink); }
+.storage-movies { background: var(--storage-movies); }
+.storage-series { background: var(--storage-series); }
+.storage-audiobooks { background: var(--storage-audiobooks); }
+.storage-music { background: var(--storage-music); }
+.storage-podcasts { background: var(--storage-podcasts); }
+.storage-youtube { background: var(--storage-youtube); }
+.storage-downloads { background: var(--storage-downloads); }
+.storage-other { background: var(--storage-other); }
 @media (max-width: 720px) {
   .dash-status { grid-template-columns: 1fr; }
   .status-card { border-left: 0; border-top: 1px solid var(--line); padding: 14px 0; }

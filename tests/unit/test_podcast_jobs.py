@@ -157,6 +157,16 @@ def test_an_episode_is_downloaded_filed_and_marked_done(world):
     assert not (world.tmp / "downloads/incomplete/podcasts" / job.external_id).exists()
 
 
+def test_a_finished_episode_asks_for_new_storage_sizes(world):
+    """The dashboard's storage bar is recomputed after every finished download (#82)."""
+    world.fetcher.files["https://cdn.example/new.mp3"] = b"ID3"
+    calls = []
+    job = world.queue()
+    world.worker(on_done=lambda: calls.append(1)).run_one()
+    assert world.status(job.id) == ("done", None)
+    assert calls == [1]
+
+
 def test_nothing_queued_means_nothing_to_do(world):
     assert world.worker().run_one() is False
 

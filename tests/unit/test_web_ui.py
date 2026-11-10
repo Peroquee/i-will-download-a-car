@@ -439,6 +439,7 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "role.admin",  # "Administrator"
         "dash.vpn",
         "dash.vpn_tab",
+        "dash.storage_downloads",  # "Downloads" in both languages (#82)
         "dash.internet",
         "dash.watchdog",
         "dash.internet_ok",
@@ -1455,7 +1456,12 @@ DASHBOARD = {
     "vpn": {"current": {"state": "ok", "since": "2026-11-02T08:00:00Z"},
             "history": [{"time": "2026-11-02T08:00:00Z", "condition": "ok", "paused": False, "reason": ""},
                         {"time": "2026-11-02T07:00:00Z", "condition": "down", "paused": True, "reason": "x"}]},
-    "disk": {"free_percent": 25, "free_gb": 500, "total_gb": 2000},
+    "disk": {"free_percent": 25, "free_gb": 500, "total_gb": 2000,
+             "total_bytes": 2 * 1024**4, "free_bytes": 512 * 1024**3,
+             "categories": {"movies": 3 * 1024**3, "series": 0, "audiobooks": 0,
+                            "music": 0, "podcasts": 0, "youtube": 0},
+             "downloads": 1024**3, "other": 2 * 1024**3,
+             "at": "2026-11-02T09:55:00Z"},
 }  # fmt: skip
 VPN_STATUS = {
     "state": "ok", "egress": "ok", "egress_country": "Switzerland",
@@ -1526,10 +1532,26 @@ def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
     history = [c["text"] for c in out["nodes"]["dash-vpn-list"]["children"]]
     assert len(history) == 2
     assert "torrents paused" in history[1]
-    assert (
-        out["nodes"]["dash-disk"]["text"] == "Storage: 25 % free (500 GB of 1.9 TB)"
-        or "25 %" in out["nodes"]["dash-disk"]["text"]
-    )
+    assert out["nodes"]["dash-storage-pending"]["hidden"] is True
+    assert out["nodes"]["dash-storage-unknown"]["hidden"] is True
+    segments = out["nodes"]["dash-storage-bar"]["children"]
+    assert len(segments) == 8, "six categories plus downloads and other"
+    widths = [segment["style"].get("width") for segment in segments]
+    assert sum(1 for width in widths if width not in (None, "0%")) == 3, widths
+    assert "as of 5 min ago" in out["nodes"]["dash-storage-at"]["text"]
+    legend = out["nodes"]["dash-storage-legend"]["text"]
+    for text in (
+        "Movie",
+        "Series",
+        "Audiobook",
+        "Music",
+        "Podcast",
+        "YouTube",
+        "Downloads",
+        "Other",
+        "Free: 512 GB of 2.0 TB (25 %)",
+    ):
+        assert text in legend
     log = out["nodes"]["dash-alerts-list"]["children"]
     assert [c["id"] for c in log] == ["alert-7", "alert-6", "alert-5"]
     assert "alert-unread" in log[0]["cls"]
@@ -1556,6 +1578,43 @@ def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
     assert "2.0 KB/s" in out["nodes"]["dash-total-speed"]["text"]
     assert "2 unread" in out["nodes"]["dash-alert-counts"]["text"]
     assert "1Errors" in out["nodes"]["dash-alert-counts"]["text"]
+
+
+def test_the_storage_bar_lives_on_the_overview_not_the_vpn_tab():
+    """#82: the free space used to sit in the VPN tab; the bar is the overview's business."""
+    assert 'id="dash-disk"' not in HTML
+    overview = HTML.index('id="dash-overview"')
+    storage_at = HTML.index('id="dash-storage"')
+    vpn_view = HTML.index('id="dash-vpn-view"')
+    assert overview < storage_at < vpn_view
+
+
+@needs_node
+def test_the_storage_bar_waits_for_the_first_size_calculation():
+    pending = dict(DASHBOARD)
+    pending["disk"] = {
+        **DASHBOARD["disk"],
+        "categories": None,
+        "downloads": None,
+        "other": None,
+        "at": None,
+    }
+    out = smoke("/dashboard", "", {**ANSWERS, "/api/dashboard": pending})
+    assert out["nodes"]["dash-storage-pending"]["hidden"] is False
+    assert out["nodes"]["dash-storage-bar"]["hidden"] is False
+    assert out["nodes"]["dash-storage-bar"]["children"] == [], "no segments without sizes"
+    legend = out["nodes"]["dash-storage-legend"]["text"]
+    assert "Free: 512 GB of 2.0 TB (25 %)" in legend
+    assert "Movie" not in legend
+    assert out["nodes"]["dash-storage-at"]["text"] == ""
+
+
+@needs_node
+def test_without_a_readable_disk_the_storage_bar_says_so():
+    out = smoke("/dashboard", "", {**ANSWERS, "/api/dashboard": {**DASHBOARD, "disk": None}})
+    assert out["nodes"]["dash-storage-bar"]["hidden"] is True
+    assert out["nodes"]["dash-storage-pending"]["hidden"] is True
+    assert out["nodes"]["dash-storage-unknown"]["hidden"] is False
 
 
 @needs_node

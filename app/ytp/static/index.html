@@ -388,6 +388,17 @@
             <div class="summary-stat"><span class="stat-label" data-i18n="dash.speed"></span><strong id="dash-total-speed" class="stat-value">&mdash;</strong></div>
           </div>
         </section>
+
+        <section id="dash-storage" class="dash-summary" aria-labelledby="dash-storage-title" data-admin-only>
+          <div class="summary-head">
+            <h2 id="dash-storage-title" class="jobs-title" data-i18n="dash.storage"></h2>
+            <span id="dash-storage-at" class="note"></span>
+          </div>
+          <div id="dash-storage-bar" class="storage-bar" aria-hidden="true"></div>
+          <p id="dash-storage-pending" class="note" data-i18n="dash.storage_pending" hidden></p>
+          <p id="dash-storage-unknown" class="note" data-i18n="dash.disk_unknown" hidden></p>
+          <ul id="dash-storage-legend" class="storage-legend"></ul>
+        </section>
       </div>
 
       <div id="dash-jobs-view" class="dash-view" data-dash-view="jobs" hidden>
@@ -420,7 +431,6 @@
         <section id="dash-vpn" class="jobs" aria-labelledby="dash-vpn-title">
           <h2 id="dash-vpn-title" class="jobs-title" data-i18n="dash.vpn"></h2>
           <p id="dash-vpn-now" class="dash-vpn-now"></p>
-          <p id="dash-disk" class="note" data-admin-only></p>
           <p id="dash-deploy" class="note" data-admin-only hidden></p>
           <ul id="dash-vpn-list" class="dash-events" data-admin-only></ul>
           <p id="dash-vpn-empty" class="note" data-i18n="dash.vpn_empty" data-admin-only hidden></p>
@@ -857,8 +867,13 @@
     "dash.vpn_empty": "Noch keine Wechsel aufgezeichnet.",
     "dash.since": "seit {when}",
     "dash.paused": "Torrents angehalten",
-    "dash.disk": "Speicher: {percent} % frei ({free} von {total})",
     "dash.disk_unknown": "Der freie Speicher ist unbekannt.",
+    "dash.storage": "Speicher",
+    "dash.storage_asof": "Stand: {time}",
+    "dash.storage_pending": "Die Größen werden berechnet …",
+    "dash.storage_free": "Frei: {free} von {total} ({percent} %)",
+    "dash.storage_other": "Sonstiges",
+    "dash.storage_downloads": "Downloads",
     "dash.alerts": "Meldungen",
     "dash.load_error": "Die Übersicht lässt sich gerade nicht laden.",
     "dash.size": "{done} von {total}",
@@ -1349,8 +1364,13 @@
     "dash.vpn_empty": "No changes recorded yet.",
     "dash.since": "since {when}",
     "dash.paused": "torrents paused",
-    "dash.disk": "Storage: {percent} % free ({free} of {total})",
     "dash.disk_unknown": "The free storage is unknown.",
+    "dash.storage": "Storage",
+    "dash.storage_asof": "as of {time}",
+    "dash.storage_pending": "Sizes are being calculated …",
+    "dash.storage_free": "Free: {free} of {total} ({percent} %)",
+    "dash.storage_other": "Other",
+    "dash.storage_downloads": "Downloads",
     "dash.alerts": "Alerts",
     "dash.load_error": "The dashboard cannot be loaded right now.",
     "dash.size": "{done} of {total}",

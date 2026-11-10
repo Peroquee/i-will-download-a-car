@@ -8,11 +8,12 @@ from collections.abc import Iterator
 import pytest
 from starlette.testclient import TestClient
 
-from ytp import alertlog, jobs
+from ytp import alertlog, jobs, storage
 from ytp.clients.qbittorrent import Torrent
 from ytp.config import Settings
 from ytp.jobs_api import TorrentProgress
 from ytp.main import create_app
+from ytp.scheduler import set_state
 
 ENV = {
     "MEDIA_DIR_MOVIES": "Filme",
@@ -260,8 +261,49 @@ def test_a_missing_watchdog_is_unknown_not_an_error(client):
 
 
 def test_the_dashboard_reports_the_free_disk_space(client):
+    """Free and total stay live; the category sizes are null until the first walk (#82)."""
     disk = client.get("/api/dashboard").json()["disk"]
-    assert set(disk) == {"free_percent", "free_gb", "total_gb"}
+    assert {"free_percent", "free_gb", "total_gb"} <= set(disk)
+    assert {"total_bytes", "free_bytes"} <= set(disk)
+    assert disk["categories"] is None
+    assert (disk["downloads"], disk["other"], disk["at"]) == (None, None, None)
+
+
+def test_the_dashboard_reports_the_cached_category_sizes(client):
+    set_state(
+        client.app.state.db,
+        storage.CACHE_KEY,
+        json.dumps(
+            {
+                "at": "2026-11-10T14:05:00.000Z",
+                "categories": {
+                    kind: 1000
+                    for kind in ("movies", "series", "audiobooks", "music", "podcasts", "youtube")
+                },
+                "downloads": 300,
+                "other": 400,
+            }
+        ),
+    )
+    disk = client.get("/api/dashboard").json()["disk"]
+    assert set(disk["categories"]) == {
+        "movies",
+        "series",
+        "audiobooks",
+        "music",
+        "podcasts",
+        "youtube",
+    }
+    assert disk["categories"]["movies"] == 1000
+    assert (disk["downloads"], disk["other"]) == (300, 400)
+    assert disk["at"] == "2026-11-10T14:05:00.000Z"
+    assert disk["free_percent"] is not None, "still live"
+
+
+def test_the_app_starts_the_storage_sampler(client):
+    assert client.app.state.storage is not None
+    assert client.app.state.youtube_worker._on_done is not None
+    assert client.app.state.podcast_worker._on_done is not None
 
 
 def test_the_dashboard_page_is_the_same_page_as_the_form(client):

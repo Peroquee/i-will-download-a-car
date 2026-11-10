@@ -8,7 +8,7 @@ const scenario = JSON.parse(scenarioJson);
 class Node {
   constructor(tag) {
     this.tagName = tag; this.children = []; this._text = ""; this.className = ""; this.dataset = {};
-    this.attrs = {}; this.hidden = false; this.disabled = false; this.listeners = {}; this.id = "";
+    this.attrs = {}; this.style = {}; this.hidden = false; this.disabled = false; this.listeners = {}; this.id = "";
   }
   appendChild(child) { this.children.push(child); return child; }
   setAttribute(k, v) { this.attrs[k] = v; }
@@ -92,7 +92,7 @@ setTimeout(() => {
 function finish() {
   dash.render();
   const out = { calls, scrolls: scrollLog, nodes: {} };
-  for (const id of Object.keys(byId)) out.nodes[id] = { text: byId[id].textContent, hidden: byId[id].hidden, attrs: byId[id].attrs, cls: byId[id].className, scrolled: !!byId[id].scrolled, children: byId[id].children.map((c) => ({ cls: c.className, text: c.textContent, id: c.id })) };
+  for (const id of Object.keys(byId)) out.nodes[id] = { text: byId[id].textContent, hidden: byId[id].hidden, attrs: byId[id].attrs, style: byId[id].style, cls: byId[id].className, scrolled: !!byId[id].scrolled, children: byId[id].children.map((c) => ({ cls: c.className, text: c.textContent, id: c.id, style: c.style })) };
   out.views = viewNodes.map((n) => [n.dataset.view, n.hidden]);
   out.strip = document.getElementById("alert-strip-list").children.map((c) => ({ cls: c.className, text: c.textContent, href: (c.children[0] || {}).href }));
   console.log(JSON.stringify(out));
