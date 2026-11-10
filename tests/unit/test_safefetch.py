@@ -12,6 +12,7 @@ from __future__ import annotations
 import http.server
 import ipaddress
 import socket
+import ssl
 import threading
 import time
 from collections.abc import Iterator
@@ -94,6 +95,20 @@ def test_only_the_web_ports_are_allowed(port):
     with pytest.raises(FetchError) as error:
         check_url(f"https://example.org:{port}/x")
     assert error.value.kind == "blocked"
+
+
+def test_port_zero_is_refused_not_silently_replaced_by_the_default():
+    with pytest.raises(FetchError) as error:
+        check_url("https://example.org:0/x")
+    assert error.value.kind == "blocked"
+    assert "port 0" in error.value.message
+
+
+def test_a_non_ascii_path_and_query_are_percent_encoded():
+    """http.client writes the request as ASCII; a raw umlaut would crash it (#71)."""
+    target = check_url("https://cdn.example.com/folge-ä.mp3?q=ü&x=1%202")
+    assert target.path == "/folge-%C3%A4.mp3?q=%C3%BC&x=1%202"
+    assert target.url == "https://cdn.example.com/folge-%C3%A4.mp3?q=%C3%BC&x=1%202"
 
 
 # --- which addresses count as public --------------------------------------------------------------
@@ -419,6 +434,28 @@ def test_an_unreachable_host_is_a_network_error(world):
     assert "podcast.example" in error.value.message
 
 
+def test_a_non_ascii_url_is_fetched_with_the_encoded_path(world, server):
+    """Regression (#71): the raw umlaut used to raise UnicodeEncodeError inside http.client."""
+    server.routes["/folge-%C3%A4.mp3"] = (200, {"Content-Type": "audio/mpeg"}, b"ID3x")
+    got = world.fetcher().fetch_bytes(
+        "http://podcast.example/folge-ä.mp3", kind="media", max_bytes=100
+    )
+    assert got.body == b"ID3x"
+    assert server.seen == ["podcast.example /folge-%C3%A4.mp3"]
+
+
+@pytest.mark.security
+def test_a_refused_certificate_is_a_bad_response_not_a_network_error(world):
+    def dial(target, ip):
+        raise ssl.SSLCertVerificationError("certificate verify failed")
+
+    fetcher = SafeFetcher(resolver=world.resolve, dialer=dial)
+    with pytest.raises(FetchError) as error:
+        fetcher.fetch_bytes("https://podcast.example/x", kind="feed", max_bytes=100)
+    assert error.value.kind == "bad_response"
+    assert "certificate" in error.value.message
+
+
 def test_the_next_address_is_tried_when_the_first_does_not_connect(world, server):
     world.names["podcast.example"] = [PUBLIC, "151.101.1.69"]
     server.routes["/x"] = (200, {"Content-Type": "text/xml"}, b"ok")
@@ -463,6 +500,31 @@ def test_the_request_asks_for_no_compression_and_closes(world, server):
 
 
 @pytest.mark.security
+@pytest.mark.parametrize(
+    ("limit", "text"),
+    [
+        (512 * 1024, "512 KiB"),
+        (5 * 1024**2, "5 MiB"),
+        (2 * 1024**3, "2 GiB"),
+        (1536 * 1024, "1536 KiB"),
+        (1000, "1000 bytes"),
+    ],
+)
+def test_a_size_limit_is_named_readably(limit, text):
+    assert safefetch._size_text(limit) == text
+
+
+def test_a_declared_size_over_a_sub_mib_limit_is_named_in_kib(world, server):
+    """Regression (#71): a 512 KiB limit used to be reported as "larger than 0 MiB"."""
+    server.routes["/big"] = (200, {"Content-Type": "image/jpeg"}, b"x" * 600_000)
+    with pytest.raises(FetchError) as error:
+        world.fetcher().fetch_bytes(
+            "http://podcast.example/big", kind="image", max_bytes=512 * 1024
+        )
+    assert error.value.kind == "too_large"
+    assert "512 KiB" in error.value.message
+
+
 def test_a_declared_size_over_the_limit_is_refused_before_reading(world, server):
     server.routes["/big"] = (200, {"Content-Type": "text/xml"}, b"x" * 5000)
     with pytest.raises(FetchError) as error:
@@ -660,6 +722,101 @@ def test_an_ipv6_address_is_bracketed_for_the_proxy(proxy):
     assert proxy.requests[0].startswith("CONNECT [2606:4700:4700::1111]:443 HTTP/1.1")
 
 
+@pytest.mark.security
+def test_a_proxy_that_trickles_its_connect_answer_is_cut_off(monkeypatch):
+    """The per-recv timeout alone lets a proxy hold the thread for hours (#71)."""
+    monkeypatch.setattr(safefetch, "DIAL_DEADLINE", 0.3)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    done = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        try:
+            conn.recv(4096)
+            for byte in b"HTTP/1.1 200 Connection established\r\n\r\n":
+                conn.sendall(bytes([byte]))
+                if done.wait(0.05):
+                    break
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    fetcher = SafeFetcher(f"http://127.0.0.1:{port}", resolver=lambda h, p: [PUBLIC])
+    started = time.monotonic()
+    try:
+        with pytest.raises(FetchError) as error:
+            fetcher.fetch_bytes("https://podcast.example/x", kind="feed", max_bytes=100)
+    finally:
+        done.set()
+        listener.close()
+    assert error.value.kind == "network"
+    assert time.monotonic() - started < 5
+
+
+def test_bytes_after_the_proxy_answer_stay_in_the_socket():
+    """The CONNECT reply is read byte-exactly; nothing of the origin's answer is swallowed (#71)."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    done = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        try:
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\nEXTRA")
+            done.wait(5)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        sock = safefetch._connect_through_proxy("127.0.0.1", port, PUBLIC, 443)
+        try:
+            sock.settimeout(2)
+            assert sock.recv(5) == b"EXTRA"
+        finally:
+            sock.close()
+    finally:
+        done.set()
+        listener.close()
+
+
+def test_an_oversized_proxy_answer_is_refused():
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    done = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        try:
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nX-Big: " + b"a" * 9000)
+            done.wait(5)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        with pytest.raises(OSError, match="oversized"):
+            safefetch._connect_through_proxy("127.0.0.1", port, PUBLIC, 443)
+    finally:
+        done.set()
+        listener.close()
+
+
 def test_a_proxy_that_refuses_the_tunnel_is_a_network_error():
     refusing = FakeProxy(b"HTTP/1.1 403 Forbidden\r\n\r\n")
     try:
@@ -745,6 +902,40 @@ def test_headers_that_trickle_in_are_cut_off_by_the_deadline(monkeypatch):
     done.set()
     listener.close()
     assert error.value.kind == "network"
+    assert time.monotonic() - started < 5
+
+
+@pytest.mark.security
+def test_a_tls_handshake_that_never_answers_is_cut_off(monkeypatch):
+    """A peer that trickles the handshake must not hold the thread for hours (#71)."""
+    monkeypatch.setattr(safefetch, "DIAL_DEADLINE", 0.3)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    done = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        try:
+            conn.recv(4096)  # the ClientHello
+            done.wait(5)  # ... and never answer it
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    target = safefetch.Target(
+        "https", "podcast.example", port, "/x", f"https://podcast.example:{port}/x"
+    )
+    started = time.monotonic()
+    try:
+        with pytest.raises((OSError, ssl.SSLError)):
+            safefetch.make_dialer("")(target, "127.0.0.1")
+    finally:
+        done.set()
+        listener.close()
     assert time.monotonic() - started < 5
 
 
