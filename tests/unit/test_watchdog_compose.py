@@ -113,6 +113,7 @@ def test_the_watchdog_module_imports_only_what_it_needs():
         ".clients.watchdog",
         ".egress",
         ".logging_setup",
+        ".tunnelprobe",
     }
 
 

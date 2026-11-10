@@ -263,7 +263,9 @@
   }
 
   /* What the VPN bar shows for an /api/vpn answer. `view` is the colour/state, in order of
-     priority: down, mismatch (the egress check caught a leak), blind, starting, unknown, ok.
+     priority: down, mismatch (the egress check caught a leak), blind, reconnecting (gluetun says
+     running but the tunnel is not connected yet; it has a few minutes to come back, #81), starting,
+     unknown, ok. `cause` is why it is down ("tunnel" = the process runs, the tunnel does not).
      `alert` = the bar must be unmissable. Anything unreadable counts as unknown, never as ok. */
   function vpnView(data) {
     var d = data && typeof data === "object" ? data : {};
@@ -271,13 +273,28 @@
     var view = state;
     if (state === "ok" && d.egress === "mismatch") view = "mismatch";
     if (state === "unknown" && d.egress === "mismatch") view = "mismatch";
+    if (view === "ok" && d.tunnel === "reconnecting") view = "reconnecting";
+    var tunnel = d.cause === "tunnel" || view === "reconnecting";
+    var since = typeof d.since === "string" ? d.since : null;
+    if (tunnel && typeof d.tunnel_since === "string") since = d.tunnel_since;
     return {
       view: view,
+      cause: view === "down" && typeof d.cause === "string" ? d.cause : "",
       alert: view === "down" || view === "mismatch" || view === "blind",
       paused: d.paused === true,
-      since: typeof d.since === "string" ? d.since : null,
+      since: since,
       country: view === "ok" && d.egress === "ok" && typeof d.egress_country === "string" ? d.egress_country.slice(0, 60) : null,
     };
+  }
+
+  /* The i18n key of the explanation under the VPN state, or null if the state needs none. A VPN
+     that is down because the tunnel is dead while gluetun runs says so (#81). */
+  function vpnDetailKey(info) {
+    if (info.view === "down" && info.cause === "tunnel") return "vpn.d.tunnel";
+    if (["down", "mismatch", "blind", "starting", "unknown", "reconnecting"].indexOf(info.view) >= 0) {
+      return "vpn.d." + info.view;
+    }
+    return null;
   }
 
   /* ---------------------------------------------------------------- dashboard (#38) */
@@ -366,6 +383,7 @@
     kindKey: kindKey,
     jobsSummary: jobsSummary,
     vpnView: vpnView,
+    vpnDetailKey: vpnDetailKey,
     detectMode: detectMode,
     looksLikeVideoUrl: looksLikeVideoUrl,
     looksLikeFeedUrl: looksLikeFeedUrl,

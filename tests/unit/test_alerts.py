@@ -457,8 +457,10 @@ def test_the_status_client_passes_on_only_the_known_fields(gluetun, qbit_server,
     assert set(got) == {
         "state", "since", "reason", "paused", "last_poll", "auto_resume",
         "egress", "egress_checked", "egress_country",
+        "cause", "tunnel", "tunnel_since", "probe", "restart", "restarts",
     }  # fmt: skip
     assert got["state"] == "ok"
+    assert (got["tunnel"], got["cause"]) == ("connected", "")
 
 
 def test_an_unreachable_or_odd_watchdog_is_unknown_not_an_error():

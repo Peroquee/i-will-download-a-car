@@ -22,6 +22,7 @@ the abuse test's recovery step.)
 |---|---|---|
 | after the first start, and after any change to the VPN, firewall, compose network or image tags | `make killswitch-test` | 2 to 5 min |
 | after changing the watchdog, `WATCHDOG_*` settings, gluetun or qBittorrent versions | `make vpn-abuse-test` | about 2 min per cycle |
+| after changing the watchdog's tunnel check or restart, or when the VPN misbehaves while gluetun says `running` | `make tunnel-test` (and `make tunnel-restart-test`) | 5 to 15 min |
 | now and then (for example every few months) | both; with `CYCLES=20` for the abuse test | |
 
 Both need the stack up and healthy (`docker compose ps`), run on the media VM, and print **only
@@ -80,7 +81,7 @@ torrents it paused.
 | `HOME IP LEAK` | the network setup is wrong (qBittorrent not in gluetun's namespace, firewall rule changed) | **stop downloading**, `docker compose stop qbittorrent`, compare `docker-compose.yml` with the repository, fix, re-run |
 | step 3 never recovers | netwatch did not restart qBittorrent | `docker restart qbittorrent`; check `docker compose logs qbittorrent` for netwatch lines; `docker compose ps` shows qBittorrent `unhealthy` while its namespace is dead |
 | exit 2, "stack not ready" | gluetun or the watchdog is not healthy | `docker compose ps`; the VPN credentials or `make vpn-config` are the usual cause ([host-setup.md](host-setup.md)) |
-| abuse test: watchdog never `down` | no read-only key, or `QBIT_PASSWORD` empty | `make watchdog-key`, set `QBIT_PASSWORD` in `.env`, `docker compose up -d --force-recreate gluetun watchdog` |
+| abuse test: watchdog never `down` | no read-only key, or `QBIT_PASSWORD` empty | `make watchdog-key`, set `QBIT_PASSWORD` in `.env`, `docker compose up -d --force-recreate gluetun qbittorrent watchdog` |
 | abuse test: `no connection` never seen in a cycle | the outage was shorter than the probe interval, so the window was not really observed | lower `AB_PROBE_INTERVAL` (default 0.5 s); the probe is `curl` run inside the qBittorrent container |
 
 Settings of both scripts (all optional) are environment variables listed in

@@ -360,6 +360,34 @@ def test_the_watchdog_gets_its_settings_from_env(tmp_path: Path):
     )
 
 
+def test_the_watchdog_tunnel_settings_have_defaults_and_follow_env(tmp_path: Path):
+    """#81: grace, probe and restart; an EMPTY probe proxy really switches the probe off."""
+    env = rendered_config()["services"]["watchdog"]["environment"]
+    assert env["WATCHDOG_TUNNEL_GRACE"] == "180"
+    assert env["TUNNEL_PROBE_PROXY"] == "http://gluetun:8888"
+    assert env["TUNNEL_PROBE_TARGETS"] == "1.1.1.1:443,8.8.8.8:443"
+    assert (env["TUNNEL_PROBE_INTERVAL"], env["TUNNEL_PROBE_CONFIRM"]) == ("10", "2")
+    assert (env["WATCHDOG_RESTART_AFTER"], env["WATCHDOG_RESTART_MAX"]) == ("900", "5")
+    env_file = write_env(
+        tmp_path / ".env",
+        GLUETUN_CONTROL_APIKEY="k" * 22,
+        WATCHDOG_TUNNEL_GRACE="60",
+        TUNNEL_PROBE_PROXY="",
+        WATCHDOG_RESTART_AFTER="0",
+    )
+    env = rendered_config(env_file)["services"]["watchdog"]["environment"]
+    assert env["WATCHDOG_TUNNEL_GRACE"] == "60"
+    assert env["TUNNEL_PROBE_PROXY"] == "", "set but empty = no probe, not the default"
+    assert env["WATCHDOG_RESTART_AFTER"] == "0"
+
+
+def test_gluetuns_control_server_does_not_log_every_request():
+    """The watchdog polls it every second; the log lines buried the real errors (#81)."""
+    assert (
+        rendered_config()["services"]["gluetun"]["environment"]["HTTP_CONTROL_SERVER_LOG"] == "off"
+    )
+
+
 @pytest.mark.security
 def test_a_missing_control_key_stops_compose(tmp_path: Path):
     env_file = write_env(tmp_path / ".env", GLUETUN_CONTROL_APIKEY=None)

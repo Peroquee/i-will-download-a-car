@@ -458,8 +458,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Build and start the services, wait until everything runs",
     },
     "step.start.hint": {
-        "de": "Die Dienste sind nicht alle gesund geworden. Am häufigsten: falsche VPN-Zugangsdaten. Schau mit `sudo docker compose ps` und `sudo docker compose logs gluetun --tail 30` nach (die letzten Zeilen kannst du unbedenklich zeigen; niemals die Datei .env).",
-        "en": "Not all services became healthy. Most often: wrong VPN credentials. Look with `sudo docker compose ps` and `sudo docker compose logs gluetun --tail 30` (the last lines are safe to show; never the file .env).",
+        "de": 'Die Dienste sind nicht alle gesund geworden. Am häufigsten steht der VPN-Tunnel nicht (falsche VPN-Zugangsdaten, oder der VPN-Server antwortet nicht). Schau mit `sudo docker compose ps` und `sudo docker compose logs gluetun --tail 60 | grep -v "http server"` nach (die letzten Zeilen kannst du unbedenklich zeigen; niemals die Datei .env).',
+        "en": 'Not all services became healthy. Most often the VPN tunnel is not connected (wrong VPN credentials, or the VPN server does not answer). Look with `sudo docker compose ps` and `sudo docker compose logs gluetun --tail 60 | grep -v "http server"` (the last lines are safe to show; never the file .env).',
     },
     "step.qbit.title": {
         "de": "qBittorrent einrichten (Kategorien)",

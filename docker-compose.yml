@@ -56,6 +56,9 @@ services:
       # yt-dlp ask YouTube THROUGH the VPN (#17, docs/youtube.md). No URL logging.
       HTTPPROXY: "on"
       HTTPPROXY_LOG: "off"
+      # The watchdog polls the control server every second; gluetun logged each request at INFO and
+      # buried the real errors in `docker compose logs gluetun` (#81).
+      HTTP_CONTROL_SERVER_LOG: "off"
     # Gluetun's own health check: healthy only while the tunnel works, so that
     # qbittorrent's depends_on (service_healthy) is meaningful. The long start
     # period gives OpenVPN time to connect before failures count.
@@ -92,7 +95,9 @@ services:
       WEBUI_PORT: "8080"
     # Unhealthy while the container's network namespace is dead (gluetun was restarted
     # as the same container). The watcher below then stops the container so that
-    # `restart: unless-stopped` re-attaches it to gluetun's new namespace.
+    # `restart: unless-stopped` re-attaches it to gluetun's new namespace. A RECREATED gluetun
+    # (docker compose up --force-recreate gluetun) is a new container: qbittorrent has to be
+    # recreated with it (list it in the command), or it stays down.
     healthcheck:
       test: ["CMD", "/custom-services.d/netwatch", "--check"]
       interval: 30s
@@ -215,6 +220,16 @@ services:
       WATCHDOG_INTERVAL: ${WATCHDOG_INTERVAL:-1}
       WATCHDOG_THRESHOLD: ${WATCHDOG_THRESHOLD:-3}
       WATCHDOG_RESUME_AFTER: ${WATCHDOG_RESUME_AFTER:-0}
+      # "running" is not "connected" (#81): a dead tunnel must last this long (gluetun reconnects on
+      # its own) before it is an outage; a probe through gluetun's proxy proves traffic gets out;
+      # and a tunnel dead for WATCHDOG_RESTART_AFTER seconds makes the watchdog restart the VPN.
+      WATCHDOG_TUNNEL_GRACE: ${WATCHDOG_TUNNEL_GRACE:-180}
+      TUNNEL_PROBE_PROXY: ${TUNNEL_PROBE_PROXY-http://gluetun:8888}
+      TUNNEL_PROBE_TARGETS: ${TUNNEL_PROBE_TARGETS:-1.1.1.1:443,8.8.8.8:443}
+      TUNNEL_PROBE_INTERVAL: ${TUNNEL_PROBE_INTERVAL:-10}
+      TUNNEL_PROBE_CONFIRM: ${TUNNEL_PROBE_CONFIRM:-2}
+      WATCHDOG_RESTART_AFTER: ${WATCHDOG_RESTART_AFTER:-900}
+      WATCHDOG_RESTART_MAX: ${WATCHDOG_RESTART_MAX:-5}
       # Alerts (#22): off while ALERT_URL is empty. The URL and token are secrets.
       ALERT_URL: ${ALERT_URL:-}
       ALERT_TOKEN: ${ALERT_TOKEN:-}

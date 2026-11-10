@@ -387,3 +387,35 @@ def test_state_is_kept_in_app_state_so_it_survives_a_restart(db):
     m = monitor(db, free_percent=2)
     m.run_once()
     assert kinds(db) == [], "the low disk was announced before the restart"
+
+
+def test_a_dead_tunnel_under_a_running_vpn_has_its_own_alert_kind_and_then_recovers(db):
+    """#81: gluetun says running, the tunnel is not connected: a different thing to look at."""
+    dog = FakeWatchdog()
+    m = monitor(db, dog)
+    m.run_once()
+    dog.set(state="down", paused=True, cause="tunnel", reason="Tunnel not connected: no address")
+    m.run_once()
+    m.run_once()
+    dog.set(state="ok")
+    m.run_once()
+    assert kinds(db) == ["vpn_tunnel", "vpn_recovered"]
+    tunnel = alertlog.list_alerts(db)[1]
+    assert tunnel.title == "The VPN tunnel is not connected"
+    assert "nothing gets through" in tunnel.detail
+    assert tunnel.severity == "error"
+    assert history(db) == [("ok", False), ("down", True), ("ok", False)]
+    assert alertlog.vpn_history(db)[1]["reason"] == "Tunnel not connected: no address"
+
+
+def test_a_stopped_vpn_keeps_the_old_alert_kind(db):
+    monitor(db, FakeWatchdog(state="down", cause="stopped")).run_once()
+    assert kinds(db) == ["vpn_down"]
+
+
+def test_a_reconnecting_tunnel_is_not_an_alert(db):
+    dog = FakeWatchdog(state="ok", tunnel="reconnecting")
+    m = monitor(db, dog)
+    m.run_once()
+    m.run_once()
+    assert kinds(db) == []

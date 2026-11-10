@@ -7,8 +7,9 @@ nothing (pausing torrents stays the watchdog's job, retrying a job stays the use
 * **The VPN**, through the watchdog's status (the watchdog has no database; the app records its
   transitions). The condition is `ok`, `down`, `blind`, `mismatch` (the egress check), `starting`
   or `unknown` (the watchdog does not answer). Every change is a row in `vpn_events`. Alerts:
-  `vpn_down`, `vpn_blind`, `egress_mismatch`, `watchdog_silent` (unknown for several polls in a
-  row; one missed poll is not news) and `vpn_recovered` (back to `ok` after one of those).
+  `vpn_down`, `vpn_tunnel` (#81: the process runs, the tunnel does not), `vpn_blind`,
+  `egress_mismatch`, `watchdog_silent` (unknown for several polls in a row; one missed poll is not
+  news) and `vpn_recovered` (back to `ok` after one of those).
   `starting` alone never alerts. The last condition is kept in `app_state`, so a restart of the
   app does not repeat an alert.
 * **Failed jobs**: every job that failed since the last look (a cursor in `app_state`; the first
@@ -125,13 +126,22 @@ class AlertMonitor:
             return  # only the "paused" flag changed: shown in the history, not worth an alert
         logger.info("vpn condition changed", extra={"condition": condition, "was": before})
         if condition == "down":
+            # The VPN process can run while the tunnel is dead (#81): a different thing to look
+            # at (the VPN's logs) than a stopped container, so it has its own alert kind and text.
+            tunnel = status.get("cause") == "tunnel"
             alertlog.add(
                 self.db,
-                "vpn_down",
+                "vpn_tunnel" if tunnel else "vpn_down",
                 "error",
-                "The VPN is down",
-                "The VPN connection is down. The watchdog pauses all torrents so that nothing "
-                "leaves through the home connection. Downloads wait until the VPN is back.",
+                "The VPN tunnel is not connected" if tunnel else "The VPN is down",
+                (
+                    "The VPN process is running, but the tunnel is not connected: nothing gets "
+                    "through it. "
+                    if tunnel
+                    else "The VPN connection is down. "
+                )
+                + "The watchdog pauses all torrents so that nothing leaves through the home "
+                "connection. Downloads wait until the VPN is back.",
                 {"paused": paused},
             )
         elif condition == "blind":

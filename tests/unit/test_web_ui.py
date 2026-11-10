@@ -459,9 +459,13 @@ def test_every_key_used_in_the_page_and_the_script_exists():
     used = set(re.findall(r'data-i18n(?:-placeholder|-label)?="([\w.-]+)"', HTML))
     used |= {k for k in re.findall(r'\bt\("([\w.]+)"', APP_JS) if not k.endswith(".")}
     used |= {
-        f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch", "stale")
+        f"vpn.{s}"
+        for s in ("ok", "down", "blind", "starting", "unknown", "mismatch", "stale", "reconnecting")
     }
-    used |= {f"vpn.d.{s}" for s in ("down", "mismatch", "blind", "starting", "unknown")}
+    used |= {
+        f"vpn.d.{s}"
+        for s in ("down", "mismatch", "blind", "starting", "unknown", "reconnecting", "tunnel")
+    }
     used |= {f"status.{s}" for s in ("queued", "downloading", "organizing", "done", "failed")}
     used |= {f"time.{u}" for u in ("now", "minutes", "hours", "days")}
     used |= {"subs.polling", "subs.poll", "subs.confirm", "subs.remove"}
@@ -764,12 +768,63 @@ def test_the_vpn_view_passes_on_only_safe_details():
         " since: '2026-11-01T10:00:00Z', ip: '1.2.3.4'})"
     )
     assert result == {
-        "view": "ok", "alert": False, "paused": True, "since": "2026-11-01T10:00:00Z",
-        "country": "Switzerland",
+        "view": "ok", "cause": "", "alert": False, "paused": True,
+        "since": "2026-11-01T10:00:00Z", "country": "Switzerland",
     }  # fmt: skip
     assert (
         run_node("L.vpnView({state: 'down', egress: 'ok', egress_country: 'X'})")["country"] is None
     )
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("data", "view", "cause", "alert", "since"),
+    [
+        # gluetun says running but the tunnel is not connected yet: amber, no alarm (#81)
+        ({"state": "ok", "tunnel": "reconnecting", "tunnel_since": "2026-11-10T13:33:00Z",
+          "since": "2026-11-10T09:00:00Z"}, "reconnecting", "", False, "2026-11-10T13:33:00Z"),
+        # an outage because of the tunnel: red, says why, and counts from when the tunnel broke
+        ({"state": "down", "cause": "tunnel", "tunnel": "down", "tunnel_since": "2026-11-10T13:33:00Z",
+          "since": "2026-11-10T13:37:00Z"}, "down", "tunnel", True, "2026-11-10T13:33:00Z"),
+        ({"state": "down", "cause": "stopped", "since": "2026-11-10T13:37:00Z"},
+         "down", "stopped", True, "2026-11-10T13:37:00Z"),
+        ({"state": "ok", "tunnel": "connected"}, "ok", "", False, None),
+        # never "reconnecting" unless the watchdog is ok, and the leak verdict still wins
+        ({"state": "down", "tunnel": "reconnecting"}, "down", "", True, None),
+        ({"state": "ok", "egress": "mismatch", "tunnel": "reconnecting"}, "mismatch", "", True, None),
+        ({"state": "unknown", "tunnel": "reconnecting"}, "unknown", "", False, None),
+    ],
+)  # fmt: skip
+def test_a_tunnel_that_is_not_connected_is_shown_as_such_not_as_running(
+    data, view, cause, alert, since
+):
+    result = run_node(f"L.vpnView({json.dumps(data)})")
+    assert (result["view"], result["cause"], result["alert"], result["since"]) == (
+        view, cause, alert, since,
+    )  # fmt: skip
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("view", "cause", "key"),
+    [
+        ("down", "tunnel", "vpn.d.tunnel"), ("down", "stopped", "vpn.d.down"),
+        ("down", "", "vpn.d.down"), ("reconnecting", "", "vpn.d.reconnecting"),
+        ("blind", "", "vpn.d.blind"), ("ok", "", None),
+    ],
+)  # fmt: skip
+def test_the_explanation_under_the_vpn_state_names_the_tunnel(view, cause, key):
+    info = {"view": view, "cause": cause}
+    assert run_node(f"L.vpnDetailKey({json.dumps(info)})") == key
+
+
+def test_the_tunnel_texts_exist_in_both_languages_and_say_tunnel():
+    t = translations(HTML)
+    for lang in ("de", "en"):
+        for key in ("vpn.reconnecting", "vpn.d.reconnecting", "vpn.d.tunnel"):
+            assert key in t[lang], (lang, key)
+    assert "tunnel" in t["en"]["vpn.d.tunnel"].lower()
+    assert "Tunnel" in t["de"]["vpn.d.tunnel"]
 
 
 def test_the_vpn_indicator_and_problem_banner_are_part_of_the_page():
@@ -1253,7 +1308,7 @@ def test_a_422_on_the_album_lands_on_the_album_field():
 
 DASH_JS = (STATIC_DIR / "dashboard.js").read_text(encoding="utf-8")
 ALERT_KINDS = (
-    "vpn_down", "vpn_blind", "egress_mismatch", "watchdog_silent", "vpn_recovered",
+    "vpn_down", "vpn_tunnel", "vpn_blind", "egress_mismatch", "watchdog_silent", "vpn_recovered",
     "job_failed", "feed_error", "disk_low",
     "update_done", "update_blocked", "update_rolled_back", "update_rolled_back_db",
     "update_halted", "update_checks", "backlog_paused", "youtube_unavailable",
@@ -1281,7 +1336,10 @@ def test_every_key_the_dashboard_uses_exists_in_both_languages():
     used = {k for k in re.findall(r'\bt\("([\w.]+)"', DASH_JS) if not k.endswith((".", "_"))}
     used |= {f"dash.backlog_{s}" for s in ("running", "paused", "done", "cancelled")}  # #45
     used |= {f"alert.sev.{s}" for s in ("info", "warning", "error")}
-    used |= {f"vpn.{s}" for s in ("ok", "down", "blind", "starting", "unknown", "mismatch")}
+    used |= {
+        f"vpn.{s}"
+        for s in ("ok", "down", "blind", "starting", "unknown", "mismatch", "reconnecting")
+    }
     for kind in ALERT_KINDS:
         used |= {f"alert.{kind}.{part}" for part in ("title", "what", "did", "todo")}
     for lang in ("de", "en"):
