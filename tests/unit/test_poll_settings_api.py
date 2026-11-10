@@ -307,7 +307,9 @@ def test_a_podcast_follows_the_podcast_default_and_its_own_values(database, defa
 
 @pytest.fixture
 def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("TZ", "Europe/Berlin")  # the container sets it (compose); a CI runner may not
+    monkeypatch.setenv(
+        "TZ", "Europe/Berlin"
+    )  # the container sets it (compose); a CI runner may not
     with running(tmp_path) as client:
         yield client
 
