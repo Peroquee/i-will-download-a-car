@@ -16,6 +16,7 @@ from typing import Any, Literal
 from .db import Database
 
 MAX_ERROR_LENGTH = 500
+MAX_NOTE_LENGTH = 500
 
 Outcome = Literal["created", "requeued", "duplicate"]
 
@@ -33,6 +34,7 @@ class Job:
     progress_bytes: int | None = None  # magnet jobs: what the reconciler last saw (#40)
     progress_at: str | None = None  # ... and when that last changed
     priority: int = 0  # 1 = high priority (#51); 0 = a normal download
+    note: str | None = None  # a short line about a finished job (#69), e.g. skipped files
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Job:
@@ -48,6 +50,7 @@ class Job:
             progress_bytes=row["progress_bytes"],
             progress_at=row["progress_at"],
             priority=row["priority"],
+            note=row["note"],
         )
 
 
@@ -103,7 +106,7 @@ def submit_job(
         ).fetchone()
         if outcome == "duplicate" and row["status"] == "failed" and retry_failed:
             conn.execute(
-                "UPDATE jobs SET status = 'queued', error = NULL, metadata = ?, "
+                "UPDATE jobs SET status = 'queued', error = NULL, note = NULL, metadata = ?, "
                 "source = COALESCE(?, source), progress_bytes = NULL, progress_at = NULL "
                 "WHERE id = ?",
                 (metadata_json, source, row["id"]),
@@ -187,18 +190,32 @@ def active_magnet_jobs(db: Database) -> list[Job]:
 
 
 def transition(
-    db: Database, job_id: int, to: str, *, expected: tuple[str, ...], error: str | None = None
+    db: Database,
+    job_id: int,
+    to: str,
+    *,
+    expected: tuple[str, ...],
+    error: str | None = None,
+    note: str | None = None,
 ) -> bool:
     """Move a job to status `to` only if it is still in one of the `expected` statuses.
 
     Returns False if someone else changed it meanwhile (so two actors never both win).
     `error` is stored (cut to length) for `failed`, and cleared for every other status.
+    `note` is the short line a finished job may carry (#69); it is stored on `done` and
+    cleared on every other transition (a job that runs again starts clean).
     """
     marks = ", ".join("?" for _ in expected)
     with db.transaction() as conn:
         cursor = conn.execute(
-            f"UPDATE jobs SET status = ?, error = ? WHERE id = ? AND status IN ({marks})",
-            (to, error[:MAX_ERROR_LENGTH] if error else None, job_id, *expected),
+            f"UPDATE jobs SET status = ?, error = ?, note = ? WHERE id = ? AND status IN ({marks})",
+            (
+                to,
+                error[:MAX_ERROR_LENGTH] if error else None,
+                note[:MAX_NOTE_LENGTH] if note else None,
+                job_id,
+                *expected,
+            ),
         )
         return cursor.rowcount == 1
 

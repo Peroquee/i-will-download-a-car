@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -43,8 +44,26 @@ def test_health_is_ok_when_the_data_root_is_there(tmp_path):
     assert response.json() == {
         "status": "ok",
         "version": __version__,
-        "checks": {"data_root": "ok", "database": "ok", "scheduler": "ok"},
+        "checks": {
+            "data_root": "ok",
+            "database": "ok",
+            "scheduler": "ok",
+            "workers": "ok",
+        },
     }
+
+
+def test_health_is_503_when_a_worker_thread_is_no_longer_running(tmp_path):
+    """A dead worker would leave the API accepting jobs nobody ever runs (#69)."""
+    with make(tmp_path) as client:
+        dead = threading.Thread(target=lambda: None)
+        dead.start()
+        dead.join()
+        client.app.state.youtube_worker_thread = dead
+        response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+    assert response.json()["checks"]["workers"] == "not running: youtube"
 
 
 def test_health_is_503_degraded_when_the_media_volume_is_missing(tmp_path):

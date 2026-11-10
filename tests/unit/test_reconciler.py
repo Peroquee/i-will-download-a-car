@@ -75,12 +75,14 @@ class Organizer:
         self.calls: list[tuple[int, str]] = []
         self.status_seen: list[str] = []
         self.raises: BaseException | None = None
+        self.note: str | None = None
 
-    def __call__(self, job: Job, t: Torrent) -> None:
+    def __call__(self, job: Job, t: Torrent) -> str | None:
         self.calls.append((job.id, t.content_path))
         self.status_seen.append(jobs.get_job(self.db, job.id).status)
         if self.raises is not None:
             raise self.raises
+        return self.note
 
 
 def add_job(db: Database, infohash: str, status: str = "queued", created: datetime | None = None):
@@ -128,6 +130,18 @@ def test_a_finished_torrent_is_organized_and_the_job_is_done(fake, database):
     assert organizer.calls == [(job.id, "/data/downloads/movies/t-1")]
     assert organizer.status_seen == ["organizing"], "claimed before the organizer ran"
     assert status_of(database, job.id) == ("done", None)
+
+
+def test_a_note_from_the_organizer_is_stored_on_the_done_job(fake, database):
+    """`done` with a note: some files were skipped, and the job list says so (#69)."""
+    job = add_job(database, H1, "downloading")
+    fake.torrents = [torrent(H1, **DONE)]
+    reconciler, organizer = make(fake, database)
+    organizer.note = "3 of 10 files skipped: S03E08.mkv: no episode number in the name"
+    assert reconciler.run_once().done == [job.id]
+    stored = jobs.get_job(database, job.id)
+    assert (stored.status, stored.error) == ("done", None)
+    assert stored.note == "3 of 10 files skipped: S03E08.mkv: no episode number in the name"
 
 
 def test_a_torrent_that_finished_while_the_app_was_down_is_organized_at_first_sight(fake, database):

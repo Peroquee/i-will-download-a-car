@@ -174,6 +174,8 @@ class FakeQbittorrent:
                     if "filter" in query:
                         items = [t for t in items if query["filter"][0] in t.get("_filters", [])]
                     return self.reply(200, json.dumps(items), {"Content-Type": "application/json"})
+                if path == "torrents/recheck":
+                    return self.reply(200, "")
                 if path == "torrents/delete":
                     if fake.delete_status != 200:
                         return self.reply(fake.delete_status, "bad")

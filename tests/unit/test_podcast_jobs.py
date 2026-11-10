@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import random
+import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -288,6 +289,49 @@ def test_stored_data_that_is_no_longer_valid_fails_clearly(world):
     assert job.status == "failed"
     assert "pick the episode again" in job.error
     assert world.fetcher.calls == []
+
+
+def test_an_unexpected_error_while_reading_the_job_is_logged(world, monkeypatch, caplog):
+    """Only really invalid data gives "not valid any more"; a bug is logged with its traceback."""
+    job = world.queue()
+
+    def broken(value):
+        raise RuntimeError("a bug, not bad data")
+
+    monkeypatch.setattr("ytp.podcast_jobs.PodcastJobMetadata.model_validate", broken)
+    with caplog.at_level(logging.ERROR, logger="ytp.podcast_jobs"):
+        world.worker().run_one()
+    assert world.status(job.id) == ("failed", "the download failed: RuntimeError")
+    assert any(record.exc_info for record in caplog.records), "the traceback is in the log"
+
+
+def test_a_database_error_at_start_does_not_kill_the_worker(world, monkeypatch):
+    """requeue_interrupted runs inside the guarded loop and is retried until it works (#69)."""
+    world.fetcher.files["https://cdn.example/new.mp3"] = b"ID3x"
+    job = world.queue()
+    real = jobs.requeue_interrupted
+    attempts = []
+
+    def busy_at_first(db, job_type):
+        attempts.append(job_type)
+        if len(attempts) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(db, job_type)
+
+    monkeypatch.setattr("ytp.podcast_jobs.jobs.requeue_interrupted", busy_at_first)
+    stop = threading.Event()
+    worker = world.worker(idle_seconds=0.05)
+    thread = threading.Thread(target=worker.run, args=(stop,))
+    thread.start()
+    for _ in range(100):
+        if world.status(job.id)[0] == "done":
+            break
+        threading.Event().wait(0.05)
+    stop.set()
+    worker.wake()
+    thread.join(5)
+    assert len(attempts) >= 2, "the worker tried the requeue again"
+    assert world.status(job.id) == ("done", None), "the worker thread survived the database error"
 
 
 @pytest.mark.security

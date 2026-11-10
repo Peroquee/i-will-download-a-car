@@ -566,6 +566,20 @@ def test_from_settings_uses_url_user_and_password():
     assert "p" * 12 not in repr(client)
 
 
+def test_recheck_torrents_sends_the_hashes_in_the_body(fake):
+    client_for(fake).recheck_torrents(["A" * 40])
+    call = fake.calls("torrents/recheck")[0]
+    assert call.method == "POST"
+    assert call.form == {"hashes": ["a" * 40]}
+    assert call.query == {}
+
+
+def test_recheck_torrents_reports_a_refusal(fake):
+    fake.fail_status = 500
+    with pytest.raises(QbitUnavailable):
+        client_for(fake).recheck_torrents(["a" * 40])
+
+
 def test_delete_torrents_sends_the_hash_and_the_files_flag_in_the_body(fake):
     fake.torrents = [{"hash": "a" * 40}, {"hash": "b" * 40}]
     client_for(fake).delete_torrents(["A" * 40], delete_files=True)

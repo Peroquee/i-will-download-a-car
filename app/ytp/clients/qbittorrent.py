@@ -445,6 +445,12 @@ class QbitClient:
         """Resume just these torrents (infohashes); same start/resume fallback as resume_all()."""
         self._all_torrents("start", "resume", _hash_list(hashes))
 
+    def recheck_torrents(self, hashes: list[str]) -> None:
+        """Ask qBittorrent to check these torrents again (this clears an error state)."""
+        status, _ = self._request("POST", "torrents/recheck", form={"hashes": _hash_list(hashes)})
+        if status != 200:
+            raise QbitRequestError(f"torrents/recheck answered {status}", status)
+
     def delete_torrents(self, hashes: list[str], *, delete_files: bool) -> None:
         """Remove these torrents (infohashes) from qBittorrent, and their files if asked.
 

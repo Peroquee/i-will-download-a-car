@@ -317,6 +317,30 @@ def test_the_video_as_an_episode_keeps_the_picture_beside_it(world, tagged):
     assert tagged == [], "a video is not tagged"
 
 
+def test_a_thumbnail_that_cannot_be_filed_does_not_fail_the_episode(
+    world, tagged, monkeypatch, caplog
+):
+    """The episode is already in the library; the sidecar must not fail the job (#69)."""
+    import errno
+    import logging
+    import shutil
+
+    real_move = shutil.move
+
+    def broken(source, target, *args, **kwargs):
+        if str(target).endswith(".jpg"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_move(source, target, *args, **kwargs)
+
+    monkeypatch.setattr("ytp.youtube_jobs.shutil.move", broken)
+    job = submit(world, audio_only=False)
+    with caplog.at_level(logging.WARNING, logger="ytp.youtube_jobs"):
+        world.worker().run_one()
+    assert world.status(job.id) == ("done", None)
+    assert podcasts_tree(world) == ["Blender Cast/2014-02-10 - Big Buck Bunny.mp4"]
+    assert "thumbnail not filed" in caplog.text
+
+
 def test_the_feed_date_is_used_when_the_download_has_none(world, tagged):
     info = {k: v for k, v in INFO.items() if k != "upload_date"}
     submit(world, published="2026-05-06")

@@ -120,6 +120,13 @@ def _is_sample(path: Path, root: Path) -> bool:
     return bool(_SAMPLE_WORD.search(path.stem))
 
 
+def _walk_failed(error: OSError) -> None:
+    """A folder that cannot be read must fail the job, not silently shrink the plan (#69)."""
+    raise OrganizeError(
+        f"cannot read the folder {error.filename}: {error.strerror or error}"
+    ) from error
+
+
 def _walk_files(root: Path) -> list[Path]:
     """Regular files below `root` (or `root` itself if it is one); symlinks are never followed."""
     if root.is_symlink():
@@ -127,7 +134,7 @@ def _walk_files(root: Path) -> list[Path]:
     if root.is_file():
         return [root]
     files: list[Path] = []
-    for directory, subdirs, names in os.walk(root, followlinks=False):
+    for directory, subdirs, names in os.walk(root, followlinks=False, onerror=_walk_failed):
         subdirs[:] = sorted(d for d in subdirs if not os.path.islink(os.path.join(directory, d)))
         for name in sorted(names):
             path = Path(directory) / name
@@ -308,6 +315,31 @@ def _copy(source: Path, target: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def result_note(result: OrganizeResult) -> str | None:
+    """A short line for a job that is `done` although not every file was filed (#69).
+
+    `None` when everything was linked. The note says how many files were left out and gives
+    the first reason, so "1 of 10 episodes" is visible in the job list instead of only in the
+    log.
+    """
+    problems = len(result.skipped) + len(result.conflicts)
+    if not problems:
+        return None
+    total = result.linked + result.copied + result.already_there + problems
+    if not result.conflicts:
+        return f"{problems} of {total} files skipped: {result.skipped[0]}"
+    if not result.skipped:
+        return (
+            f"{problems} of {total} files already in the library with other content, "
+            f"not overwritten: {result.conflicts[0]}"
+        )
+    return (
+        f"{problems} of {total} files not filed: {len(result.skipped)} skipped "
+        f"({result.skipped[0]}); {len(result.conflicts)} already in the library "
+        f"with other content ({result.conflicts[0]})"
+    )
+
+
 def execute(plan: Plan, library: Path, downloads: Path) -> OrganizeResult:
     result = OrganizeResult(skipped=list(plan.skipped))
     library_root = library.resolve()
@@ -365,13 +397,17 @@ def execute(plan: Plan, library: Path, downloads: Path) -> OrganizeResult:
 
 
 class FileOrganizer:
-    """`organize(job, torrent)` for the reconciler: plan, link, ask Jellyfin to refresh."""
+    """`organize(job, torrent)` for the reconciler: plan, link, ask Jellyfin to refresh.
+
+    Returns the note for a job that is `done` although some files were skipped or conflicted
+    (#69); None when everything was filed.
+    """
 
     def __init__(self, settings: Settings, refresher: LibraryRefresher):
         self.settings = settings
         self.refresher = refresher
 
-    def __call__(self, job: Job, torrent: Torrent) -> None:
+    def __call__(self, job: Job, torrent: Torrent) -> str | None:
         try:
             meta = parse_metadata(job.metadata)
         except ValidationError as exc:
@@ -423,3 +459,4 @@ class FileOrganizer:
         self.refresher.request_refresh(
             unicodedata.normalize("NFC", library_name), immediate=job.priority > 0
         )
+        return result_note(result)

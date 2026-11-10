@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _set_up_accounts(app.state.db, settings)
     # YouTube downloads (#18): the database is the queue, one worker thread runs it.
     app.state.youtube_worker = None
+    app.state.youtube_worker_thread = None
     worker_stop = threading.Event()
     if app.state.db is not None:
         app.state.youtube_worker = YoutubeWorker(
@@ -102,22 +103,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             app.state.jellyfin,
         )
-        threading.Thread(
+        app.state.youtube_worker_thread = threading.Thread(
             target=app.state.youtube_worker.run, args=(worker_stop,), name="youtube", daemon=True
-        ).start()
+        )
+        app.state.youtube_worker_thread.start()
     # Podcast episodes (#34): the same kind of queue and worker thread. Feeds and files are
     # fetched through SafeFetcher (public addresses only, through the VPN proxy).
     app.state.podcast_feeds = PodcastFeedClient(
         SafeFetcher(settings.podcast_proxy, blocked_networks=settings.fetch_blocked_networks)
     )
     app.state.podcast_worker = None
+    app.state.podcast_worker_thread = None
     if app.state.db is not None:
         app.state.podcast_worker = PodcastWorker(
             app.state.db, settings, app.state.podcast_feeds, app.state.jellyfin
         )
-        threading.Thread(
+        app.state.podcast_worker_thread = threading.Thread(
             target=app.state.podcast_worker.run, args=(worker_stop,), name="podcasts", daemon=True
-        ).start()
+        )
+        app.state.podcast_worker_thread.start()
     # The scheduler needs the database (its jobs keep their state there).
     app.state.scheduler = None
     app.state.reconciler = None
@@ -246,6 +250,28 @@ def _set_up_accounts(db: Database, settings: Settings) -> None:
         )
 
 
+def _workers_state(state) -> str:
+    """Whether the download worker threads are alive (for /health, #69).
+
+    A worker whose thread died would leave the API accepting jobs (201) that nobody ever runs;
+    the app must say so instead of looking healthy.
+    """
+    workers = (
+        ("youtube", state.youtube_worker, state.youtube_worker_thread),
+        ("podcasts", state.podcast_worker, state.podcast_worker_thread),
+    )
+    dead = [
+        name
+        for name, worker, thread in workers
+        if worker is not None and (thread is None or not thread.is_alive())
+    ]
+    if dead:
+        return "not running: " + ", ".join(dead)
+    if all(worker is None for _, worker, _ in workers):
+        return "disabled: no database"
+    return "ok"
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the app. With no argument the settings come from the environment."""
     resolved = settings if settings is not None else Settings.from_env()
@@ -281,6 +307,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.youtube = None
     app.state.channels = None
     app.state.youtube_worker = None
+    app.state.youtube_worker_thread = None
+    app.state.podcast_worker_thread = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     app.state.limiter = LoginLimiter()
     api.register(app)
@@ -312,9 +340,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             scheduler_problem = scheduler.check()
             scheduler_state = "ok" if scheduler_problem is None else f"stalled: {scheduler_problem}"
-        # "disabled" is already reported through the database; only a scheduler that should work
-        # and does not turns the app unhealthy on its own.
-        healthy = data_root_ok and db_state == "ok" and scheduler_state in {"ok"}
+        workers_state = _workers_state(app.state)
+        # "disabled" is already reported through the database; only a scheduler or a worker
+        # that should work and does not turns the app unhealthy on its own (#69).
+        healthy = (
+            data_root_ok and db_state == "ok" and scheduler_state == "ok" and workers_state == "ok"
+        )
         if not healthy:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
@@ -324,6 +355,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "data_root": "ok" if data_root_ok else "missing",
                 "database": db_state,
                 "scheduler": scheduler_state,
+                "workers": workers_state,
             },
         }
 
