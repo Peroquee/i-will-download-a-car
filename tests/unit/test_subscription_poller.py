@@ -15,6 +15,7 @@ from ytp.db import Database
 from ytp.feeds import FeedClient, FeedError
 from ytp.subscription_poller import (
     MAX_CHANNELS_PER_RUN,
+    MAX_CHECKS_PER_MINUTE,
     RETRY_MINUTES,
     SubscriptionPoller,
     interval_for,
@@ -302,13 +303,21 @@ def test_channels_are_spread_out_within_a_run(db):
     assert all(3.0 <= s <= 8.0 for s in poller.sleeps)
 
 
-def test_a_run_polls_at_most_a_few_channels(db):
+def test_a_run_polls_at_most_a_few_channels_and_never_more_than_the_cap_per_minute(db):
     for i in range(MAX_CHANNELS_PER_RUN + 5):
         add(db, f"UC{i:022d}", f"c{i}")
     feeds = FakeFeeds()
     poller = make_poller(db, feeds)
-    assert poller.run_once().polled == MAX_CHANNELS_PER_RUN
-    assert poller.run_once().polled == 5, "the rest follow at the next tick"
+    clock = [NOW]
+    poller._now = lambda: clock[0]
+    assert MAX_CHECKS_PER_MINUTE <= MAX_CHANNELS_PER_RUN
+    assert poller.run_once().polled == MAX_CHECKS_PER_MINUTE
+    assert poller.run_once().polled == 0, "the same minute: the cap is used up"
+    clock[0] = NOW + timedelta(seconds=61)
+    second = poller.run_once().polled
+    assert second == min(MAX_CHECKS_PER_MINUTE, MAX_CHANNELS_PER_RUN + 5 - MAX_CHECKS_PER_MINUTE)
+    clock[0] = NOW + timedelta(seconds=122)
+    assert poller.run_once().polled == MAX_CHANNELS_PER_RUN + 5 - MAX_CHECKS_PER_MINUTE - second
 
 
 def test_a_run_ends_early_when_the_app_shuts_down(db):

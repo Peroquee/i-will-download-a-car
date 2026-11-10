@@ -307,6 +307,9 @@ class PodcastPoller(SubscriptionPoller):
     def _key(self, sub: PodcastSubscription) -> str:  # type: ignore[override]
         return sub.feed_url
 
+    def _fill_history(self, sub) -> None:  # type: ignore[no-untyped-def,override]
+        """A podcast feed has the times of its episodes on every poll: nothing to fill."""
+
     def _record(self, sub: PodcastSubscription, error: str | None) -> None:  # type: ignore[override]
         podcast_subscriptions.record_poll(self.db, sub.id, error, self._now())
 
@@ -317,6 +320,7 @@ class PodcastPoller(SubscriptionPoller):
         except PodcastError as error:
             self._record(sub, error.message)
             raise
+        self._remember_publications(sub, [(e.key, e.published) for e in podcast.episodes])
         queued = 0
         followers = accounts.followers(self.db, "podcast", sub.id)
         for episode in new_entries(sub, podcast.episodes):  # type: ignore[arg-type]

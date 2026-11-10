@@ -440,7 +440,15 @@ def test_when_yt_dlp_fails_the_rss_feed_is_used_and_the_poll_succeeds(db):
 
 
 def test_the_rss_feed_is_not_asked_when_yt_dlp_works(db):
+    """The poll itself never uses it. (A thin publication history is filled from it once, #80: see
+    test_smart_poller; with a full history it is not asked at all.)"""
+    from ytp import publish_history
+
     sub = add(db)
+    base = NOW - timedelta(days=200)
+    publish_history.record(
+        db, "channel", sub.id, [(f"h{n}", base + timedelta(days=n, hours=n % 5)) for n in range(25)]
+    )
     feeds = rss_feeds()
     poller, probe = poller_for(db, FakeListing(v(1)), feeds=feeds)
     probe.default = traits_at(-30)

@@ -24,8 +24,12 @@ POST /api/subscriptions
     404/403/502/504/429 {"detail", "kind"}: the lookup failed (see POST /api/youtube/probe)
 
 PATCH /api/subscriptions/{id}
-    One or more of {"max_height": 720|null, "poll_minutes": 120|0|null, "poll_at": "06:00"|""|null}
-    (#65, #79); null = follow the server default (`GET /api/settings/defaults`).
+    One or more of {"max_height": 720|null, "poll_minutes": 120|0|null, "poll_at": "06:00"|""|null,
+    "poll_mode": "smart"|"fixed"|null} (#65, #79, #80); null = follow the server default
+    (`GET /api/settings/defaults`).
+    * `poll_mode` (#80): `smart` checks around the times the channel usually publishes (learned
+      from its history) and falls back to `poll_minutes`/`poll_at` while the pattern is unknown;
+      `fixed` uses only the interval and start time. Smart is the server default.
     * `max_height`: the cap for new videos (see above).
     * `poll_minutes`: how often the channel's feed is looked at; 0 = paused (only "check now"
       looks at it), otherwise 15..1440 minutes.
@@ -46,6 +50,11 @@ GET /api/subscriptions
                         skipped: {count, by_reason: {live, premiere, short},
                                   recent: [{video_id, reason, title, published, skipped_at}]}},
                        ...]}
+    `poll_mode` is the channel's own mode (null = the server default) and `smart` (#80) what the
+    smart mode knows: {mode (the effective one), regular, confidence 0..1, events, slots:
+    [{weekday 0=Mon..6=Sun, minute of the day}] in the server's time zone, next_window: {start,
+    expected, active} | null}. `regular` is false (and `slots` empty) while the history is too thin
+    or irregular: the interval is used then. See docs/youtube.md.
     `skipped` (#39): videos the poller left out on purpose (live streams, premieres, Shorts); the
     five newest are listed. Not jobs, not failures.
 
@@ -71,7 +80,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 from pydantic_core import PydanticCustomError
 
 from . import accounts, poll_schedule, resolution, seen_videos, skipped_videos, subscriptions
-from .apiutil import PROBE_STATUS, followed_view, may_use, problem
+from .apiutil import PROBE_STATUS, followed_view, may_use, problem, smart_views
 from .channels import ChannelResolver, InvalidChannel, parse_channel_ref
 from .feeds import FeedError
 from .metadata import Name, sanitize_name
@@ -217,8 +226,11 @@ async def list_subscriptions(request: Request) -> JSONResponse:
         return problem(503, "The database is not available; see /health.")
     rows = await asyncio.to_thread(subscriptions.list_all, db)
     entries = await followed_view(db, "channel", rows, request.state.account)
+    by_id = {row.id: row for row in rows}
+    smart = await asyncio.to_thread(smart_views, request.app.state.defaults, db, "channel", by_id)
     for entry in entries:
         entry["skipped"] = await asyncio.to_thread(skipped_videos.summary, db, entry["id"])
+        entry["smart"] = smart.get(entry["id"])
     return JSONResponse({"subscriptions": entries})
 
 

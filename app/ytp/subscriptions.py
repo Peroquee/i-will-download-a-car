@@ -39,6 +39,9 @@ class Subscription:
     max_height: int | None = None  # new videos of this channel (#65); None = server default
     poll_minutes: int | None = None  # check interval (#79): 0 = paused, None = server default
     poll_at: str | None = None  # start time "HH:MM" (#79): "" = none, None = server default
+    poll_mode: str | None = None  # "smart" | "fixed" (#80); None = the server default
+    poll_errors: int = 0  # failed checks in a row (#80): the retry waits longer each time
+    history_checked_at: str | None = None  # when the publication history was last filled (#80)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subscription:
@@ -56,6 +59,9 @@ class Subscription:
             max_height=row["max_height"],
             poll_minutes=row["poll_minutes"],
             poll_at=row["poll_at"],
+            poll_mode=row["poll_mode"],
+            poll_errors=row["poll_errors"],
+            history_checked_at=row["history_checked_at"],
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -74,6 +80,7 @@ class Subscription:
             "max_height": self.max_height,
             "poll_minutes": self.poll_minutes,
             "poll_at": self.poll_at,
+            "poll_mode": self.poll_mode,
         }
 
 
@@ -130,7 +137,7 @@ def set_max_height(
     return Subscription.from_row(row)
 
 
-SETTINGS_COLUMNS = ("max_height", "poll_minutes", "poll_at")
+SETTINGS_COLUMNS = ("max_height", "poll_minutes", "poll_at", "poll_mode")
 
 
 def update_settings(
@@ -163,6 +170,10 @@ def list_all(db: Database) -> list[Subscription]:
 def delete(db: Database, subscription_id: int) -> bool:
     """Unsubscribe. Videos already downloaded stay where they are. False if there was none."""
     with db.transaction() as conn:
+        conn.execute(
+            "DELETE FROM publish_history WHERE kind = 'channel' AND subscription_id = ?",
+            (subscription_id,),
+        )  # ids can be reused: a new channel must not inherit the old one's history (#80)
         return (
             conn.execute("DELETE FROM subscriptions WHERE id = ?", (subscription_id,)).rowcount == 1
         )
@@ -178,8 +189,9 @@ def record_poll(
         if when is None:
             stamp = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
             conn.execute(
-                f"UPDATE subscriptions SET last_checked = {stamp}, last_error = ? WHERE id = ?",
-                (message, subscription_id),
+                f"UPDATE subscriptions SET last_checked = {stamp}, last_error = ?, "
+                "poll_errors = CASE WHEN ? IS NULL THEN 0 ELSE poll_errors + 1 END WHERE id = ?",
+                (message, message, subscription_id),
             )
         else:
             text = (
@@ -187,6 +199,17 @@ def record_poll(
                 + f"{when.microsecond // 1000:03d}Z"
             )
             conn.execute(
-                "UPDATE subscriptions SET last_checked = ?, last_error = ? WHERE id = ?",
-                (text, message, subscription_id),
+                "UPDATE subscriptions SET last_checked = ?, last_error = ?, "
+                "poll_errors = CASE WHEN ? IS NULL THEN 0 ELSE poll_errors + 1 END WHERE id = ?",
+                (text, message, message, subscription_id),
             )
+
+
+def mark_history_checked(db: Database, subscription_id: int, when: datetime) -> None:
+    """Note that the publication history was just filled from the channel's RSS feed (#80)."""
+    text = when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{when.microsecond // 1000:03d}Z"
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE subscriptions SET history_checked_at = ? WHERE id = ?",
+            (text, subscription_id),
+        )

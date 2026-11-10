@@ -33,8 +33,10 @@ POST /api/podcasts         {"feed": "...", "name": "<folder, optional>", "backfi
     episodes the first poll also takes; 0 = only episodes published after subscribing.
 GET    /api/podcasts            {"podcasts": [{id, kind: "podcast", feed_url, title, enabled,
                                  backfill, created_at, last_checked, last_error,
-                                 poll_minutes, poll_at}, ...]}
-PATCH  /api/podcasts/{id}       {"poll_minutes": 240|0|null, "poll_at": "06:00"|""|null}  (#79)
+                                 poll_minutes, poll_at, poll_mode, smart}, ...]}
+PATCH  /api/podcasts/{id}       {"poll_minutes": 240|0|null, "poll_at": "06:00"|""|null,
+                                 "poll_mode": "smart"|"fixed"|null}  (#79, #80: the mode and the
+                                 `smart` object are those of channels, see /api/subscriptions)
     How often the feed is looked at: 0 = paused (only "check now" looks at it), otherwise 30..1440
     minutes (podcast hosts get a longer minimum than channels); `poll_at` is an optional start
     time of day ("HH:MM", server time zone) that anchors the interval: every local day restarts
@@ -64,7 +66,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from pydantic_core import PydanticCustomError
 
 from . import accounts, jobs, podcast_backlog, podcast_subscriptions, poll_schedule, resolution
-from .apiutil import followed_view, may_use, problem, visible_to
+from .apiutil import followed_view, may_use, problem, smart_views, visible_to
 from .metadata import Name, sanitize_name
 from .podcast_jobs import JOB_TYPE, PodcastWorker, episode_metadata
 from .podcasts import Podcast, PodcastError, PodcastFeedClient, normalise_feed_url
@@ -369,9 +371,13 @@ async def list_podcasts(request: Request) -> JSONResponse:
     if db is None:
         return problem(503, "The database is not available; see /health.")
     rows = await asyncio.to_thread(podcast_subscriptions.list_all, db)
-    return JSONResponse(
-        {"podcasts": await followed_view(db, "podcast", rows, request.state.account)}
+    entries = await followed_view(db, "podcast", rows, request.state.account)
+    smart = await asyncio.to_thread(
+        smart_views, request.app.state.defaults, db, "podcast", {row.id: row for row in rows}
     )
+    for entry in entries:
+        entry["smart"] = smart.get(entry["id"])
+    return JSONResponse({"podcasts": entries})
 
 
 async def update_podcast(subscription_id: int, request: Request) -> JSONResponse:

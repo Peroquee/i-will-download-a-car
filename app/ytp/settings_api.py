@@ -23,6 +23,12 @@ Fields (PATCH; `null` = back to the environment's value):
 * `max_height`: 0 (best) or one of 2160, 1440, 1080, 720, 480, 360.
 * `subscription_poll_minutes` / `podcast_poll_minutes`: 0 = paused, or 15..1440 (channels) and
   30..1440 (podcasts) minutes: how often a feed is looked at.
+* `poll_mode` (#80): `smart` (the default: check around the learned publishing times) or `fixed`.
+* `smart_before_minutes` (0 to 60, default 10) and `smart_after_minutes` (5 to 240, default 60):
+  the intensive window runs from this long before to this long after a slot's time;
+  `smart_step_minutes` (5 to 60, default 5): a check this often inside it (never less than 5: the
+  shortest gap between two checks of a feed); `smart_base_minutes` (60 to 1440, default 360):
+  the slow interval outside the windows, so off-schedule uploads are still found.
 * `subscription_poll_at` / `podcast_poll_at`: an optional start time of day, "HH:MM" in the server's
   time zone, which anchors the interval (`""` or `null` = none).
 
