@@ -15,6 +15,7 @@ by the accounts page in a check below.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -401,7 +402,7 @@ def a_user_sees_other_tabs_than_the_admin_and_none_of_the_admins_jobs(ctx):
     expect(page.locator("#dash-tab-alerts")).to_be_hidden()
     page.click("#dash-tab-vpn")
     expect(page.locator("#dash-vpn")).to_be_visible()
-    expect(page.locator("#dash-disk")).to_be_hidden()
+    expect(page.locator("#dash-storage")).to_be_hidden()
     expect(page.locator("#dash-vpn-list")).to_be_hidden()
     expect(page.locator("#dash-error")).to_have_text("")
     page.goto(BASE + "/accounts")
@@ -444,6 +445,61 @@ def a_page_on_another_site_cannot_act_with_the_admins_cookie(ctx):
         assert response.status == 403, (origin, response.status)
     listed = ctx.page.request.get(BASE + "/api/accounts").json()["accounts"]
     assert sorted(a["username"] for a in listed) == sorted([ADMIN, USER])
+
+
+@check
+def the_storage_bar_draws_its_segments_in_a_real_browser(ctx):
+    """The CSP is `style-src 'self'`, which blocks inline style ATTRIBUTES.
+
+    A width written with `setAttribute("style", ...)` would be ignored and every segment would
+    stay empty (jsdom does not enforce CSP, so only a real browser sees it, #82 review). The
+    width must be set through the CSSOM (`element.style.width`).
+    """
+    page = ctx.page
+    fake = {
+        "active": [],
+        "recent": [],
+        "dismissed": 0,
+        "vpn": {"current": {"state": "ok", "since": "2026-11-02T08:00:00Z"}, "history": []},
+        "disk": {
+            "free_percent": 25,
+            "free_gb": 500,
+            "total_gb": 2000,
+            "total_bytes": 2 * 1024**4,
+            "free_bytes": 512 * 1024**3,
+            "categories": {
+                "movies": 500 * 1024**3,
+                "series": 0,
+                "audiobooks": 0,
+                "music": 0,
+                "podcasts": 0,
+                "youtube": 0,
+            },
+            "downloads": 100 * 1024**3,
+            "other": 300 * 1024**3,
+            "at": "2026-11-02T09:55:00Z",
+        },
+        "deploy": None,
+        "backlogs": [],
+    }
+    page.route(
+        "**/api/dashboard*",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(fake)
+        ),
+    )
+    try:
+        page.goto(BASE + "/dashboard")
+        expect(page.locator("#dashboard")).to_be_visible()
+        segments = page.locator("#dash-storage-bar .storage-seg")
+        expect(segments.first).to_be_visible(timeout=15000)
+        boxes = [segments.nth(index).bounding_box() for index in range(segments.count())]
+        assert any(box is not None and box["width"] > 0 for box in boxes), boxes
+        csp = [line for line in ctx.problems if "Content Security Policy" in line]
+        assert not csp, csp
+    finally:
+        page.unroute("**/api/dashboard*")
+        page.goto(BASE + "/dashboard")
 
 
 @check

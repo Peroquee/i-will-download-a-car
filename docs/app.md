@@ -468,7 +468,7 @@ Below the job list: **Subscribed channels** and **Podcasts**, in two groups (#56
   down). Refreshes every 30 s while the tab is visible and after every action.
 - **Check now:** `POST /api/subscriptions/{id}/poll` looks at that channel's feed at once,
   whatever its interval, and queues new videos like the scheduled poll; the row says how many were
-  queued (they show up in the job list). It works even with `SUBSCRIPTION_POLL_MINUTES=0`. One
+  queued (they show up in the job list). It works even when the channel (or the server default) is paused. One
   manual check runs at a time (429 otherwise); a failure answers 502/503 with the reason, which is
   also stored as the channel's last error.
 - **Remove:** two clicks ("Remove", then "Really remove?" for 5 seconds), no dialog. Videos that

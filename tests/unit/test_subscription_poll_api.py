@@ -99,7 +99,9 @@ def test_check_now_queues_new_videos_at_once_and_updates_last_checked(client):
 
 def test_check_now_works_when_the_schedule_is_off(client):
     assert client.app.state.settings.subscription_poll_minutes == 0
-    assert "subscription-poll" not in client.app.state.scheduler.job_ids()
+    # the job always runs (#79): an admin can switch polling on later; it finds nothing due
+    assert "subscription-poll" in client.app.state.scheduler.job_ids()
+    assert client.app.state.poller.due() == []
     sub = subscribe(client)
     assert client.post(f"/api/subscriptions/{sub.id}/poll").status_code == 200
 

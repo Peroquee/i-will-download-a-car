@@ -37,6 +37,8 @@ class Subscription:
     target: str = "video"  # "video" or "podcast" (issue #35)
     audio_only: bool = False
     max_height: int | None = None  # new videos of this channel (#65); None = server default
+    poll_minutes: int | None = None  # check interval (#79): 0 = paused, None = server default
+    poll_at: str | None = None  # start time "HH:MM" (#79): "" = none, None = server default
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subscription:
@@ -52,6 +54,8 @@ class Subscription:
             target=row["target"],
             audio_only=bool(row["audio_only"]),
             max_height=row["max_height"],
+            poll_minutes=row["poll_minutes"],
+            poll_at=row["poll_at"],
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -68,6 +72,8 @@ class Subscription:
             "target": self.target,
             "audio_only": self.audio_only,
             "max_height": self.max_height,
+            "poll_minutes": self.poll_minutes,
+            "poll_at": self.poll_at,
         }
 
 
@@ -115,6 +121,30 @@ def set_max_height(
         updated = conn.execute(
             "UPDATE subscriptions SET max_height = ? WHERE id = ?",
             (max_height, subscription_id),
+        ).rowcount
+        if updated != 1:
+            return None
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE id = ?", (subscription_id,)
+        ).fetchone()
+    return Subscription.from_row(row)
+
+
+SETTINGS_COLUMNS = ("max_height", "poll_minutes", "poll_at")
+
+
+def update_settings(
+    db: Database, subscription_id: int, changes: dict[str, object]
+) -> Subscription | None:
+    """Change the given settings (`SETTINGS_COLUMNS`) of a channel in one step; None for a value
+    means "follow the server default" (#79). None is returned if there is no such channel."""
+    assert changes
+    assert set(changes) <= set(SETTINGS_COLUMNS)
+    assignments = ", ".join(f"{column} = ?" for column in changes)
+    with db.transaction() as conn:
+        updated = conn.execute(
+            f"UPDATE subscriptions SET {assignments} WHERE id = ?",
+            (*changes.values(), subscription_id),
         ).rowcount
         if updated != 1:
             return None

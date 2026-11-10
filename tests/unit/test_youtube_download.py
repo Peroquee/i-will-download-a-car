@@ -25,6 +25,7 @@ from ytp.clients.jellyfin import LibraryRefresher
 from ytp.config import ConfigError, Settings
 from ytp.db import Database
 from ytp.main import create_app
+from ytp.resolution import MAX_HEIGHTS
 from ytp.youtube import ProbeError, VideoRef
 from ytp.youtube_download import (
     AUDIO_FORMAT,
@@ -497,6 +498,15 @@ def test_jobs_run_one_at_a_time_oldest_first(world):
     assert world.status(second.id)[0] == "queued"
 
 
+def test_a_finished_download_asks_for_new_storage_sizes(world):
+    """The dashboard's storage bar is recomputed after every finished download (#82)."""
+    calls = []
+    world.submit()
+    world.worker(on_done=lambda: calls.append(1)).run_one()
+    assert world.status()[0] == "done"
+    assert calls == [1]
+
+
 def test_a_library_folder_that_is_missing_fails_the_job_readably(world):
     world.submit()
     (world.data / "Youtube").rmdir()
@@ -959,8 +969,19 @@ def test_max_height_defaults_to_1080_and_accepts_0():
     assert Settings.from_env({**ENV, "YOUTUBE_MAX_HEIGHT": "2160"}).youtube_max_height == 2160
 
 
-@pytest.mark.parametrize("value", ["abc", "100", "9999", "-1", "10.5"])
-def test_a_bad_max_height_is_reported(value):
+@pytest.mark.parametrize("height", MAX_HEIGHTS)
+def test_every_resolution_choice_is_accepted_as_the_server_default(height):
+    """The config list is the resolution list of the form and the accounts (#73)."""
+    assert (
+        Settings.from_env({**ENV, "YOUTUBE_MAX_HEIGHT": str(height)}).youtube_max_height == height
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ["abc", "100", "144", "900", "2000", "4320", "9999", "-1", "10.5"]
+)
+def test_a_max_height_outside_the_fixed_list_is_reported(value):
+    """Regression (#73): 144..4320 used to be accepted although the app refuses those values."""
     with pytest.raises(ConfigError, match="YOUTUBE_MAX_HEIGHT"):
         Settings.from_env({**ENV, "YOUTUBE_MAX_HEIGHT": value})
 

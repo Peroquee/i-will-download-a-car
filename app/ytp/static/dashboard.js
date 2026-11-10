@@ -7,6 +7,12 @@
   var STRIP_MAX = 3;
   var ALERTS_LIMIT = 50;
   var DASH_POLL_MS = 3000;
+  /* The storage bar's categories, in the order the server uses (#82). The second value is the
+     key `Logic.kindKey` knows for the category name in the i18n table. */
+  var STORAGE_KINDS = [
+    ["movies", "movies"], ["series", "series"], ["audiobooks", "audiobooks"],
+    ["music", "music"], ["podcasts", "podcast"], ["youtube", "youtube"]
+  ];
 
   function create(ctx) {
     var t = ctx.t;
@@ -428,6 +434,83 @@
       $("dash-vpn-empty").hidden = history.length > 0;
     }
 
+    /* The storage bar on the overview (#82): the cached category sizes as segments, the free
+       space as the empty rest, and a legend with every category, "other" and the free line. */
+    function storageWidth(size, total) {
+      if (!(size > 0) || !(total > 0)) return "0%";
+      return (size * 100 / total).toFixed(3) + "%";
+    }
+
+    function storageItem(cls, label, size) {
+      var li = el("li", "storage-item");
+      li.appendChild(el("span", "storage-swatch " + cls));
+      li.appendChild(el("span", "storage-name", label));
+      li.appendChild(el("span", "storage-size", L.formatBytes(size, lang()) || "—"));
+      return li;
+    }
+
+    function renderStorage(disk) {
+      var bar = $("dash-storage-bar");
+      var legend = $("dash-storage-legend");
+      var pending = $("dash-storage-pending");
+      var unknown = $("dash-storage-unknown");
+      var at = $("dash-storage-at");
+      bar.textContent = "";
+      legend.textContent = "";
+      at.textContent = "";
+      if (!disk) {
+        bar.hidden = true;
+        pending.hidden = true;
+        unknown.hidden = false;
+        return;
+      }
+      bar.hidden = false;
+      unknown.hidden = true;
+      var total = typeof disk.total_bytes === "number" ? disk.total_bytes : (disk.total_gb || 0) * 1e9;
+      var free = typeof disk.free_bytes === "number" ? disk.free_bytes : (disk.free_gb || 0) * 1e9;
+      var categories = disk.categories && typeof disk.categories === "object" ? disk.categories : null;
+      pending.hidden = !!categories;
+      at.textContent = disk.at
+        ? t("dash.storage_asof", { time: ctx.timeText(disk.at) || disk.at })
+        : "";
+      var parts = [];
+      var used = 0;
+      if (categories) {
+        STORAGE_KINDS.forEach(function (pair) {
+          var size = categories[pair[0]];
+          if (typeof size !== "number" || !isFinite(size) || size < 0) size = 0;
+          parts.push({
+            cls: "storage-" + pair[0],
+            label: t(L.kindKey(pair[1]) || "dash.storage_other"),
+            size: size
+          });
+          used += size;
+        });
+        var downloads = typeof disk.downloads === "number" && disk.downloads > 0 ? disk.downloads : 0;
+        var other = typeof disk.other === "number" && disk.other > 0 ? disk.other : 0;
+        parts.push({ cls: "storage-downloads", label: t("dash.storage_downloads"), size: downloads });
+        parts.push({ cls: "storage-other", label: t("dash.storage_other"), size: other });
+        used += downloads + other;
+      }
+      var denom = Math.max(total, used, 1);
+      parts.forEach(function (part) {
+        var seg = el("span", "storage-seg " + part.cls);
+        /* CSSOM, not a style attribute: the CSP (`style-src 'self'`) blocks inline styles. */
+        seg.style.width = storageWidth(part.size, denom);
+        bar.appendChild(seg);
+        legend.appendChild(storageItem(part.cls, part.label, part.size));
+      });
+      var percent = total > 0 ? Math.round(free * 100 / total) : 0;
+      var freeLine = el("li", "storage-item storage-free");
+      freeLine.appendChild(el("span", "storage-swatch storage-free"));
+      freeLine.appendChild(el("span", "storage-name", t("dash.storage_free", {
+        free: L.formatBytes(free, lang()) || "—",
+        total: L.formatBytes(total, lang()) || "—",
+        percent: percent
+      })));
+      legend.appendChild(freeLine);
+    }
+
     function renderDeploy(deploy) {
       var line = $("dash-deploy");
       line.hidden = !deploy;
@@ -454,10 +537,7 @@
         renderBacklogs(dashData.backlogs);
         renderVpn(dashData.vpn);
         renderDeploy(dashData.deploy);
-        var disk = dashData.disk;
-        $("dash-disk").textContent = disk
-          ? t("dash.disk", { percent: disk.free_percent, free: L.formatBytes(disk.free_gb * 1e9, lang()), total: L.formatBytes(disk.total_gb * 1e9, lang()) })
-          : t("dash.disk_unknown");
+        renderStorage(dashData.disk);
       }
       $("dash-active-empty").hidden = !dashData || dashData.active.length > 0;
       if (jobsData) {

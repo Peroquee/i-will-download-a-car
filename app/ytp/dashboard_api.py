@@ -7,7 +7,9 @@
      "dismissed": n,
      "vpn": {"current": {state, since, paused, egress, country}, "history": [{time, condition,
              paused, reason}, ...]},
-     "disk": {free_percent, free_gb, total_gb} | null,
+     "disk": {free_percent, free_gb, total_gb, total_bytes, free_bytes,
+              categories: {movies, series, audiobooks, music, podcasts, youtube} | null,
+              downloads, other, at} | null,
      "deploy": {deployed, deployed_at, result, message, paused, halted, checked_at} | null,
      "backlogs": [{id, folder, state, total, done, failed, waiting, skipped, size,
                    paused_reason, created_at}, ...]}
@@ -28,6 +30,9 @@
   counts them either way (the page's "show dismissed (N)" toggle).
 * `vpn.current` is the watchdog's status reduced to what is safe to show (no address); `history`
   the last changes of the VPN condition the app recorded, newest first.
+* `disk` (#82) is for admins: free and total are live, the per-category sizes come from the
+  cache that `storage.StorageSampler` fills after downloads (the hardlinks are counted once).
+  Without a cache the size fields are null and the page says that they are being calculated.
 """
 
 from __future__ import annotations
@@ -40,12 +45,11 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import alertlog, jobs, podcast_backlog
+from . import alertlog, jobs, podcast_backlog, storage
 from .apiutil import problem, visible_to
 from .clients.qbittorrent import Torrent
 from .jobs import Job
 from .jobs_api import job_label
-from .monitor import disk_summary
 from .podcast_jobs import JOB_TYPE as PODCAST_JOB_TYPE
 from .youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
 
@@ -162,7 +166,7 @@ async def dashboard(request: Request, dismissed: int = 0):
     deploy = None
     if account.is_admin:
         history = await asyncio.to_thread(alertlog.vpn_history, db, HISTORY)
-        disk = await asyncio.to_thread(disk_summary, state.settings.data_root)
+        disk = await asyncio.to_thread(storage.disk_view, db, state.settings)
         deploy = await asyncio.to_thread(deploy_status, state.settings.config_dir)
     backlogs = await asyncio.to_thread(podcast_backlog.visible, db, owner)
     return JSONResponse(

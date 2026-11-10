@@ -24,6 +24,9 @@ DETAIL = "max_height must be 0 (best) or one of " + ", ".join(
 NOT_ALLOWED = (
     "you may not choose a resolution; your account uses the resolution an admin set for it"
 )
+SETTINGS_NOT_ALLOWED = (
+    "you may not change the settings of a subscription; an admin can allow it for your account"
+)
 
 
 class NotAllowed(Exception):

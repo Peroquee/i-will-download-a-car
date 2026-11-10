@@ -21,7 +21,8 @@ import re
 import shutil
 import threading
 import time
-from datetime import date, timedelta
+from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -45,7 +46,7 @@ from .podcasts import (
     save_cover,
 )
 from .safefetch import FetchError
-from .subscription_poller import SubscriptionPoller, new_entries, spread_interval
+from .subscription_poller import SubscriptionPoller, new_entries
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class PodcastWorker:
         *,
         idle_seconds: float = 5.0,
         min_free_bytes: int = MIN_FREE_BYTES,
+        on_done: Callable[[], None] | None = None,
     ):
         self.db = db
         self.settings = settings
@@ -110,6 +112,7 @@ class PodcastWorker:
         self.refresher = refresher
         self._idle = idle_seconds
         self._min_free = min_free_bytes
+        self._on_done = on_done  # e.g. the dashboard's storage sizes (#82)
         self._wake = threading.Event()
         self.processed = 0
         # Percent of the running download by job id, for the job list (not persisted).
@@ -228,6 +231,8 @@ class PodcastWorker:
                     self.settings.library_dirs["podcasts"],
                     immediate=job.priority > 0,  # high priority skips the debounce once (#51)
                 )
+                if self._on_done is not None:
+                    self._on_done()
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
@@ -297,8 +302,10 @@ class PodcastPoller(SubscriptionPoller):
     def _all(self) -> list[PodcastSubscription]:  # type: ignore[override]
         return podcast_subscriptions.list_all(self.db)
 
-    def _interval(self, sub: PodcastSubscription) -> timedelta:  # type: ignore[override]
-        return spread_interval(sub.feed_url, sub.last_error, self.poll_minutes)
+    kind = "podcast"
+
+    def _key(self, sub: PodcastSubscription) -> str:  # type: ignore[override]
+        return sub.feed_url
 
     def _record(self, sub: PodcastSubscription, error: str | None) -> None:  # type: ignore[override]
         podcast_subscriptions.record_poll(self.db, sub.id, error, self._now())

@@ -39,6 +39,7 @@ import logging
 import re
 import shutil
 import threading
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -146,11 +147,13 @@ class YoutubeWorker:
         refresher: LibraryRefresher,
         *,
         idle_seconds: float = 5.0,
+        on_done: Callable[[], None] | None = None,
     ):
         self.db = db
         self.settings = settings
         self.downloader = downloader
         self.refresher = refresher
+        self._on_done = on_done  # e.g. the dashboard's storage sizes (#82)
         self._idle = idle_seconds
         self._wake = threading.Event()
         self.processed = 0
@@ -270,6 +273,8 @@ class YoutubeWorker:
                 self.settings.library_dirs[LIBRARY_KEYS[meta.target]],
                 immediate=job.priority > 0,  # a high-priority job skips the debounce once (#51)
             )
+            if self._on_done is not None:
+                self._on_done()
 
     def _file_music(
         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path

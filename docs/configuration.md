@@ -23,7 +23,7 @@ in a log.
 
 | Variable | Default | Required | Meaning |
 |---|---|---|---|
-| `DATA_ROOT` | `/data` | yes | Mount point of the media volume. `downloads/` and all library folders must be on **one filesystem** so hardlinks work ([host-setup.md](host-setup.md)). |
+| `DATA_ROOT` | `/data` | yes | **Host** path of the media volume. `downloads/` and all library folders must be on **one filesystem** so hardlinks work ([host-setup.md](host-setup.md)). Compose mounts it at `/data` and never passes this value to the app: inside the container the app reads its own `DATA_ROOT` (default `/data`). Do not give the app service `env_file: .env`, or it would look for the host path (#73). |
 | `MEDIA_DIR_MOVIES`, `MEDIA_DIR_SERIES`, `MEDIA_DIR_AUDIOBOOKS`, `MEDIA_DIR_MUSIC`, `MEDIA_DIR_PODCASTS`, `MEDIA_DIR_YOUTUBE` | `Filme`, `Serien`, `Hörbücher`, `Musik`, `Podcasts`, `Youtube` | yes | Library folder per type, relative to `DATA_ROOT`: the folders Jellyfin's libraries point at. Must be distinct and match the folders on disk exactly (umlauts included). Downloads go to `downloads/<type>` first and are hardlinked here when finished. |
 
 ## Network and the login
@@ -90,8 +90,9 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | Variable | Default | Required | Meaning |
 |---|---|---|---|
 | `YTDLP_PROXY` | `http://gluetun:8888` | no | Where yt-dlp and the channel feeds go out: gluetun's HTTP proxy, i.e. through the VPN. **Set but empty** = ask YouTube directly from the home line (the owner's decision; unset = the default). |
-| `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels (144 to 4320); `0` = no limit. A disk-space knob. |
-| `SUBSCRIPTION_POLL_MINUTES` | `60` | no | How often each subscribed channel is checked (15 to 1440; each channel gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
+| `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels: `0` (best, no cap) or one of `2160`, `1440`, `1080`, `720`, `480`, `360` — the same fixed list the download form, the account settings and the database use. Any other value stops the app at start with a clear error. A disk-space knob. The initial value of the server-wide default resolution, which an admin can change in the app (#79); a subscription or an account can have its own. |
+| `YOUTUBE_PROBE_TIMEOUT` | `25` | no | Seconds a YouTube probe (the metadata check before a download) may take (3 to 120). |
+| `SUBSCRIPTION_POLL_MINUTES` | `60` | no | How often each subscribed channel is checked (15 to 1440; each channel gets its own slightly different interval); `0` = never poll (the "Check now" button still works). This is the **initial** value: an admin can change the server-wide default in the app, and each subscription can have its own ([youtube.md](youtube.md#check-interval-and-check-time-79)). |
 
 ## Podcasts ([podcasts.md](podcasts.md))
 
@@ -99,7 +100,7 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 |---|---|---|---|
 | `PODCAST_PROXY` | `http://gluetun:8888` | no | Where podcast feeds and episodes go out: gluetun's HTTP proxy, i.e. through the VPN. **Set but empty** = fetch directly from the home line (some podcast hosts block VPN addresses). Only `http://` proxies. |
 | `FETCH_BLOCKED_NETWORKS` | empty | no | Networks podcast fetches must never go to, comma-separated, **in addition to** the private ranges, `HOME_PUBLIC_IP` and this host's own global IPv6 networks (found automatically). Put the home line's global IPv6 prefix here (DS-Lite gives the LAN native global IPv6): on the VM `ip -6 addr show scope global`. Matters when `PODCAST_PROXY` is empty (direct). Never logged in full. |
-| `PODCAST_POLL_MINUTES` | `240` | no | How often each subscribed podcast's feed is checked (30 to 1440; each feed gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
+| `PODCAST_POLL_MINUTES` | `240` | no | How often each subscribed podcast's feed is checked (30 to 1440; each feed gets its own slightly different interval); `0` = never poll (the "Check now" button still works). The initial value of the podcast default, which an admin can change in the app (see [youtube.md](youtube.md#check-interval-and-check-time-79)). |
 | `MAGNET_STALL_DAYS` | `7` | no | Days without progress after which a magnet link is given up (job failed with "no sources for 7 days", torrent and unfinished files removed from qBittorrent; retry from the job list). Paused time and downtime do not count. `0` = never. See [app.md](app.md). |
 | `INTERNET_CHECK_HOST` | `www.youtube.com` | no | The host the dashboard's "Internet" card connects to (plain TCP, nothing is sent) every 30 seconds while a dashboard is open, from the home line, not through the VPN. A host the app contacts anyway. A host name or IP address; invalid = the app refuses to start with a clear message. **Empty = the check is off** and the card shows "Unknown" with the reason (never "Online"). Only the host name is logged. |
 | `INTERNET_CHECK_PORT` | `443` | no | Its port (1 to 65535). |
@@ -124,14 +125,13 @@ defaults; they matter when running the code outside the stack (tests, developmen
 
 | Variable | Value in the stack | Meaning |
 |---|---|---|
-| `APP_HOST`, `APP_PORT` | `0.0.0.0`, `8000` | Where the app listens inside its container (never published). |
+| `APP_HOST`, `APP_PORT` | `0.0.0.0`, `8000` | Dev/test only: compose never passes them. The image (`EXPOSE 8000`, health check), the Caddyfile and the published ports assume 8000. |
 | `CONFIG_DIR` | `/config` | The app's folder (`config/app` on the host): the database. |
 | `QBIT_URL` | `http://gluetun:8080` | qBittorrent as seen from the bridge network (it lives in gluetun's namespace). |
 | `WATCHDOG_STATUS_URL` | `http://watchdog:8090` | The watchdog's status page, read by the app for the VPN bar. |
 | `WATCHDOG_STATUS_PORT` | `8090` | Where the watchdog serves it. |
 | `GLUETUN_CONTROL_URL` | `http://gluetun:8000` | gluetun's control server, read by the watchdog. |
 | `WATCHDOG_HEARTBEAT_FILE` | `/tmp/watchdog.alive` | The file its health check reads. |
-| `YOUTUBE_PROBE_TIMEOUT` | `25` | Seconds a YouTube probe may take (3 to 120). Not in the compose file: the default is used. |
 
 ## Variables of the test and ops scripts
 

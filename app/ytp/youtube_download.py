@@ -284,6 +284,7 @@ class YoutubeDownloader:
         *,
         proxy: str = "",
         max_height: int = 1080,
+        max_height_source: Callable[[], int] | None = None,
         socket_timeout: float = 20.0,
         download: Callable[[str, dict[str, Any]], dict[str, Any]] = _download_with_ytdlp,
         min_free_bytes: int = MIN_FREE_BYTES,
@@ -294,6 +295,8 @@ class YoutubeDownloader:
     ):
         self.proxy = proxy
         self.max_height = max_height
+        # The server-wide default can change while the app runs (#79): ask for it at each download.
+        self._max_height_source = max_height_source
         self._socket_timeout = socket_timeout
         self._download = download
         self._min_free = min_free_bytes
@@ -301,6 +304,9 @@ class YoutubeDownloader:
         self._stall = stall_seconds
         self._deadline = deadline_seconds
         self._clock = clock
+
+    def _default_height(self) -> int:
+        return self.max_height if self._max_height_source is None else self._max_height_source()
 
     def download(
         self,
@@ -337,7 +343,7 @@ class YoutubeDownloader:
             options = download_options(
                 workdir,
                 proxy=self.proxy,
-                max_height=self.max_height if max_height is None else max_height,
+                max_height=self._default_height() if max_height is None else max_height,
                 socket_timeout=self._socket_timeout,
                 progress_hook=watchdog,
                 audio_only=audio_only,

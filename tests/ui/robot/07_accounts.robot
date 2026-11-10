@@ -62,6 +62,6 @@ A User Sees Fewer Tabs And No Admin Parts
     Element Should Not Be Visible    id:dash-tab-alerts
     Click Element    id:dash-tab-vpn
     Wait Until Element Is Visible    id:dash-vpn
-    Element Should Not Be Visible    id:dash-disk
+    Element Should Not Be Visible    id:dash-storage
     Element Should Not Be Visible    id:dash-vpn-list
     Log Out

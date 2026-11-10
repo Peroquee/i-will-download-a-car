@@ -147,7 +147,7 @@ def test_the_qbittorrent_password_never_shows_in_repr_str_or_summary():
 
 
 @pytest.mark.parametrize(
-    ("value", "mask"), [(None, 0o022), ("002", 0o002), ("0027", 0o027), ("022", 0o022)]
+    ("value", "mask"), [(None, 0o002), ("002", 0o002), ("0027", 0o027), ("022", 0o022)]
 )
 def test_umask_is_an_octal_mask(value, mask):
     if mask is None:
@@ -184,6 +184,20 @@ def test_library_variables_match_env_example_and_the_compose_app_service():
 def test_the_env_example_is_a_valid_configuration():
     example = {k: v for k, v in parse_env_file(ENV_EXAMPLE).items() if k != "DATA_ROOT"}
     assert Settings.from_env(example).library_dirs["audiobooks"] == "Hörbücher"
+
+
+def test_the_youtube_probe_timeout_reaches_the_app_through_compose():
+    """Regression (#73): the app read it, but compose never passed it, so `.env` did nothing."""
+    app = environment_as_dict(services(load_compose(REPO_ROOT / "docker-compose.yml"))["app"])
+    assert "YOUTUBE_PROBE_TIMEOUT" in app
+    assert "YOUTUBE_PROBE_TIMEOUT" in parse_env_file(ENV_EXAMPLE)
+
+
+def test_the_app_never_gets_the_host_side_settings():
+    """`DATA_ROOT` in `.env` is the HOST path; compose mounts it at /data instead. The other
+    three are dev-only (the image and the Caddyfile fix the port at 8000) (#73)."""
+    app = environment_as_dict(services(load_compose(REPO_ROOT / "docker-compose.yml"))["app"])
+    assert not {"APP_HOST", "APP_PORT", "CONFIG_DIR", "DATA_ROOT"} & set(app)
 
 
 # --- networks podcast fetches never go to (issue #34 follow-up) --------------------------------
