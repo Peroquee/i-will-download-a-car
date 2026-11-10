@@ -34,6 +34,9 @@ class PodcastSubscription:
     last_error: str | None
     poll_minutes: int | None = None  # check interval (#79): 0 = paused, None = server default
     poll_at: str | None = None  # start time "HH:MM" (#79): "" = none, None = server default
+    poll_mode: str | None = None  # "smart" | "fixed" (#80); None = the server default
+    poll_errors: int = 0  # failed checks in a row (#80): the retry waits longer each time
+    history_checked_at: str | None = None  # unused for podcasts (every poll has the times)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> PodcastSubscription:
@@ -48,6 +51,9 @@ class PodcastSubscription:
             last_error=row["last_error"],
             poll_minutes=row["poll_minutes"],
             poll_at=row["poll_at"],
+            poll_mode=row["poll_mode"],
+            poll_errors=row["poll_errors"],
+            history_checked_at=row["history_checked_at"],
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -63,6 +69,7 @@ class PodcastSubscription:
             "last_error": self.last_error,
             "poll_minutes": self.poll_minutes,
             "poll_at": self.poll_at,
+            "poll_mode": self.poll_mode,
         }
 
 
@@ -94,7 +101,7 @@ def get(db: Database, subscription_id: int) -> PodcastSubscription | None:
     return PodcastSubscription.from_row(rows[0]) if rows else None
 
 
-SETTINGS_COLUMNS = ("poll_minutes", "poll_at")
+SETTINGS_COLUMNS = ("poll_minutes", "poll_at", "poll_mode")
 
 
 def update_settings(
@@ -126,6 +133,10 @@ def list_all(db: Database) -> list[PodcastSubscription]:
 def delete(db: Database, subscription_id: int) -> bool:
     """Unsubscribe. Episodes already downloaded stay where they are. False if there was none."""
     with db.transaction() as conn:
+        conn.execute(
+            "DELETE FROM publish_history WHERE kind = 'podcast' AND subscription_id = ?",
+            (subscription_id,),
+        )  # ids can be reused (#80)
         cursor = conn.execute("DELETE FROM podcast_subscriptions WHERE id = ?", (subscription_id,))
         return cursor.rowcount == 1
 
@@ -142,6 +153,7 @@ def record_poll(
     )
     with db.transaction() as conn:
         conn.execute(
-            "UPDATE podcast_subscriptions SET last_checked = ?, last_error = ? WHERE id = ?",
-            (stamp, message, subscription_id),
+            "UPDATE podcast_subscriptions SET last_checked = ?, last_error = ?, "
+            "poll_errors = CASE WHEN ? IS NULL THEN 0 ELSE poll_errors + 1 END WHERE id = ?",
+            (stamp, message, message, subscription_id),
         )

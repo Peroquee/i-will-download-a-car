@@ -428,3 +428,48 @@ same way; only the limits differ.
 - **Where the decision lives:** `app/ytp/poll_schedule.py` (`decide()`, a pure function of the
   settings, the last check and "now"); the poller only calls it. The server-wide values are in
   `app/ytp/server_defaults.py` (stored in `app_state`).
+
+## Smart check times (#80)
+
+New videos and episodes should be downloaded soon after they appear, without checking every feed
+constantly. Most channels publish at regular times, so the app **learns when** and checks often
+around those times and rarely otherwise. It is the default mode (`poll_mode`: `smart`; `fixed`
+keeps the interval and check time of #79) for every subscription, new and existing, channels and
+podcasts. An admin can change the default and the numbers in the *Server defaults* panel
+(`PATCH /api/settings/defaults`), a subscription can choose its own mode in its Settings window.
+
+- **What it keeps:** the publication times of the feed's items (`publish_history`, newest 100 per
+  subscription). A podcast feed has them on every poll. A channel's yt-dlp list has none, so the
+  first poll asks the channel's RSS feed once for its last 15 uploads (a few weeks of history at
+  once, no learning phase); it is asked again after a week only while the history is still thin, and
+  a feed that answers 404 is left alone. Times that are only a date (no hour) are not kept.
+- **What it learns** (`app/ytp/smart_schedule.py`, plain arithmetic): times of day that lie close
+  together form a cluster ("around 17:00"); a cluster is a slot on a weekday when the subscription
+  published in it on at least three dates of that weekday (two if it publishes that way on many
+  days), on at least half of the dates of that weekday since the slot first appeared, and recently
+  (the newest dates count more; one of the last three dates must be a hit). "Tuesday and Friday at
+  17:00" is two slots; a channel that changes its schedule loses the old slot after a few misses
+  and gets the new one as soon as it repeats. Times are wall-clock times of the server's time zone,
+  so 17:00 stays 17:00 across a daylight-saving change. At least 6 publications and a **confidence**
+  (the share of recent publications that fell on a slot, within -20/+60 minutes) of 0.6 are needed;
+  otherwise the pattern is "not regular" and the interval and check time of #79 are used instead,
+  automatically, with no error.
+- **When it checks:** inside a **window** from `smart_before_minutes` (10) before to
+  `smart_after_minutes` (60) after a slot's time: once as soon as the window begins, then every
+  `smart_step_minutes` (5; each feed's step is stretched by a fixed 0 to 25 % so feeds do not fire
+  together, never below the step). When the item the window waits for was found (something was
+  published since the window began) the rest of that window is checked slowly. Outside windows
+  every `smart_base_minutes` (360, spread by 0.8 to 1.2) so off-schedule uploads are still found.
+  A paused subscription (0 minutes) is never checked.
+- **Politeness:** no feed is looked at twice within 5 minutes (any mode); at most 12 checks per
+  rolling minute per poller (channels and podcasts each; a check inside its window comes first, the
+  rest wait for the next tick, and the pauses of 3 to 8 seconds between two checks stay); after an
+  error the retry waits 10 minutes, then twice as long for every failure in a row, up to two hours
+  (also for HTTP 429 and unreachable hosts); a failed check never counts as "found".
+- **The decision** is `poll_schedule.decide()` (the same pure function as for #79, now with a
+  `Smart` input); the learner is `smart_schedule.learn()` and `windows()`.
+- **API:** `poll_mode` on `PATCH /api/subscriptions/{id}` and `/api/podcasts/{id}` (same right as
+  the interval); every entry of the lists carries `smart` (`mode`, `regular`, `confidence`,
+  `events`, `slots`, `next_window`), see the module description of `subscriptions_api.py`.
+- Why polling and not WebSub: push notifications need an address YouTube can reach from the
+  internet; this app is LAN-only by design.

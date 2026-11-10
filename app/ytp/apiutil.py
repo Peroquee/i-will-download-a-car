@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from . import accounts, jobs
+from . import accounts, jobs, smart_info
 from .clients.qbittorrent import QbitAuthError, QbitClient, QbitError, QbitUnavailable
 from .db import Database
 from .jobs import Job
+from .poll_schedule import effective
 
 logger = logging.getLogger(__name__)
 
@@ -99,3 +101,23 @@ async def may_use(db: Database, kind: str, subscription_id: int, account) -> boo
     if account.is_admin:
         return True
     return await asyncio.to_thread(accounts.follows, db, kind, subscription_id, account.id)
+
+
+def smart_views(defaults, db: Database, kind: str, rows: dict[int, Any]) -> dict[int, dict]:
+    """What the smart mode knows about each listed subscription (`smart_info.describe`), by id.
+    A failure for one subscription leaves it out: the list must not break because of it (#80)."""
+    now = datetime.now(UTC)
+    settings = defaults.smart_settings()
+    base = defaults.schedule(kind)
+    found: dict[int, dict] = {}
+    for subscription_id, row in rows.items():
+        try:
+            schedule = effective(
+                row.poll_minutes, row.poll_at, base.minutes, base.at, row.poll_mode, base.mode
+            )
+            found[subscription_id] = smart_info.describe(
+                db, kind, subscription_id, schedule, settings, defaults.zone, now
+            )
+        except Exception:
+            logger.exception("smart info failed", extra={"subscription_id": subscription_id})
+    return found

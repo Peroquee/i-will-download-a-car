@@ -52,7 +52,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 
-from . import accounts, jobs, seen_videos, skipped_videos, subscriptions
+from . import accounts, jobs, publish_history, seen_videos, skipped_videos, subscriptions
 from .channel_videos import ChannelLister
 from .db import Database
 from .feeds import (
@@ -67,8 +67,9 @@ from .feeds import (
 )
 from .metadata import sanitize_name
 from .poll_schedule import RETRY_MINUTES as RETRY_MINUTES
-from .poll_schedule import Schedule, decide, effective, local_zone, spread_interval
-from .server_defaults import ServerDefaults
+from .poll_schedule import Schedule, Smart, decide, effective, local_zone, spread_interval
+from .server_defaults import DEFAULT_MODE, ServerDefaults, SmartSettings
+from .smart_schedule import Pattern, learn
 from .subscriptions import Subscription
 from .video_filter import VideoTraits, skip_reason
 from .youtube import ProbeError, VideoRef, YoutubeProbe
@@ -79,6 +80,12 @@ logger = logging.getLogger(__name__)
 POLL_JOB_ID = "subscription-poll"
 POLL_JOB_SECONDS = 60
 MAX_CHANNELS_PER_RUN = 20
+# At most this many feeds are looked at per rolling minute, over all subscriptions of a poller (the
+# channels and the podcasts each have one): many feeds in a window at once must not burst through
+# the VPN, and the pauses between two checks (a few seconds) come on top (#80).
+MAX_CHECKS_PER_MINUTE = 12
+HISTORY_THIN = 20  # fewer publication times than this: fill them from the RSS feed
+HISTORY_RETRY_DAYS = 7  # ... and ask for them again after this long if it did not help
 PAUSE_SECONDS = (3.0, 8.0)  # between two channels of one run
 PROBE_PAUSE_SECONDS = (1.0, 3.0)  # between two metadata probes (#39)
 MAX_PROBES_PER_POLL = 8
@@ -154,6 +161,7 @@ class SubscriptionPoller:
         self._probe_pause = probe_pause
         self.stop = threading.Event()  # set at shutdown: a run in progress ends early
         self._manual = threading.Lock()
+        self._checks: list[datetime] = []  # when the checks of the last minute began
 
     # -- what differs between channels and podcasts (PodcastPoller overrides these) ---------------
 
@@ -170,12 +178,26 @@ class SubscriptionPoller:
         """The server-wide interval and start time for this kind (read from the database)."""
         if self.defaults is not None:
             return self.defaults.schedule(self.kind)
-        return Schedule(self.poll_minutes)
+        return Schedule(self.poll_minutes, None, DEFAULT_MODE)
 
     def schedule_of(self, sub: Subscription, default: Schedule | None = None) -> Schedule:
-        """The effective interval and start time: the subscription's own, else the server's."""
+        """The effective interval, start time and mode: its own, else the server's."""
         default = default or self.default_schedule()
-        return effective(sub.poll_minutes, sub.poll_at, default.minutes, default.at)
+        return effective(
+            sub.poll_minutes, sub.poll_at, default.minutes, default.at, sub.poll_mode, default.mode
+        )
+
+    def smart_settings(self) -> SmartSettings:
+        return self.defaults.smart_settings() if self.defaults is not None else SmartSettings()
+
+    def pattern_of(self, sub: Subscription, now: datetime) -> tuple[Pattern, datetime | None]:
+        """What is learned about when this subscription publishes, and when it published last."""
+        times = publish_history.times(self.db, self.kind, sub.id)
+        return learn(times, self.zone, now), (times[0] if times else None)
+
+    def smart_for(self, sub: Subscription, now: datetime, settings: SmartSettings) -> Smart:
+        pattern, newest = self.pattern_of(sub, now)
+        return Smart(pattern, settings.before, settings.after, settings.step, settings.base, newest)
 
     def _record(self, sub: Subscription, error: str | None) -> None:
         subscriptions.record_poll(self.db, sub.id, error, self._now())
@@ -186,23 +208,34 @@ class SubscriptionPoller:
         """Enabled subscriptions that are due; never-checked first, then the longest ago."""
         now = self._now()
         default = self.default_schedule()  # read once per tick, not once per subscription
-        result: list[tuple[datetime, Subscription]] = []
+        settings = self.smart_settings()
+        result: list[tuple[int, datetime, Subscription]] = []
         for sub in self._all():
             if not sub.enabled:
                 continue
             checked = parse_time(sub.last_checked) if sub.last_checked else None
+            schedule = self.schedule_of(sub, default)
+            smart = (
+                self.smart_for(sub, now, settings)
+                if schedule.mode == "smart" and schedule.minutes > 0
+                else None
+            )
             decision = decide(
                 now=now,
                 last_checked=checked,
                 last_error=sub.last_error,
-                schedule=self.schedule_of(sub, default),
+                schedule=schedule,
                 key=self._key(sub),
                 zone=self.zone,
+                smart=smart,
+                error_streak=sub.poll_errors,
             )
             if decision.due:
-                result.append((checked or datetime.min.replace(tzinfo=UTC), sub))
-        result.sort(key=lambda pair: pair[0])
-        return [sub for _, sub in result]
+                # a feed inside its window comes first: that is what the smart mode is for
+                rank = 0 if decision.phase == "window" else 1
+                result.append((rank, checked or datetime.min.replace(tzinfo=UTC), sub))
+        result.sort(key=lambda row: row[:2])
+        return [sub for _, _, sub in result]
 
     # -- polling -------------------------------------------------------------------------------
 
@@ -311,6 +344,7 @@ class SubscriptionPoller:
             queued += outcome == "created"
         if not stopped_early and not judge.postponed:
             seen_videos.add(self.db, sub.id, [e.video_id for e in entries])
+        self._remember_publications(sub, [(e.video_id, e.published) for e in entries], judge)
         subscriptions.record_poll(self.db, sub.id, None, self._now())
         logger.info(
             "channel polled",
@@ -323,6 +357,45 @@ class SubscriptionPoller:
             },
         )
         return queued
+
+    # -- the publication history the smart mode learns from (#80) ----------------------------------
+
+    def _remember_publications(
+        self,
+        sub: Subscription,
+        items: list[tuple[str, datetime | None]],
+        judge: _Judge | None = None,
+    ) -> None:
+        """Keep the publication times this poll saw: the feed's own (RSS and podcasts have them)
+        and the ones of the videos yt-dlp was asked about. Never fails the poll."""
+        try:
+            dated = [(item, when) for item, when in items if when is not None]
+            if judge is not None:
+                dated += judge.dated()
+            publish_history.record(self.db, self.kind, sub.id, dated)
+            if not any(when is not None for _, when in items):  # the RSS feed was not the source
+                self._fill_history(sub)
+        except Exception:
+            logger.exception("publication history not saved", extra={"subscription_id": sub.id})
+
+    def _fill_history(self, sub: Subscription) -> None:
+        """The yt-dlp list of a channel has no times, so a new or thin history is filled from the
+        RSS feed (15 uploads with their times): at once on the first poll, so the pattern is
+        known without weeks of waiting. Asked rarely (`HISTORY_RETRY_DAYS`); a channel whose feed
+        answers 404 is simply left to the interval."""
+        if self.lister is None or publish_history.count(self.db, self.kind, sub.id) >= HISTORY_THIN:
+            return
+        asked = parse_time(sub.history_checked_at) if sub.history_checked_at else None
+        if asked is not None and self._now() - asked < timedelta(days=HISTORY_RETRY_DAYS):
+            return
+        try:
+            entries = parse_feed(self.feeds.fetch(sub.channel_id), sub.channel_id)
+        except FeedError:
+            entries = []
+        publish_history.record(
+            self.db, self.kind, sub.id, [(e.video_id, e.published) for e in entries if e.published]
+        )
+        subscriptions.mark_history_checked(self.db, sub.id, self._now())
 
     def poll_now(self, sub: Subscription) -> int:
         """The "check now" button (#27): poll one channel at once, whatever its interval.
@@ -339,14 +412,23 @@ class SubscriptionPoller:
             self.worker.wake()
         return queued
 
+    def _recent_checks(self) -> list[datetime]:
+        """The checks of the last minute (the global cap counts them)."""
+        cutoff = self._now() - timedelta(seconds=60)
+        self._checks = [moment for moment in self._checks if moment > cutoff]
+        return self._checks
+
     def run_once(self) -> RunResult:
         """One scheduler tick: poll the due channels (at most a few), spread out."""
         result = RunResult()
-        for position, sub in enumerate(self.due()[:MAX_CHANNELS_PER_RUN]):
+        started = self._recent_checks()
+        room = max(0, MAX_CHECKS_PER_MINUTE - len(started))
+        for position, sub in enumerate(self.due()[: min(MAX_CHANNELS_PER_RUN, room)]):
             if self.stop.is_set():
                 break
             if position:
                 self._sleep(self._rng.uniform(*self._pause))
+            self._checks.append(self._now())
             try:
                 result.queued += self.poll(sub)
             except self.feed_errors as error:
@@ -423,6 +505,14 @@ class _Judge:
             return self._traits(entry).published or NEW_FOR_SURE
         except ProbeError:
             return NEW_FOR_SURE
+
+    def dated(self) -> list[tuple[str, datetime]]:
+        """The videos looked at in this poll that have a publication time."""
+        return [
+            (video_id, traits.published)
+            for video_id, traits in self._looked.items()
+            if isinstance(traits, VideoTraits) and traits.published is not None
+        ]
 
     def published_of(self, entry: FeedEntry) -> datetime | None:
         """The date of a video already looked at (None if it was not, or has none)."""

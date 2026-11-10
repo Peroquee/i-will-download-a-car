@@ -18,7 +18,8 @@ BEFORE = 17  # 0001 .. 0017 are the state before this migration
 def old_database(tmp_path):
     """A database at the version before 0018, with one row in every table it rebuilds."""
     conn = dbmod.connect(tmp_path / "app.db")
-    migrations = dbmod.load_migrations()
+    # up to and including 0018: later migrations (0019 ...) are not what this file is about
+    migrations = dbmod.load_migrations()[: BEFORE + 1]
     assert dbmod.migrate(conn, migrations[:BEFORE])[-1] == "0017_poll_settings.sql"
     conn.execute("BEGIN IMMEDIATE")
     conn.execute(

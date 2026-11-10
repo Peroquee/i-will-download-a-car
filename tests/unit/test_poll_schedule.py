@@ -267,3 +267,207 @@ def test_the_server_zone_comes_from_tz(monkeypatch):
     assert poll_schedule.local_zone() is not None, (
         "an unknown name falls back to the clock's offset"
     )
+
+
+# --- the smart mode (#80) ---------------------------------------------------------------------------------
+
+from ytp.poll_schedule import MIN_GAP_MINUTES, Smart, retry_wait  # noqa: E402
+from ytp.smart_schedule import NO_PATTERN, Pattern, Slot  # noqa: E402
+
+TUESDAY_17 = Pattern(True, (Slot(1, 17 * 60, 12),), 0.95, 14)  # Tuesdays 17:00 local
+SMART = Schedule(60, None, "smart")
+
+
+def smart_for(pattern=TUESDAY_17, published=None, **kw) -> Smart:
+    return Smart(pattern, last_published=published, **kw)
+
+
+def go(now, last=None, error=None, schedule=SMART, smart=None, streak=1, key=CHANNEL) -> Decision:
+    return decide(
+        now=now,
+        last_checked=last,
+        last_error=error,
+        schedule=schedule,
+        key=key,
+        zone=BERLIN,
+        smart=smart if smart is not None else smart_for(),
+        error_streak=streak,
+    )
+
+
+def test_outside_a_window_the_slow_base_interval_applies_not_the_interval():
+    """Tuesday 12:00; a check 2 h ago is not due (the interval of 60 min does not count)."""
+    now = at(12, 0, day=10)
+    decision = go(now, last=now - timedelta(hours=2), smart=smart_for(base=1440))
+    assert decision.due is False
+    assert decision.phase == "base"
+    assert decision.next_due == at(16, 50, day=10), "the next window comes before the base interval"
+
+
+def test_the_base_interval_is_spread_between_80_and_120_percent_and_checks_off_schedule_uploads():
+    now = at(2, 0, day=11)  # Wednesday night: no window for days
+    last = now - timedelta(hours=1)
+    decision = go(now, last=last, smart=smart_for(base=360))
+    assert decision.phase == "base"
+    assert last + timedelta(minutes=288) <= decision.next_due <= last + timedelta(minutes=432)
+    late = go(now, last=now - timedelta(hours=8), smart=smart_for(base=360))
+    assert late.due is True, "off-schedule uploads are still found within the base interval"
+
+
+def test_a_check_is_made_as_soon_as_the_window_begins():
+    just_before = go(at(16, 49, day=10), last=at(14, 0, day=10))
+    assert just_before.due is False
+    begun = go(at(16, 51, day=10), last=at(14, 0, day=10))
+    assert (begun.due, begun.phase) == (True, "window")
+    assert begun.next_due == at(16, 50, day=10), "due since the window began"
+
+
+def test_inside_the_window_it_is_checked_every_five_minutes_with_a_bounded_spread():
+    start = at(16, 55, day=10)
+    for key in ("UCaaaaaaaaaaaaaaaaaaaaaa", "UCbbbbbbbbbbbbbbbbbbbbbb", "UCcccccccccccccccccccccc"):
+        gap = go(start + timedelta(minutes=4, seconds=50), last=start, key=key)
+        assert (gap.due, gap.phase) == (False, "gap"), "never within the minimum gap"
+        too_soon = go(start + timedelta(minutes=5, seconds=5), last=start, key=key)
+        assert too_soon.phase == "window"
+        assert too_soon.next_due >= start + timedelta(minutes=5), "never before the step"  # type: ignore[operator]
+        late = go(start + timedelta(minutes=6, seconds=30), last=start, key=key)
+        assert late.due is True, "at most a quarter longer than the step"
+
+
+def test_different_feeds_get_different_steps_so_they_do_not_fire_together():
+    start = at(17, 5, day=10)
+    seconds = {
+        go(
+            start + timedelta(minutes=5, seconds=1), last=start, key=f"UC{n:022d}"
+        ).next_due.timestamp()  # type: ignore[union-attr]
+        - start.timestamp()
+        for n in range(12)
+    }
+    assert len(seconds) > 6
+    assert all(300 <= s <= 375 for s in seconds)
+
+
+def test_the_window_ends_after_the_after_minutes_and_the_base_interval_returns():
+    inside = go(at(17, 59, day=10), last=at(17, 52, day=10))
+    assert inside.phase == "window"
+    after = go(at(18, 5, day=10), last=at(17, 59, day=10))
+    assert after.phase == "base"
+    assert after.due is False
+
+
+def test_no_feed_is_looked_at_twice_within_the_minimum_gap_even_at_a_window_start():
+    decision = go(at(16, 51, day=10), last=at(16, 49, day=10))
+    assert decision.due is False
+    assert decision.phase == "gap"
+    assert decision.next_due == at(16, 49, day=10) + timedelta(minutes=MIN_GAP_MINUTES)
+    fixed = go(
+        at(12, 0), last=at(12, 0) - timedelta(minutes=2), schedule=Schedule(15, None, "fixed")
+    )
+    assert fixed.due is False, "also in the fixed mode"
+    assert MIN_GAP_MINUTES == 5
+
+
+def test_a_window_whose_item_was_found_is_done_and_the_rest_is_checked_slowly():
+    published = at(16, 58, day=10)  # the video the window was waiting for, found at 17:01
+    decision = go(at(17, 10, day=10), last=at(17, 4, day=10), smart=smart_for(published=published))
+    assert decision.phase == "base"
+    assert decision.due is False
+    still_waiting = go(
+        at(17, 10, day=10), last=at(17, 4, day=10), smart=smart_for(published=at(9, 0))
+    )
+    assert still_waiting.phase == "window", "an older video does not end the window"
+
+
+def test_a_pattern_that_is_not_regular_falls_back_to_the_interval_and_start_time():
+    smart = smart_for(NO_PATTERN)
+    last = at(10, 0, day=10)
+    plain = go(at(10, 40, day=10), last=last, smart=smart)
+    assert plain.phase == "fixed"
+    assert plain.due is False
+    due = go(at(11, 15, day=10), last=last, smart=smart)
+    assert due.due is True, "the interval of 60 minutes (x 0.8..1.2) has passed"
+    anchored = go(
+        at(11, 59, day=10),
+        last=at(6, 1, day=10),
+        smart=smart,
+        schedule=Schedule(360, "06:00", "smart"),
+    )
+    assert anchored.due is False, "the start-time rule of #79 still applies as the fallback"
+    assert go(
+        at(12, 0, day=10),
+        last=at(6, 1, day=10),
+        smart=smart,
+        schedule=Schedule(360, "06:00", "smart"),
+    ).due
+
+
+def test_the_fixed_mode_ignores_the_pattern():
+    now = at(17, 0, day=10)
+    fixed = go(now, last=now - timedelta(minutes=10), schedule=Schedule(60, None, "fixed"))
+    assert fixed.due is False
+    assert fixed.phase == "fixed"
+
+
+def test_without_the_smart_inputs_the_smart_mode_is_the_fixed_one():
+    decision = decide(
+        now=at(10, 0),
+        last_checked=at(9, 55),
+        last_error=None,
+        schedule=SMART,
+        key=CHANNEL,
+        zone=BERLIN,
+    )
+    assert decision.phase == "fixed"
+    assert decision.due is False
+
+
+def test_a_paused_subscription_stays_paused_in_the_smart_mode_and_a_new_one_is_checked_at_once():
+    now = at(17, 0, day=10)
+    assert go(now, last=now - timedelta(hours=9), schedule=Schedule(0, None, "smart")) == Decision(
+        False, None
+    )
+    new = go(now, last=None)
+    assert (new.due, new.phase) == (True, "new")
+
+
+def test_the_window_follows_the_wall_clock_across_a_daylight_saving_change():
+    pattern = Pattern(True, (Slot(6, 20 * 60, 10),), 0.9, 12)  # Sundays 20:00
+    # 2026-10-25: Berlin goes back to winter time (19:00 UTC from the night on)
+    start = datetime(2026, 10, 25, 18, 50, tzinfo=UTC)  # 19:50 Berlin
+    inside = go(
+        start + timedelta(minutes=10), last=start - timedelta(hours=3), smart=smart_for(pattern)
+    )
+    assert (inside.due, inside.phase) == (True, "window")
+    early = go(
+        start - timedelta(minutes=30), last=start - timedelta(hours=3), smart=smart_for(pattern)
+    )
+    assert early.phase == "base"
+    assert early.next_due == datetime(2026, 10, 25, 18, 50, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("streak", "minutes"), [(1, 10), (2, 20), (3, 40), (4, 80), (5, 120), (9, 120), (0, 10)]
+)
+def test_the_retry_wait_doubles_with_every_failure_in_a_row_up_to_two_hours(streak, minutes):
+    assert retry_wait(streak, 1440) == timedelta(minutes=minutes)
+
+
+def test_the_first_retry_is_never_longer_than_a_short_interval():
+    assert retry_wait(1, 15) == timedelta(minutes=10)
+    assert retry_wait(1, 5) == timedelta(minutes=5)
+
+
+@pytest.mark.parametrize("mode", ["fixed", "smart"])
+def test_an_error_backs_off_in_every_mode_also_inside_a_window(mode):
+    now = at(17, 30, day=10)
+    last = now - timedelta(minutes=12)
+    schedule = Schedule(60, None, mode)
+    assert go(now, last=last, error="down", streak=1, schedule=schedule).due is True
+    third = go(now, last=last, error="down", streak=3, schedule=schedule)
+    assert third.due is False
+    assert third.next_due == last + timedelta(minutes=40)
+    assert third.phase == "retry"
+
+
+def test_the_decision_identity_ignores_the_phase():
+    assert Decision(True, None, "window") == Decision(True, None, "base")

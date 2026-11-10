@@ -178,6 +178,9 @@ def test_a_new_database_gets_the_initial_schema(database):
         "max_height",  # #65
         "poll_minutes",  # #79
         "poll_at",
+        "poll_mode",  # #80
+        "poll_errors",
+        "history_checked_at",
     ]
 
 

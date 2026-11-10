@@ -18,7 +18,7 @@ from ytp.db import Database
 from ytp.feeds import FeedClient
 from ytp.podcast_jobs import PodcastPoller
 from ytp.podcasts import PodcastFeedClient
-from ytp.server_defaults import ServerDefaults
+from ytp.server_defaults import ServerDefaults, SmartSettings
 from ytp.subscription_poller import SubscriptionPoller
 from ytp.youtube_download import YoutubeDownloader
 
@@ -98,11 +98,12 @@ def test_before_an_admin_saves_anything_the_defaults_are_the_environments(tmp_pa
     assert (snap["podcast_poll_minutes"], snap["podcast_poll_at"]) == (0, None)
     assert not any(snap["custom"].values())
     assert snap["timezone"] == "Europe/Berlin"
-    assert snap["limits"] == {
-        "choices": [0, 2160, 1440, 1080, 720, 480, 360],
-        "min_minutes": {"channel": 15, "podcast": 30},
-        "max_minutes": 1440,
-    }
+    limits = snap["limits"]
+    assert limits["choices"] == [0, 2160, 1440, 1080, 720, 480, 360]
+    assert limits["min_minutes"] == {"channel": 15, "podcast": 30}
+    assert limits["max_minutes"] == 1440
+    assert limits["modes"] == ["smart", "fixed"]
+    assert limits["smart"]["smart_step_minutes"] == {"min": 5, "max": 60}
     assert from_env.schedule("channel").minutes == 30
     assert from_env.max_height() == 720
 
@@ -119,7 +120,9 @@ def test_a_saved_default_wins_and_takes_effect_at_once(defaults):
     assert defaults.schedule("channel").minutes == 120
     assert defaults.schedule("podcast").minutes == 240, "the podcast default is separate"
     defaults.update({"podcast_poll_minutes": 0, "podcast_poll_at": "07:30"})
-    assert defaults.schedule("podcast") == defaults.schedule("podcast").__class__(0, "07:30")
+    assert defaults.schedule("podcast") == defaults.schedule("podcast").__class__(
+        0, "07:30", "smart"
+    )
 
 
 def test_none_goes_back_to_the_environment_and_an_empty_time_means_none(defaults):
@@ -589,3 +592,162 @@ def test_a_channel_cannot_be_changed_through_the_podcast_route_or_the_other_way_
     client_for(app_client, alice).patch(f"/api/podcasts/{podcast_id}", json={"poll_minutes": 90})
     assert subscriptions.get(app_client.app.state.db, channel_id).poll_minutes is None
     assert podcast_subscriptions.get(app_client.app.state.db, podcast_id).poll_minutes == 90
+
+
+# --- the smart defaults (#80) ----------------------------------------------------------------------------
+
+
+def test_the_smart_defaults_start_smart_and_follow_what_an_admin_saves(defaults):
+    snap = defaults.snapshot()
+    assert snap["poll_mode"] == "smart"
+    assert (snap["smart_before_minutes"], snap["smart_after_minutes"]) == (10, 60)
+    assert (snap["smart_step_minutes"], snap["smart_base_minutes"]) == (5, 360)
+    assert not any(snap["custom"][k] for k in ("poll_mode", "smart_step_minutes"))
+    assert defaults.schedule("channel").mode == "smart"
+    assert defaults.schedule("podcast").mode == "smart"
+    assert defaults.smart_settings() == SmartSettings(10, 60, 5, 360)
+    after = defaults.update(
+        {"poll_mode": "fixed", "smart_before_minutes": 20, "smart_after_minutes": 90,
+         "smart_step_minutes": 10, "smart_base_minutes": 720}
+    )  # fmt: skip
+    assert after["poll_mode"] == "fixed"
+    assert after["custom"]["poll_mode"] is True
+    assert defaults.schedule("channel").mode == "fixed"
+    assert defaults.smart_settings() == SmartSettings(20, 90, 10, 720)
+    back = defaults.update({"poll_mode": None, "smart_step_minutes": None})
+    assert back["poll_mode"] == "smart"
+    assert back["smart_step_minutes"] == 5
+    assert defaults.smart_settings().before == 20, "only what was reset"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"poll_mode": "clever"}, {"poll_mode": True}, {"poll_mode": ""},
+        {"smart_before_minutes": -1}, {"smart_before_minutes": 61},
+        {"smart_after_minutes": 4}, {"smart_after_minutes": 241},
+        {"smart_step_minutes": 4}, {"smart_step_minutes": 61}, {"smart_step_minutes": "5"},
+        {"smart_step_minutes": True}, {"smart_base_minutes": 59}, {"smart_base_minutes": 1441},
+    ],
+)  # fmt: skip
+def test_a_bad_smart_default_is_refused_and_nothing_is_saved(defaults, bad):
+    before = defaults.snapshot()
+    with pytest.raises(Exception, match=r"."):
+        defaults.update({"max_height": 480, **bad})
+    assert defaults.snapshot() == before
+
+
+def test_the_step_cannot_be_shorter_than_the_minimum_gap_between_two_checks(defaults):
+    from ytp.poll_schedule import MIN_GAP_MINUTES
+
+    assert defaults.snapshot()["limits"]["smart"]["smart_step_minutes"]["min"] == MIN_GAP_MINUTES
+
+
+# --- the smart mode in the API (#80) -------------------------------------------------------------------------
+
+
+def test_the_mode_of_a_channel_is_saved_cleared_and_listed(app_client):
+    alice = make_user(app_client, "alice")
+    sub_id = follow_channel(app_client, alice)
+    mine = client_for(app_client, alice)
+    assert mine.get("/api/subscriptions").json()["subscriptions"][0]["poll_mode"] is None
+    saved = mine.patch(f"/api/subscriptions/{sub_id}", json={"poll_mode": "fixed"})
+    assert saved.status_code == 200
+    assert saved.json()["poll_mode"] == "fixed"
+    listed = mine.get("/api/subscriptions").json()["subscriptions"][0]
+    assert (listed["poll_mode"], listed["smart"]["mode"]) == ("fixed", "fixed")
+    back = mine.patch(f"/api/subscriptions/{sub_id}", json={"poll_mode": None, "poll_minutes": 120})
+    assert (back.json()["poll_mode"], back.json()["poll_minutes"]) == (None, 120)
+
+
+@pytest.mark.parametrize("value", ["clever", "", 1, True, ["smart"]])
+def test_a_bad_mode_is_a_400_for_a_channel_and_a_podcast(app_client, value):
+    alice = make_user(app_client, "alice")
+    channel_id = follow_channel(app_client, alice)
+    podcast_id = follow_podcast(app_client, alice)
+    mine = client_for(app_client, alice)
+    assert (
+        mine.patch(f"/api/subscriptions/{channel_id}", json={"poll_mode": value}).status_code == 400
+    )
+    assert mine.patch(f"/api/podcasts/{podcast_id}", json={"poll_mode": value}).status_code == 400
+    assert subscriptions.get(app_client.app.state.db, channel_id).poll_mode is None
+
+
+def test_the_mode_needs_the_same_right_as_the_interval(app_client):
+    alice = make_user(app_client, "alice", can_choose=False)
+    sub_id = follow_channel(app_client, alice)
+    pod_id = follow_podcast(app_client, alice)
+    mine = client_for(app_client, alice)
+    assert (
+        mine.patch(f"/api/subscriptions/{sub_id}", json={"poll_mode": "fixed"}).status_code == 403
+    )
+    assert mine.patch(f"/api/podcasts/{pod_id}", json={"poll_mode": "fixed"}).status_code == 403
+    assert subscriptions.get(app_client.app.state.db, sub_id).poll_mode is None
+    assert (
+        client_for(app_client, ADMIN)
+        .patch(f"/api/podcasts/{pod_id}", json={"poll_mode": "fixed"})
+        .status_code
+        == 200
+    )
+
+
+def test_the_list_says_what_was_learned_and_when_the_next_window_is(app_client):
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from ytp import publish_history
+
+    alice = make_user(app_client, "alice")
+    sub_id = follow_channel(app_client, alice)
+    mine = client_for(app_client, alice)
+    thin = mine.get("/api/subscriptions").json()["subscriptions"][0]["smart"]
+    assert thin == {
+        "mode": "smart",
+        "regular": False,
+        "confidence": 0.0,
+        "events": 0,
+        "slots": [],
+        "next_window": None,
+    }
+    berlin = ZoneInfo("Europe/Berlin")
+    today = datetime.now(UTC).astimezone(berlin).date()
+    tuesdays = [
+        today - timedelta(days=d)
+        for d in range(1, 90)
+        if (today - timedelta(days=d)).weekday() == 1
+    ][:10]
+    publish_history.record(
+        app_client.app.state.db,
+        "channel",
+        sub_id,
+        [
+            (f"v{n}", datetime(d.year, d.month, d.day, 17, 0, tzinfo=berlin).astimezone(UTC))
+            for n, d in enumerate(tuesdays)
+        ],
+    )
+    learned = mine.get("/api/subscriptions").json()["subscriptions"][0]["smart"]
+    assert learned["regular"] is True
+    assert [s["weekday"] for s in learned["slots"]] == [1]
+    assert abs(learned["slots"][0]["minute"] - 17 * 60) <= 2
+    assert learned["events"] == 10
+    window = learned["next_window"]
+    assert window["start"] < window["expected"]
+    assert isinstance(window["active"], bool)
+    assert "ip" not in str(learned).lower()
+
+
+def test_a_podcast_list_carries_the_smart_info_too(app_client):
+    alice = make_user(app_client, "alice")
+    follow_podcast(app_client, alice)
+    listed = client_for(app_client, alice).get("/api/podcasts").json()["podcasts"][0]
+    assert listed["smart"]["mode"] == "smart"
+    assert listed["poll_mode"] is None
+
+
+def test_the_admin_default_mode_decides_for_subscriptions_without_their_own(app_client):
+    alice = make_user(app_client, "alice")
+    follow_channel(app_client, alice)
+    mine = client_for(app_client, alice)
+    client_for(app_client, ADMIN).patch("/api/settings/defaults", json={"poll_mode": "fixed"})
+    assert mine.get("/api/subscriptions").json()["subscriptions"][0]["smart"]["mode"] == "fixed"
+    assert mine.get("/api/settings/defaults").json()["poll_mode"] == "fixed"
