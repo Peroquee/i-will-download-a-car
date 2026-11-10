@@ -12,7 +12,7 @@ from ytp import poll_schedule
 from ytp.poll_schedule import Decision, Schedule, decide, effective, slots_around
 
 BERLIN = ZoneInfo("Europe/Berlin")
-KEY = "UCSMOQeBJ2RAnuFungnQOxLg"
+CHANNEL = "UCSMOQeBJ2RAnuFungnQOxLg"
 
 
 def at(hour: int, minute: int = 0, day: int = 10, month: int = 11, zone=BERLIN) -> datetime:
@@ -22,7 +22,7 @@ def at(hour: int, minute: int = 0, day: int = 10, month: int = 11, zone=BERLIN) 
 
 def run(schedule, now, last=None, error=None, zone=BERLIN) -> Decision:
     return decide(
-        now=now, last_checked=last, last_error=error, schedule=schedule, key=KEY, zone=zone
+        now=now, last_checked=last, last_error=error, schedule=schedule, key=CHANNEL, zone=zone
     )
 
 
@@ -109,8 +109,8 @@ def test_without_a_start_time_it_is_due_when_the_interval_has_passed():
 
 
 def test_the_spread_factor_is_stable_and_differs_between_subscriptions():
-    base = poll_schedule.spread_interval(KEY, None, 60)
-    assert base == poll_schedule.spread_interval(KEY, None, 60)
+    base = poll_schedule.spread_interval(CHANNEL, None, 60)
+    assert base == poll_schedule.spread_interval(CHANNEL, None, 60)
     keys = [f"UC{i:022d}" for i in range(30)]
     factors = {poll_schedule.spread_interval(k, None, 100).total_seconds() / 6000 for k in keys}
     assert len(factors) > 10
@@ -129,8 +129,8 @@ def test_after_an_error_it_is_tried_again_after_ten_minutes(start):
 def test_the_retry_is_never_longer_than_the_interval():
     last = at(10)
     assert run(Schedule(15), last + timedelta(minutes=10), last=last, error="x").due
-    assert poll_schedule.spread_interval(KEY, "x", 15) == timedelta(minutes=10)
-    assert poll_schedule.spread_interval(KEY, "x", 1440) == timedelta(minutes=10)
+    assert poll_schedule.spread_interval(CHANNEL, "x", 15) == timedelta(minutes=10)
+    assert poll_schedule.spread_interval(CHANNEL, "x", 1440) == timedelta(minutes=10)
 
 
 # --- with a start time ----------------------------------------------------------------------------------
