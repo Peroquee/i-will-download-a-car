@@ -35,7 +35,10 @@ module, which enforces:
   (checked against `Content-Length` and counted while reading), no compressed transfer
   (`Accept-Encoding: identity`; a compressed answer is refused), and a content-type check per
   kind of thing (feed, media, image) plus a look at the first bytes (an HTML or JSON page
-  behind an "mp3" address is refused instead of being filed as an episode).
+  behind an "mp3" address is refused instead of being filed as an episode). The proxy's CONNECT
+  answer and the TLS handshake have their own overall deadline too (#71).
+* **Plain URLs.** A non-ASCII path or query is percent-encoded (the host is checked as before),
+  so `http.client` never sees a character it cannot write as ASCII (#71).
 
 Residual risk, also in docs/podcasts.md: the host name is looked up by the app's own resolver,
 outside the VPN, so the home DNS server sees which podcast hosts are used (not what is fetched);
@@ -54,6 +57,7 @@ import http.client
 import ipaddress
 import logging
 import re
+import select
 import socket
 import ssl
 import threading
@@ -61,7 +65,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import SplitResult, urljoin, urlsplit
+from urllib.parse import SplitResult, quote, urljoin, urlsplit
 
 from . import __version__
 
@@ -74,9 +78,13 @@ MAX_ADDRESSES_TRIED = 3
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 20.0
 CHUNK = 64 * 1024
+DIAL_DEADLINE = 30.0  # the proxy's CONNECT answer and the TLS handshake, overall
 HEADER_DEADLINE = 30.0  # the whole wait for the answer's headers, however slowly they trickle
 SMALL_DEADLINE = 60.0  # a whole feed or cover
 HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
+# What stays as it is when the path/query is percent-encoded. "%" keeps existing escapes.
+_PATH_SAFE = "/%:@!$&'()*+,;=-._~"
+_QUERY_SAFE = "/?%:@!$&'()*+,;=-._~"
 
 # IPv6 ranges that carry an IPv4 address inside: refused whatever they wrap.
 _WRAPPED_V6 = tuple(
@@ -146,12 +154,15 @@ def check_url(url: str) -> Target:
         # this and is judged after resolving, below).
         if not HOST_NAME.fullmatch(host) or len(host) > 253:
             raise FetchError("invalid", "the host name is not valid") from None
-    port = port or (443 if parts.scheme == "https" else 80)
+    port = port if port is not None else (443 if parts.scheme == "https" else 80)
     if port not in ALLOWED_PORTS:
         raise FetchError("blocked", f"port {port} is not allowed (only 80, 443, 8080, 8443)")
-    path = parts.path or "/"
+    # http.client writes the request line as ASCII; a non-ASCII path or query would raise
+    # UnicodeEncodeError (a ValueError) deep inside it. Percent-encoding here keeps the SSRF
+    # checks on the decoded host untouched and gives every caller a plain URL (#71).
+    path = quote(parts.path or "/", safe=_PATH_SAFE)
     if parts.query:
-        path += "?" + parts.query
+        path += "?" + quote(parts.query, safe=_QUERY_SAFE)
     default = port == (443 if parts.scheme == "https" else 80)
     shown_host = f"[{host}]" if ":" in host else host
     normalised = f"{parts.scheme}://{shown_host}{'' if default else f':{port}'}{path}"
@@ -245,21 +256,34 @@ def resolve_public(
 
 
 def _connect_through_proxy(proxy_host: str, proxy_port: int, ip: str, port: int) -> socket.socket:
-    """An HTTP proxy tunnel to ip:port (the IP, not the name). Raises OSError on any failure."""
+    """An HTTP proxy tunnel to ip:port (the IP, not the name). Raises OSError on any failure.
+
+    The CONNECT answer is read line by line with a raw file object: it takes exactly the header
+    bytes and leaves whatever follows them in the socket, so nothing the origin server sends is
+    swallowed (#71). The whole reply has an overall deadline, not just the per-read timeout.
+    """
     sock = socket.create_connection((proxy_host, proxy_port), timeout=CONNECT_TIMEOUT)
     try:
         sock.settimeout(READ_TIMEOUT)
         shown = f"[{ip}]" if ":" in ip else ip
-        sock.sendall(
-            f"CONNECT {shown}:{port} HTTP/1.1\r\nHost: {shown}:{port}\r\n"
-            f"User-Agent: youtube-premium/{__version__}\r\n\r\n".encode("ascii")
-        )
-        head = b""
-        while b"\r\n\r\n" not in head:
-            chunk = sock.recv(1024)
-            if not chunk or len(head) > 8192:
-                raise OSError("the proxy closed the connection")
-            head += chunk
+        with _Deadline(sock, DIAL_DEADLINE):
+            sock.sendall(
+                f"CONNECT {shown}:{port} HTTP/1.1\r\nHost: {shown}:{port}\r\n"
+                f"User-Agent: youtube-premium/{__version__}\r\n\r\n".encode("ascii")
+            )
+            head = b""
+            # Unbuffered: readline takes one byte at a time and reads nothing past the header.
+            reader = sock.makefile("rb", buffering=0)
+            try:
+                while not head.endswith(b"\r\n\r\n"):
+                    line = reader.readline(8192)
+                    if not line:
+                        raise OSError("the proxy closed the connection")
+                    head += line
+                    if len(head) > 8192:
+                        raise OSError("the proxy sent an oversized reply header")
+            finally:
+                reader.close()
         status_line = head.split(b"\r\n", 1)[0].decode("latin-1")
         if not re.match(r"HTTP/1\.[01] 200\b", status_line):
             raise OSError(f"the proxy refused the tunnel: {status_line[:80]}")
@@ -274,14 +298,15 @@ def _abort(sock: socket.socket) -> None:
         sock.shutdown(socket.SHUT_RDWR)
 
 
-class _BodyDeadline:
-    """The overall deadline for reading a body, enforced in real time.
+class _Deadline:
+    """An overall deadline for a blocking socket phase, enforced in real time.
 
     Checking the clock between reads is not enough: one `response.read(CHUNK)` waits until the
     whole chunk has arrived, and each byte only has to beat the per-read timeout, so a server
-    that trickles its body a byte at a time could hold the thread for days. When the deadline
-    passes, a timer shuts the socket down, which ends the blocked read; `expired` then says why
-    (after a shutdown the read may look like a normal end of the answer).
+    that trickles its body a byte at a time could hold the thread for days. The same is true of
+    a TLS handshake or a proxy's CONNECT reply (#71). When the deadline passes, a timer shuts
+    the socket down, which ends the blocked call; `expired` then says why (after a shutdown a
+    read may look like a normal end of the answer).
     """
 
     def __init__(self, sock: socket.socket, seconds: float):
@@ -294,12 +319,38 @@ class _BodyDeadline:
         self._timer = threading.Timer(max(0.0, seconds), expire)
         self._timer.daemon = True
 
-    def __enter__(self) -> _BodyDeadline:
+    def __enter__(self) -> _Deadline:
         self._timer.start()
         return self
 
     def __exit__(self, *exc_info: object) -> None:
         self._timer.cancel()
+
+
+def _handshake_with_deadline(sock: ssl.SSLSocket, seconds: float) -> None:
+    """Finish the TLS handshake within `seconds` overall, however slowly the peer trickles.
+
+    The socket timeout alone bounds one read: a peer that sends a handshake byte just before
+    every timeout could hold the thread for hours (#71). Non-blocking calls with a `select`
+    that waits only for the time that is left give a real overall deadline.
+    """
+    original = sock.gettimeout()
+    end = time.monotonic() + seconds
+    sock.setblocking(False)
+    try:
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                raise OSError("the TLS handshake did not finish in time")
+            try:
+                sock.do_handshake()
+                return
+            except ssl.SSLWantReadError:
+                select.select([sock], [], [], remaining)
+            except ssl.SSLWantWriteError:
+                select.select([], [sock], [], remaining)
+    finally:
+        sock.settimeout(original)
 
 
 def make_dialer(proxy: str = "", ssl_context: ssl.SSLContext | None = None) -> Dialer:
@@ -324,10 +375,18 @@ def make_dialer(proxy: str = "", ssl_context: ssl.SSLContext | None = None) -> D
             return raw
         context = ssl_context or ssl.create_default_context()
         try:
-            return context.wrap_socket(raw, server_hostname=target.host)
+            wrapped = context.wrap_socket(
+                raw, server_hostname=target.host, do_handshake_on_connect=False
+            )
         except BaseException:
             raw.close()
             raise
+        try:
+            _handshake_with_deadline(wrapped, DIAL_DEADLINE)
+        except BaseException:
+            wrapped.close()
+            raise
+        return wrapped
 
     return dial
 
@@ -369,6 +428,18 @@ def is_jpeg(head: bytes) -> bool:
 
 def is_png(head: bytes) -> bool:
     return head.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _size_text(max_bytes: int) -> str:
+    """A byte limit the way people read it: whole GiB/MiB/KiB, bytes below that.
+
+    One helper for every "too large" message, so a 512 KiB cover limit is not called
+    "0 MiB" (#71).
+    """
+    for unit, factor in (("GiB", 1024**3), ("MiB", 1024**2), ("KiB", 1024)):
+        if max_bytes and max_bytes % factor == 0:
+            return f"{max_bytes // factor} {unit}"
+    return f"{max_bytes} bytes"
 
 
 # ------------------------------------------------------------------------------ the fetcher
@@ -470,6 +541,12 @@ class SafeFetcher:
                     "fetch failed",
                     extra={"host": target.host, "error": type(last_error).__name__},
                 )
+                if isinstance(last_error, ssl.SSLCertVerificationError):
+                    # A wrong or expired certificate will not fix itself: say so instead of
+                    # "could not be reached", which sounds temporary (#71).
+                    raise FetchError(
+                        "bad_response", f"{target.host}: the server's certificate was refused"
+                    ) from None
                 raise FetchError("network", f"{target.host} could not be reached") from None
             status = response.status
             if status in {301, 302, 303, 307, 308}:
@@ -506,7 +583,7 @@ class SafeFetcher:
     def _declared_size(response: http.client.HTTPResponse, max_bytes: int) -> None:
         declared = response.getheader("Content-Length")
         if declared and declared.isdigit() and int(declared) > max_bytes:
-            raise FetchError("too_large", f"the file is larger than {max_bytes // 1024**2} MiB")
+            raise FetchError("too_large", f"the file is larger than {_size_text(max_bytes)}")
 
     # -- the two public ways to use it -------------------------------------------------------
 
@@ -521,7 +598,7 @@ class SafeFetcher:
         too_slow = FetchError("network", f"{target.host} answered too slowly")
         try:
             self._declared_size(response, max_bytes)
-            with _BodyDeadline(sock, deadline_seconds) as deadline:
+            with _Deadline(sock, deadline_seconds) as deadline:
                 while True:
                     if deadline.expired.is_set() or self._clock() - started > deadline_seconds:
                         raise too_slow
@@ -536,7 +613,7 @@ class SafeFetcher:
                     size += len(chunk)
                     if size > max_bytes:
                         raise FetchError(
-                            "too_large", f"the answer is larger than {max_bytes // 1024} KiB"
+                            "too_large", f"the answer is larger than {_size_text(max_bytes)}"
                         )
                     chunks.append(chunk)
                 if deadline.expired.is_set():  # the "end" was the shutdown: a cut-off answer
@@ -569,7 +646,7 @@ class SafeFetcher:
             conn.close()
             raise
         try:
-            with out, _BodyDeadline(sock, deadline_seconds) as deadline:
+            with out, _Deadline(sock, deadline_seconds) as deadline:
                 while True:
                     if deadline.expired.is_set() or self._clock() - started > deadline_seconds:
                         raise too_slow
@@ -590,7 +667,7 @@ class SafeFetcher:
                     written += len(chunk)
                     if written > max_bytes:
                         raise FetchError(
-                            "too_large", f"the file is larger than {max_bytes // 1024**2} MiB"
+                            "too_large", f"the file is larger than {_size_text(max_bytes)}"
                         )
                     out.write(chunk)
                     if progress is not None:
