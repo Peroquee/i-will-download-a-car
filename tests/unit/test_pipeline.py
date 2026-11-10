@@ -129,6 +129,15 @@ def test_secret_scan_covers_full_history():
     assert "gitleaks git" in script_text(job)
 
 
+@pytest.mark.security
+def test_secret_scan_reads_only_the_history_of_the_pipelines_commit():
+    """Without --log-opts gitleaks scans `git log --all`: the other branches the runner's clone
+    holds, so one branch's finding failed everybody's pipeline."""
+    text = script_text(JOBS["lint:secrets"])
+    assert '--log-opts="--full-history HEAD"' in text
+    assert "--all" not in text
+
+
 def test_lint_covers_python_yaml_and_shell():
     text = "\n".join(script_text(resolved(j)) for n, j in JOBS.items() if n.startswith("lint:"))
     for tool in ("ruff check", "ruff format --check", "yamllint", "shellcheck"):

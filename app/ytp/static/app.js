@@ -1117,8 +1117,10 @@
   }
 
   /* The browser scrolls to #subscriptions when the page loads, but until the sign-in is known that
-     part is hidden and there is nothing to scroll to: do it once it shows. */
+     part is hidden and there is nothing to scroll to: do it once it shows. The dashboard's hashes
+     are tabs (and an alert, which it brings into view itself): nothing to scroll to there. */
   function scrollToAnchor() {
+    if (dash && dash.view() === "dashboard") return;
     var id = (window.location.hash || "").replace(/^#/, "");
     if (!/^[A-Za-z][\w-]*$/.test(id) || (auth && !auth.isIn())) return;
     var target = document.getElementById(id);

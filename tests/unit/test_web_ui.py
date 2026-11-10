@@ -1406,7 +1406,7 @@ def test_the_strip_shows_only_unread_alerts_newest_first_and_at_most_three():
     assert run_node("L.stripAlerts(null, 3)") == []
 
 
-def smoke(path, hash_, answers, click=None):
+def smoke(path, hash_, answers, click=None, polls=0):
     ids = sorted(set(re.findall(r'\bid="([\w-]+)"', HTML)) - {"i18n"})
     scenario = {
         "ids": ids,
@@ -1414,6 +1414,7 @@ def smoke(path, hash_, answers, click=None):
         "dictionary": translations(HTML)["en"],
         "answers": answers,
         "click": click,
+        "polls": polls,
     }
     result = subprocess.run(
         [require_node(), str(STATIC_DIR.parents[2] / "tests/helpers/dashboard_smoke.js"), str(STATIC_DIR),
@@ -1555,6 +1556,21 @@ def test_the_dashboard_view_shows_progress_history_and_the_alert_log():
     assert "2.0 KB/s" in out["nodes"]["dash-total-speed"]["text"]
     assert "2 unread" in out["nodes"]["dash-alert-counts"]["text"]
     assert "1Errors" in out["nodes"]["dash-alert-counts"]["text"]
+
+
+@needs_node
+@pytest.mark.parametrize("hash_", ["", "#jobs", "#vpn", "#alerts"])
+def test_a_periodic_refresh_never_scrolls_the_page(hash_):
+    out = smoke("/dashboard", hash_, ANSWERS, polls=3)
+    assert out["scrolls"] == []
+    assert "alert-target" not in out["nodes"]["dash-vpn"]["cls"]
+
+
+@needs_node
+def test_an_alert_address_brings_that_alert_into_view_once_and_not_on_every_refresh():
+    out = smoke("/dashboard", "#alert-7", ANSWERS, polls=3)
+    assert out["scrolls"] == ["alert-7"]
+    assert "alert-target" in out["nodes"]["dash-alerts-list"]["children"][0]["cls"]
 
 
 @needs_node
