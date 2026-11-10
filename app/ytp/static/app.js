@@ -1253,12 +1253,13 @@
   }
 
   /* What the smart mode has learned about a subscription: the usual times and the next intensive
-     check, or that there is not enough yet (#80). */
+     check, or that there is not enough yet (#80). A fixed subscription runs no intensive check,
+     so its next window is not announced. */
   function learnedText(sub) {
     var smart = sub && sub.smart;
     if (!smart || !smart.regular) return t("sched.learned_none");
     var text = t("sched.learned_pattern", { slots: L.slotsText(smart.slots, lang) });
-    var next = smart.next_window;
+    var next = smart.mode === "fixed" ? null : smart.next_window;
     if (next && next.active) return text + " " + t("sched.learned_now");
     var when = next ? L.whenText(next.start, defaultsData && defaultsData.timezone, lang) : "";
     return when ? text + " " + t("sched.learned_next", { when: when }) : text;

@@ -474,6 +474,9 @@ def test_no_translation_is_empty_and_german_differs_from_english():
         "dash.watchdog",
         "dash.internet_ok",
         "dash.watchdog_blind",
+        # The check mode is called "smart" in both languages (#80).
+        "sched.mode_short.smart",
+        "sched.smart_on",
         # Resolution labels are the same in both languages (#47).
         "yt.resolution_2160",
         "yt.resolution_1440",
@@ -699,6 +702,97 @@ def test_the_first_look_in_the_browser_catches_empty_fields_and_a_bad_year():
 def test_the_text_template_fills_in_values():
     assert run_node("L.format('Job #{id} ({status})', {id: 7, status: 'done'})") == "Job #7 (done)"
     assert run_node("L.format('no {missing} here', {})") == "no {missing} here"
+
+
+# --- smart check times (#80) ----------------------
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("minute", "lang", "expected"),
+    [
+        (0, "en", "12 am"),
+        (9 * 60, "en", "9 am"),
+        (12 * 60, "en", "12 pm"),
+        (17 * 60, "en", "5 pm"),
+        (17 * 60 + 30, "en", "5:30 pm"),
+        (0, "de", "0 Uhr"),
+        (9 * 60, "de", "9 Uhr"),
+        (17 * 60 + 30, "de", "17:30 Uhr"),
+    ],
+)
+def test_a_time_of_day_in_the_page_language(minute, lang, expected):
+    assert run_node(f"L.clockText({minute}, {json.dumps(lang)})") == expected
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("slots", "lang", "expected"),
+    [
+        ([{"weekday": 1, "minute": 1020}], "en", "Tue 5 pm"),
+        (
+            [{"weekday": 1, "minute": 1020}, {"weekday": 4, "minute": 1020}],
+            "en",
+            "Tue and Fri 5 pm",
+        ),
+        (
+            [{"weekday": 1, "minute": 1020}, {"weekday": 4, "minute": 1020}],
+            "de",
+            "Di und Fr 17 Uhr",
+        ),
+        # every weekday: "daily", not seven names
+        ([{"weekday": day, "minute": 540} for day in range(7)], "en", "daily 9 am"),
+        ([{"weekday": day, "minute": 540} for day in range(7)], "de", "täglich 9 Uhr"),
+        # a run of weekdays, then one more day with another time
+        (
+            [{"weekday": day, "minute": 540} for day in range(5)] + [{"weekday": 5, "minute": 660}],
+            "en",
+            "Mon–Fri 9 am, Sat 11 am",  # noqa: RUF001 - the UI uses an en dash for day ranges
+        ),
+        # times within 20 min on different days share one time
+        (
+            [{"weekday": 1, "minute": 1020}, {"weekday": 2, "minute": 1030}],
+            "en",
+            "Tue and Wed 5 pm",
+        ),
+        # at most three groups, then an ellipsis
+        (
+            [
+                {"weekday": 0, "minute": 540},
+                {"weekday": 2, "minute": 600},
+                {"weekday": 4, "minute": 660},
+                {"weekday": 6, "minute": 720},
+            ],
+            "en",
+            "Mon 9 am, Wed 10 am, Fri 11 am, …",
+        ),
+        ([], "en", ""),
+        ([{"weekday": 9, "minute": 0}, {"weekday": 1, "minute": -1}], "en", ""),
+        ("not a list", "en", ""),
+    ],
+)
+def test_the_learned_slots_as_a_phrase(slots, lang, expected):
+    assert run_node(f"L.slotsText({json.dumps(slots)}, {json.dumps(lang)})") == expected
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("iso", "zone", "lang", "expected"),
+    [
+        # 15:50 UTC is 16:50 in Berlin (CET in November), a Tuesday
+        ("2026-11-10T15:50:00Z", "Europe/Berlin", "en", "Tue 4:50 pm"),
+        ("2026-11-10T15:50:00Z", "Europe/Berlin", "de", "Di 16:50 Uhr"),
+        ("2026-11-10T15:50:00Z", "UTC", "en", "Tue 3:50 pm"),
+        ("2026-11-13T00:30:00Z", "Europe/Berlin", "en", "Fri 1:30 am"),
+        ("not a time", "Europe/Berlin", "en", ""),
+        ("2026-11-10T15:50:00Z", "Not/AZone", "en", ""),
+    ],
+)
+def test_an_iso_time_in_the_servers_zone(iso, zone, lang, expected):
+    assert (
+        run_node(f"L.whenText({json.dumps(iso)}, {json.dumps(zone)}, {json.dumps(lang)})")
+        == expected
+    )
 
 
 # --- the job list (#26) ----------------------

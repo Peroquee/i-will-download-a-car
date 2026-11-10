@@ -6,7 +6,9 @@ A real headless Chromium against the real app: the sign-in (#44: a visitor sees 
 wrong password is refused, the cookie is HttpOnly and SameSite=Strict, logout ends the session,
 an admin and a user see different tabs), the form creates a job, the navigation and the VPN bar
 lead where they say, and the failure modes of issue #43 (scripts that did not load, an update
-while the page is open) end in a clear message instead of a silent native submit.
+while the page is open) end in a clear message instead of a silent native submit. Since #79 it
+also opens a subscription's Settings window, changes the resolution and check interval, and saves
+the server defaults; since #80 it switches the check mode there and saves the smart-mode numbers.
 Each check prints its name; the run goes on after a failure and exits 1 at the end.
 
 The admin (YTP_ADMIN / YTP_ADMIN_PASSWORD) exists when the app starts; the user "alice" is made
@@ -350,6 +352,76 @@ def the_admin_saves_the_server_defaults_on_the_accounts_page(ctx):
     page.reload()
     expect(page.locator("#sd-channel-interval")).to_have_value("60")
     expect(page.locator("#sd-podcast-interval")).to_have_value("360")
+
+
+@check
+def the_subscription_settings_window_saves_the_check_mode(ctx):
+    """#80: the Settings window offers smart/fixed, says what smart learned, and saves the mode;
+    the row's summary follows it (smart vs the plain interval)."""
+    page = ctx.page
+    page.goto(BASE + "/#subscriptions")
+    row = page.locator("#subs-youtube-list li", has_text="Blender")
+    expect(row).to_be_visible(timeout=15000)
+    # the server default is smart; nothing is learned yet, so it falls back to the interval
+    expect(row).to_contain_text("Checks: smart, still learning: every 2 h")
+    button = row.get_by_role("button", name="Settings")
+    button.click()
+    expect(page.locator("#sub-settings-mode")).to_be_visible()
+    assert page.input_value("#sub-settings-mode") == "", "following the server default"
+    expect(page.locator("#sub-settings-mode")).to_contain_text("Server default (smart)")
+    expect(page.locator("#sub-settings-mode")).to_contain_text("Fixed: interval and check time")
+    expect(page.locator("#sub-settings-learned")).to_contain_text("Not enough regular uploads yet")
+    page.select_option("#sub-settings-mode", "fixed")
+    page.click("#sub-settings-save")
+    expect(page.locator("#sub-settings")).to_be_hidden()
+    expect(row).to_contain_text("Checks: every 2 h")
+    expect(row).not_to_contain_text("smart, still learning")
+    # back to the server default (smart)
+    button.click()
+    expect(page.locator("#sub-settings-mode")).to_have_value("fixed")
+    page.select_option("#sub-settings-mode", "")
+    page.click("#sub-settings-save")
+    expect(page.locator("#sub-settings")).to_be_hidden()
+    expect(row).to_contain_text("Checks: smart, still learning: every 2 h")
+
+
+@check
+def the_admin_sets_the_smart_check_numbers(ctx):
+    """#80: the four numbers are admin-adjustable; a value outside its range is refused in the
+    page, a valid one is saved and survives a reload."""
+    page = ctx.page
+    page.goto(BASE + "/accounts")
+    expect(page.locator("#server-defaults")).to_be_visible(timeout=15000)
+    assert page.input_value("#sd-channel-mode") == "smart"
+    assert [
+        page.input_value(f"#sd-{name}")
+        for name in (
+            "smart_before_minutes",
+            "smart_after_minutes",
+            "smart_step_minutes",
+            "smart_base_minutes",
+        )
+    ] == ["10", "60", "5", "360"]
+    page.fill("#sd-smart_before_minutes", "61")
+    page.click("#sd-save")
+    expect(page.locator("#sd-result")).to_contain_text("0 to 60")
+    page.fill("#sd-smart_before_minutes", "10")
+    page.fill("#sd-smart_after_minutes", "90")
+    page.fill("#sd-smart_step_minutes", "10")
+    page.fill("#sd-smart_base_minutes", "240")
+    page.click("#sd-save")
+    expect(page.locator("#sd-result")).to_have_text("The server defaults were saved.")
+    page.reload()
+    assert page.input_value("#sd-channel-mode") == "smart"
+    assert [
+        page.input_value(f"#sd-{name}")
+        for name in (
+            "smart_before_minutes",
+            "smart_after_minutes",
+            "smart_step_minutes",
+            "smart_base_minutes",
+        )
+    ] == ["10", "90", "10", "240"]
 
 
 @check
