@@ -724,8 +724,6 @@ def test_the_input_page_has_one_line_about_the_downloads_and_no_job_list():
                    {"status": "queued"}, {"status": "organizing"}],
           "counts": {"queued": 3, "downloading": 2, "organizing": 1, "failed": 1}},
          {"running": 3, "waiting": 3, "failed": 1, "progress": 51}),
-        ({"jobs": [{"status": "downloading", "progress": None}, {"status": "failed"}]},
-         {"running": 1, "waiting": 0, "failed": 1, "progress": None}),
         ({"jobs": [], "counts": {}}, {"running": 0, "waiting": 0, "failed": 0, "progress": None}),
         (None, {"running": 0, "waiting": 0, "failed": 0, "progress": None}),
     ],

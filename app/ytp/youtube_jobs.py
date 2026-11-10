@@ -69,7 +69,6 @@ logger = logging.getLogger(__name__)
 
 JOB_TYPE = "youtube"
 LIBRARY_KEYS = {"video": "youtube", "podcast": "podcasts", "music": "music"}
-TARGETS = ("video", "podcast", "music")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 

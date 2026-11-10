@@ -182,9 +182,6 @@ def mark_failed(db: Database, job_id: int, error: str) -> None:
         )
 
 
-ACTIVE_STATUSES = ("queued", "downloading", "organizing")
-
-
 def active_magnet_jobs(db: Database) -> list[Job]:
     """Magnet jobs that are not finished (the reconciler's work list), oldest first."""
     rows = db.query(

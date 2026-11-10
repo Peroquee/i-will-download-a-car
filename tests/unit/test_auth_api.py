@@ -471,7 +471,10 @@ def test_there_is_always_one_active_admin(app_client):
         response = change_it()
         assert response.status_code == 409
         assert response.json()["kind"] == "last_admin"
-    assert accounts.count_active_admins(db_of(app_client)) == 1
+    active_admins = db_of(app_client).query(
+        "SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin' AND disabled = 0"
+    )[0]["n"]
+    assert active_admins == 1
     # with a second admin the first may go
     add_account(app_client, "deputy", "admin")
     assert admin.patch(f"/api/accounts/{boss.id}", json={"role": "user"}).status_code == 200

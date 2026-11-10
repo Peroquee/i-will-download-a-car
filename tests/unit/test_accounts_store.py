@@ -299,7 +299,8 @@ def test_an_expired_session_is_cleaned_out_when_a_new_one_starts(db, alice):
 def test_ending_all_sessions_of_one_account_leaves_the_others(db, alice):
     bob = accounts.create_with_hash(db, "bob", fast_hash(), "user")
     mine, theirs = accounts.new_session(db, alice.id), accounts.new_session(db, bob.id)
-    accounts.end_all_sessions(db, alice.id)
+    with db.transaction() as conn:
+        accounts.end_all_sessions(conn, alice.id)
     assert accounts.session_account(db, mine) is None
     assert accounts.session_account(db, theirs).id == bob.id
 

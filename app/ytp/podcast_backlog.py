@@ -47,8 +47,6 @@ RESERVE_PERCENT = 5.0  # ... and at least this share of the drive (monitor.DISK_
 FEEDER_JOB_ID = "podcast-backlog"
 FEEDER_SECONDS = 10
 KEEP_FINISHED_DAYS = 14
-_ACTIVE = ("running", "paused")
-_WAITING = ("queued", "downloading", "organizing")
 
 
 class BacklogExists(Exception):

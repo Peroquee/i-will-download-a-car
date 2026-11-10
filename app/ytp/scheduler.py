@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.events import (
@@ -195,11 +195,3 @@ class AppScheduler:
             logger.warning("job skipped: the previous run is still going", extra={"job": job_id})
         elif event.code == EVENT_JOB_MISSED:
             logger.warning("job run missed", extra={"job": job_id})
-
-
-def next_run_in(scheduler: AppScheduler, job_id: str) -> timedelta | None:
-    """How long until a job runs next (for tests and diagnostics)."""
-    job = scheduler._scheduler.get_job(job_id)
-    if job is None or job.next_run_time is None:
-        return None
-    return job.next_run_time - datetime.now(UTC)
