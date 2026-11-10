@@ -1130,8 +1130,10 @@
       paused.textContent = t("sched.paused_note");
       show();
     }
-    interval.addEventListener("change", show);
-    mode.addEventListener("change", show);
+    ["change", "input"].forEach(function (type) {
+      interval.addEventListener(type, show);
+      mode.addEventListener(type, show);
+    });
 
     function fill(ownMinutes, ownAt) {
       var inPresets = ownMinutes === 0
@@ -1226,11 +1228,14 @@
   }
 
   function openSettings(sub, openerId) {
+    if (settingsFor) return;   // one window at a time: a second click while one opens must not rebuild it
     settingsFor = sub;
     settingsOpener = openerId;
     settingsBusy = false;
     loadDefaults().then(function () {
       if (settingsFor !== sub) return;
+      var dialog = $("sub-settings");
+      if (dialog.open) return;   // already showing: never rebuild the controls under a user
       settingsControls = scheduleControls($("sub-settings-schedule"), "sub-settings", settingsKind(), false);
       if (settingsKind() === "channel") {
         fillSettingsResolution();
@@ -1239,7 +1244,6 @@
       settingsControls.fill(sub.poll_minutes == null ? null : sub.poll_minutes, sub.poll_at == null ? null : sub.poll_at);
       settingsError("");
       renderSettings();
-      var dialog = $("sub-settings");
       document.body.classList.add("modal-open");   // the page behind does not scroll
       if (typeof dialog.showModal === "function") {
         if (!dialog.open) dialog.showModal();   // Esc closes it, focus stays inside
@@ -1247,18 +1251,25 @@
         dialog.setAttribute("open", "");
       }
       (settingsKind() === "channel" ? $("sub-settings-resolution") : settingsControls.first).focus();
+    }).catch(function () {
+      settingsFor = null;   // whatever went wrong: the next click must be able to try again
+      settingsOpener = "";
     });
   }
 
   function closeSettings() {
     var dialog = $("sub-settings");
     if (typeof dialog.close === "function") dialog.close();
-    else { dialog.removeAttribute("open"); settingsClosed(); }
+    else dialog.removeAttribute("open");
+    settingsClosed();   // at once: the browser's own "close" event comes later (and Esc has only that one)
   }
 
   /* Whatever closed it (Close, Cancel, Esc, a save): the page scrolls again and the focus goes back
      to the button that opened it (looked up again: the list is rebuilt while the window is open). */
   function settingsClosed() {
+    // The "close" event of an earlier closing can arrive after the window was opened again, or
+    // after closeSettings() has cleaned up already: neither may undo a newer open.
+    if ($("sub-settings").open || !settingsFor) return;
     document.body.classList.remove("modal-open");
     var opener = settingsOpener ? $(settingsOpener) : null;
     settingsFor = null;

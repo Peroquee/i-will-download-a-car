@@ -1773,16 +1773,66 @@ def test_the_settings_window_closes_and_the_focus_goes_back_to_its_button(closer
     close = {
         "close-button": {"click": "#sub-settings-close"},
         "cancel": {"click": "#sub-settings-cancel"},
-        "escape": {"fire": "#sub-settings", "type": "close"},  # what the browser sends after Esc
+        "escape": {"close": "#sub-settings"},  # Esc: the browser closes it, then sends "close"
         "backdrop": {"click": "#sub-settings"},
     }[closer]
     out = settings_page([OPEN_CHANNEL, close, {"read": "#sub-settings"}])
     closed = out["reads"]["#sub-settings"]
-    if closer != "escape":
-        assert closed["open"] is False
+    assert closed["open"] is False
     assert closed["active"] == "subs-settings-channel-5", "focus returns to the button"
     assert "modal-open" not in closed["bodyCls"], "the page scrolls again"
     assert not [call for call in out["fetched"] if call[0] == "PATCH"], "nothing was saved"
+
+
+@needs_node
+def test_a_late_close_event_of_the_previous_closing_does_not_undo_the_next_open():
+    """Browsers send "close" after the dialog is closed, as a task of its own: it can arrive when
+    the window was already opened again (an automated browser clicks that fast)."""
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"click": "#sub-settings-close"},
+            OPEN_CHANNEL,
+            {"fire": "#sub-settings", "type": "close"},  # the late event of the first closing
+            {"read": "#sub-settings"},
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"read": "#sub-settings-minutes"},
+        ]
+    )
+    opened = out["reads"]["#sub-settings"]
+    assert opened["open"] is True
+    assert "modal-open" in opened["bodyCls"], "the page behind stays locked"
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False, "the minutes field shows"
+
+
+@needs_node
+def test_a_second_click_while_the_window_opens_does_not_rebuild_it():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            OPEN_CHANNEL,  # a double click: the second one must not start another opening
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"read": "#sub-settings-minutes"},
+        ]
+    )
+    defaults_asked = [call for call in out["fetched"] if call == ["GET", "/api/settings/defaults"]]
+    assert len(defaults_asked) <= 2, "once for the list refresh, once for the opening"
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False
+
+
+@needs_node
+def test_the_input_event_also_shows_the_minutes_field():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "input"},
+            {"read": "#sub-settings-minutes"},
+        ]
+    )
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False
 
 
 @needs_node

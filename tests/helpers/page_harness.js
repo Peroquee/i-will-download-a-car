@@ -202,6 +202,7 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
       else if ("fire" in step) { fireEvent(select(step.fire), step.type); }
       else if ("submit" in step) { prevented[step.submit] = fireEvent(select(step.submit), "submit").defaultPrevented; }
       else if ("click" in step) { fireEvent(select(step.click), "click"); }
+      else if ("close" in step) { select(step.close).close(); }   // what Esc does: closes, then "close"
       else if ("tick" in step) { const due = timers.filter((t) => t.once).splice(0); timers.splice(0, timers.length, ...timers.filter((t) => !t.once)); due.forEach((t) => { try { t.f(); } catch (e) { errors.push({ file: "timer", message: String(e && e.message), stack: String(e && e.stack).split("\n").slice(0, 5).join("\n") }); } }); }
       else if ("read" in step) { const el = select(step.read); reads[step.read] = { text: el.textContent, hidden: el.hidden, value: el.value, checked: el.checked, children: el.children.length, disabled: el.disabled, cls: el.className, open: el.open, active: document.activeElement ? document.activeElement.id : null, bodyCls: tree.className }; }
     } catch (e) { errors.push({ file: "step " + JSON.stringify(step), message: String(e && e.message), stack: "" }); }

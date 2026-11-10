@@ -308,11 +308,13 @@ def the_subscription_settings_window_saves_resolution_and_check_interval(ctx):
     expect(page.locator("body")).not_to_have_class(re.compile(r"\bmodal-open\b"))
     # the Close button too
     button.click()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()  # the window is built and open
     page.click("#sub-settings-close")
     expect(dialog).to_be_hidden()
     expect(button).to_be_focused()
     # change the resolution and the interval and save
     button.click()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()
     page.select_option("#sub-settings-resolution", "480")
     page.select_option("#sub-settings-interval", "120")
     page.select_option("#sub-settings-at-mode", "time")
@@ -323,9 +325,11 @@ def the_subscription_settings_window_saves_resolution_and_check_interval(ctx):
     expect(row).to_contain_text("from 06:00")
     expect(row).to_contain_text("The settings were saved.")
     expect(button).to_be_focused()  # the list was rebuilt: the focus came back to the new button
-    # a value the server refuses is shown inside the window, which stays open
+    # a value the page refuses is shown inside the window, which stays open
     button.click()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()
     page.select_option("#sub-settings-interval", "custom")
+    expect(page.locator("#sub-settings-minutes")).to_be_visible()  # wait for the state, not a time
     page.fill("#sub-settings-minutes", "5")
     page.click("#sub-settings-save")
     expect(page.locator("#sub-settings-error")).to_contain_text("15 to 1440")
