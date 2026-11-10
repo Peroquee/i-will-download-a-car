@@ -23,7 +23,6 @@ from ytp.metadata import (
     MusicMetadata,
     SeasonSpecError,
     SeriesMetadata,
-    metadata_from_json,
     metadata_to_json,
     parse_metadata,
     parse_seasons,
@@ -43,6 +42,11 @@ def errors(data) -> list[tuple[str, str]]:
     with pytest.raises(ValidationError) as caught:
         parse_metadata(data)
     return [(".".join(str(p) for p in e["loc"]), e["type"]) for e in caught.value.errors()]
+
+
+def metadata_from_json(text: str):
+    """Read back what `metadata_to_json` stored (test-only; the app calls `parse_metadata`)."""
+    return parse_metadata(json.loads(text))
 
 
 # --- the four types ----------------------
