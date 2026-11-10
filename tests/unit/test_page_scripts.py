@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -1648,18 +1649,35 @@ DEFAULTS = {
     "subscription_poll_at": None,
     "podcast_poll_minutes": 240,
     "podcast_poll_at": None,
+    "poll_mode": "smart",
+    "smart_before_minutes": 10,
+    "smart_after_minutes": 60,
+    "smart_step_minutes": 5,
+    "smart_base_minutes": 360,
     "custom": {
         "max_height": False,
         "subscription_poll_minutes": False,
         "subscription_poll_at": False,
         "podcast_poll_minutes": False,
         "podcast_poll_at": False,
+        "poll_mode": False,
+        "smart_before_minutes": False,
+        "smart_after_minutes": False,
+        "smart_step_minutes": False,
+        "smart_base_minutes": False,
     },
     "timezone": "Europe/Berlin",
     "limits": {
         "choices": [0, 2160, 1440, 1080, 720, 480, 360],
         "min_minutes": {"channel": 15, "podcast": 30},
         "max_minutes": 1440,
+        "modes": ["smart", "fixed"],
+        "smart": {
+            "smart_before_minutes": {"min": 0, "max": 60},
+            "smart_after_minutes": {"min": 5, "max": 240},
+            "smart_step_minutes": {"min": 5, "max": 60},
+            "smart_base_minutes": {"min": 60, "max": 1440},
+        },
     },
 }
 SUB_WITH_RESOLUTION = {
@@ -1667,6 +1685,15 @@ SUB_WITH_RESOLUTION = {
     "kind": "channel",
     "poll_minutes": None,
     "poll_at": None,
+    "poll_mode": None,
+    "smart": {
+        "mode": "smart",
+        "regular": False,
+        "confidence": 0.0,
+        "events": 0,
+        "slots": [],
+        "next_window": None,
+    },
 }
 PODCAST_SUB = {
     "id": 3,
@@ -1680,6 +1707,15 @@ PODCAST_SUB = {
     "last_error": None,
     "poll_minutes": None,
     "poll_at": None,
+    "poll_mode": None,
+    "smart": {
+        "mode": "smart",
+        "regular": False,
+        "confidence": 0.0,
+        "events": 0,
+        "slots": [],
+        "next_window": None,
+    },
     "following": True,
     "follower_count": 1,
 }
@@ -1705,9 +1741,12 @@ def test_a_subscription_row_shows_its_resolution_and_checks_and_has_a_settings_b
     out = settings_page([{"read": "#subs-youtube-list"}, {"read": "#subs-podcast-list"}])
     channel = out["reads"]["#subs-youtube-list"]["text"]
     assert "Resolution: 720p (HD)" in channel
-    assert "Checks: Server default (every 1 h)" in channel
+    assert "Checks: smart, still learning: Server default (every 1 h)" in channel
     assert "Settings" in channel, "next to Check now and Remove"
-    assert "Checks: Server default (every 4 h)" in out["reads"]["#subs-podcast-list"]["text"]
+    assert (
+        "Checks: smart, still learning: Server default (every 4 h)"
+        in out["reads"]["#subs-podcast-list"]["text"]
+    )
 
 
 @needs_node
@@ -1721,8 +1760,90 @@ def test_a_subscription_with_its_own_checks_shows_them():
             "/api/podcasts": {"podcasts": [paused]},
         },
     )
-    assert "Checks: every 6 h \u00b7 from 06:00" in out["reads"]["#subs-youtube-list"]["text"]
+    assert (
+        "Checks: smart, still learning: every 6 h \u00b7 from 06:00"
+        in out["reads"]["#subs-youtube-list"]["text"]
+    )
     assert "Checks: paused" in out["reads"]["#subs-podcast-list"]["text"]
+
+
+TWICE_A_WEEK = [{"weekday": 1, "minute": 1020}, {"weekday": 4, "minute": 1020}]
+
+
+def a_regular_subscription(slots, last_checked=None, **extra):
+    """A channel the smart mode knows a regular pattern for (#80)."""
+    return {
+        **SUB_WITH_RESOLUTION,
+        "last_checked": last_checked,
+        "poll_mode": "smart",
+        "smart": {
+            **SUB_WITH_RESOLUTION["smart"],
+            "regular": True,
+            "confidence": 0.8,
+            "events": 12,
+            "slots": slots,
+        },
+        **extra,
+    }
+
+
+def checked_minutes_ago(minutes: int) -> str:
+    moment = datetime.now(UTC) - timedelta(minutes=minutes, seconds=30)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@needs_node
+def test_a_regular_channel_shows_when_it_uploads_before_the_last_check():
+    sub = a_regular_subscription(TWICE_A_WEEK, last_checked=checked_minutes_ago(25))
+    out = settings_page(
+        [{"read": "#subs-youtube-list"}],
+        answers={"/api/subscriptions": {"subscriptions": [sub]}},
+    )
+    text = out["reads"]["#subs-youtube-list"]["text"]
+    assert re.search(r"Usually uploads Tue and Fri 5 pm, last checked 2[56] min ago", text), text
+
+
+@needs_node
+def test_a_regular_channel_that_was_never_checked_says_so():
+    out = settings_page(
+        [{"read": "#subs-youtube-list"}],
+        answers={"/api/subscriptions": {"subscriptions": [a_regular_subscription(TWICE_A_WEEK)]}},
+    )
+    assert (
+        "Usually uploads Tue and Fri 5 pm, never checked"
+        in out["reads"]["#subs-youtube-list"]["text"]
+    )
+
+
+@needs_node
+def test_the_upload_statistic_follows_the_page_language_and_fits_several_slots():
+    three_days = [
+        {"weekday": 0, "minute": 540},
+        {"weekday": 2, "minute": 540},
+        {"weekday": 4, "minute": 540},
+    ]
+    sub = a_regular_subscription(three_days, last_checked=checked_minutes_ago(25))
+    out = settings_page(
+        [{"read": "#subs-youtube-list"}],
+        answers={"/api/subscriptions": {"subscriptions": [sub]}},
+        language="de-DE",
+    )
+    text = out["reads"]["#subs-youtube-list"]["text"]
+    assert re.search(
+        r"L\u00e4dt meist Mo, Mi und Fr 9 Uhr hoch, zuletzt gepr\u00fcft vor 2[56] Min\.", text
+    ), text
+
+
+@needs_node
+def test_without_a_regular_pattern_the_row_keeps_the_plain_last_check():
+    sub = {**SUB_WITH_RESOLUTION, "last_checked": checked_minutes_ago(25)}
+    out = settings_page(
+        [{"read": "#subs-youtube-list"}],
+        answers={"/api/subscriptions": {"subscriptions": [sub]}},
+    )
+    text = out["reads"]["#subs-youtube-list"]["text"]
+    assert "Usually uploads" not in text
+    assert re.search(r"checked 2[56] min ago", text), text
 
 
 @needs_node
@@ -1765,6 +1886,114 @@ def test_the_settings_window_opens_with_focus_inside_and_the_page_locked():
         reads["#sub-settings-tz"]["text"] == "Times are in the server's time zone: Europe/Berlin."
     )
     assert "every 5 h from 06:00" in reads["#sub-settings-rule"]["text"]
+
+
+@needs_node
+def test_the_settings_window_offers_the_check_mode():
+    out = settings_page([OPEN_CHANNEL, {"read": "#sub-settings-mode"}])
+    mode = out["reads"]["#sub-settings-mode"]
+    assert mode["hidden"] is False
+    assert mode["value"] == "", "following the server default (smart)"
+    assert "Server default (smart)" in mode["text"]
+    assert "Smart: learn the publishing times" in mode["text"]
+    assert "Fixed: interval and check time" in mode["text"]
+
+
+@needs_node
+@pytest.mark.parametrize("chosen", ["fixed", "smart"])
+def test_saving_sends_the_chosen_check_mode(chosen):
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-mode", "value": chosen},
+            {"click": "#sub-settings-save"},
+        ]
+    )
+    body = sent_body(out, "PATCH", "/api/subscriptions/5")
+    assert body["poll_mode"] == chosen
+
+
+@needs_node
+def test_a_fixed_subscription_shows_its_mode_in_the_window_and_the_plain_row():
+    fixed = {
+        **SUB_WITH_RESOLUTION,
+        "poll_mode": "fixed",
+        "poll_minutes": 360,
+        "poll_at": "06:00",
+        "smart": {**SUB_WITH_RESOLUTION["smart"], "mode": "fixed"},
+    }
+    out = settings_page(
+        [{"read": "#subs-youtube-list"}, OPEN_CHANNEL, {"read": "#sub-settings-mode"}],
+        answers={"/api/subscriptions": {"subscriptions": [fixed]}},
+    )
+    assert "Checks: every 6 h · from 06:00" in out["reads"]["#subs-youtube-list"]["text"]
+    assert "smart" not in out["reads"]["#subs-youtube-list"]["text"].lower()
+    assert out["reads"]["#sub-settings-mode"]["value"] == "fixed"
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("smart", "expected"),
+    [
+        (
+            {},
+            "Not enough regular uploads yet to learn a pattern: it is checked by the interval.",
+        ),
+        (
+            {"regular": True, "slots": TWICE_A_WEEK},
+            "Usually uploads Tue and Fri 5 pm.",
+        ),
+        (
+            {
+                "regular": True,
+                "slots": TWICE_A_WEEK,
+                "next_window": {
+                    "start": "2026-11-10T15:50:00Z",
+                    "expected": "2026-11-10T16:00:00Z",
+                    "active": False,
+                },
+            },
+            "Usually uploads Tue and Fri 5 pm. Next intensive check: Tue 4:50 pm.",
+        ),
+        (
+            {
+                "regular": True,
+                "slots": TWICE_A_WEEK,
+                "next_window": {
+                    "start": "2026-11-10T15:50:00Z",
+                    "expected": "2026-11-10T16:00:00Z",
+                    "active": True,
+                },
+            },
+            "Usually uploads Tue and Fri 5 pm. Intensive checking is on now.",
+        ),
+        (
+            {
+                "mode": "fixed",
+                "regular": True,
+                "slots": TWICE_A_WEEK,
+                "next_window": {
+                    "start": "2026-11-10T15:50:00Z",
+                    "expected": "2026-11-10T16:00:00Z",
+                    "active": True,
+                },
+            },
+            "Usually uploads Tue and Fri 5 pm.",
+            # fixed mode never runs an intensive check, so it is not announced
+        ),
+    ],
+)
+def test_the_settings_window_says_what_smart_learned(smart, expected):
+    sub = {
+        **SUB_WITH_RESOLUTION,
+        "poll_mode": "smart",
+        "smart": {**SUB_WITH_RESOLUTION["smart"], **smart},
+    }
+    out = settings_page(
+        [OPEN_CHANNEL, {"read": "#sub-settings-learned"}],
+        answers={"/api/subscriptions": {"subscriptions": [sub]}},
+    )
+    assert out["reads"]["#sub-settings-learned"]["text"] == expected
 
 
 @needs_node
@@ -1854,6 +2083,7 @@ def test_saving_sends_the_resolution_interval_and_start_time_and_closes():
     assert sent_body(out, "PATCH", "/api/subscriptions/5") == {
         "poll_minutes": 120,
         "poll_at": "06:00",
+        "poll_mode": None,
         "max_height": 480,
     }
     assert out["reads"]["#sub-settings"]["open"] is False
@@ -1881,6 +2111,7 @@ def test_saving_server_defaults_and_none_send_null_and_empty():
     assert sent_body(out, "PATCH", "/api/subscriptions/5") == {
         "poll_minutes": None,
         "poll_at": None,
+        "poll_mode": None,
         "max_height": None,
     }
     none = settings_page(
@@ -1931,7 +2162,7 @@ def test_a_custom_interval_is_checked_before_it_is_sent():
     assert out["reads"]["#sub-settings-minutes"]["hidden"] is False
     assert out["reads"]["#sub-settings-error"]["text"] == "Enter whole minutes from 15 to 1440."
     assert [b for b in sent_bodies(out, "PATCH", "/api/subscriptions/5")] == [
-        {"poll_minutes": 20, "poll_at": None, "max_height": 720}
+        {"poll_minutes": 20, "poll_at": None, "poll_mode": None, "max_height": 720}
     ], "only the valid one was sent"
 
 
@@ -1971,7 +2202,9 @@ def test_a_podcast_has_the_interval_only_and_a_longer_minimum():
     assert "every 30 min" in interval
     assert "every 15 min" not in interval, "podcasts start at 30"
     assert out["reads"]["#sub-settings-error"]["text"] == "Enter whole minutes from 30 to 1440."
-    assert sent_bodies(out, "PATCH", "/api/podcasts/3") == [{"poll_minutes": 45, "poll_at": None}]
+    assert sent_bodies(out, "PATCH", "/api/podcasts/3") == [
+        {"poll_minutes": 45, "poll_at": None, "poll_mode": None}
+    ]
 
 
 @needs_node
@@ -1981,6 +2214,7 @@ def test_without_the_right_the_settings_are_shown_read_only():
             OPEN_CHANNEL,
             {"read": "#sub-settings-readonly"},
             {"read": "#sub-settings-save"},
+            {"read": "#sub-settings-mode"},
             {"read": "#sub-settings-interval"},
             {"read": "#sub-settings-resolution"},
             {"click": "#sub-settings-save"},
@@ -1989,6 +2223,7 @@ def test_without_the_right_the_settings_are_shown_read_only():
     )
     assert out["reads"]["#sub-settings-readonly"]["hidden"] is False
     assert out["reads"]["#sub-settings-save"]["hidden"] is True
+    assert out["reads"]["#sub-settings-mode"]["disabled"] is True
     assert out["reads"]["#sub-settings-interval"]["disabled"] is True
     assert out["reads"]["#sub-settings-resolution"]["disabled"] is True
     assert not [call for call in out["fetched"] if call[0] == "PATCH"]
@@ -2018,9 +2253,14 @@ def test_the_admin_defaults_panel_shows_the_values_and_saves_them():
     out = settings_page(
         [
             {"read": "#sd-resolution"},
+            {"read": "#sd-channel-mode"},
             {"read": "#sd-channel-interval"},
             {"read": "#sd-channel-at"},
             {"read": "#sd-podcast-interval"},
+            {"read": "#sd-smart_before_minutes"},
+            {"read": "#sd-smart_after_minutes"},
+            {"read": "#sd-smart_step_minutes"},
+            {"read": "#sd-smart_base_minutes"},
             {"read": "#sd-tz"},
             {"set": "#sd-resolution", "value": "480"},
             {"set": "#sd-channel-interval", "value": "60"},
@@ -2037,10 +2277,20 @@ def test_the_admin_defaults_panel_shows_the_values_and_saves_them():
     )
     reads = out["reads"]
     assert reads["#sd-resolution"]["value"] == "720", "read before the edits: the saved value"
+    assert reads["#sd-channel-mode"]["value"] == "smart"
     assert reads["#sd-channel-interval"]["value"] == "120"
     assert reads["#sd-channel-at"]["value"] == "06:00"
     assert reads["#sd-podcast-interval"]["value"] == "0"
+    assert reads["#sd-smart_before_minutes"]["value"] == "10"
+    assert reads["#sd-smart_after_minutes"]["value"] == "60"
+    assert reads["#sd-smart_step_minutes"]["value"] == "5"
+    assert reads["#sd-smart_base_minutes"]["value"] == "360"
     assert sent_body(out, "PATCH", "/api/settings/defaults") == {
+        "poll_mode": "smart",
+        "smart_before_minutes": 10,
+        "smart_after_minutes": 60,
+        "smart_step_minutes": 5,
+        "smart_base_minutes": 360,
         "max_height": 480,
         "subscription_poll_minutes": 60,
         "subscription_poll_at": None,
@@ -2085,6 +2335,54 @@ def test_a_failed_save_of_the_defaults_is_shown():
     )
     assert out["reads"]["#sd-result"]["text"] == "The server defaults could not be saved. bad value"
     assert "bad" in out["reads"]["#sd-result"]["cls"]
+
+
+@needs_node
+def test_the_admin_saves_the_smart_numbers():
+    out = settings_page(
+        [
+            {"set": "#sd-smart_before_minutes", "value": "15"},
+            {"set": "#sd-smart_after_minutes", "value": "90"},
+            {"set": "#sd-smart_step_minutes", "value": "10"},
+            {"set": "#sd-smart_base_minutes", "value": "240"},
+            {"click": "#sd-save"},
+            {"read": "#sd-result"},
+        ],
+        answers={"/api/accounts": {"accounts": [ACCOUNT]}},
+    )
+    body = sent_body(out, "PATCH", "/api/settings/defaults")
+    assert (
+        body["smart_before_minutes"],
+        body["smart_after_minutes"],
+        body["smart_step_minutes"],
+        body["smart_base_minutes"],
+    ) == (15, 90, 10, 240)
+    assert out["reads"]["#sd-result"]["text"] == "The server defaults were saved."
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("smart_before_minutes", "61", "0 to 60"),
+        ("smart_before_minutes", "-1", "0 to 60"),
+        ("smart_after_minutes", "4", "5 to 240"),
+        ("smart_step_minutes", "0", "5 to 60"),
+        ("smart_step_minutes", "lots", "5 to 60"),
+        ("smart_base_minutes", "1441", "60 to 1440"),
+    ],
+)
+def test_a_bad_smart_number_is_refused_before_anything_is_sent(field, value, message):
+    out = settings_page(
+        [
+            {"set": "#sd-" + field, "value": value},
+            {"click": "#sd-save"},
+            {"read": "#sd-result"},
+        ],
+        answers={"/api/accounts": {"accounts": [ACCOUNT]}},
+    )
+    assert message in out["reads"]["#sd-result"]["text"]
+    assert not [call for call in out["fetched"] if call[0] == "PATCH"]
 
 
 @needs_node

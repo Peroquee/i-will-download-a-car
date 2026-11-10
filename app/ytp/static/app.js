@@ -812,9 +812,14 @@
 
     var meta = document.createElement("div");
     meta.className = "job-meta";
-    var metaText = sub.last_checked
-      ? t("subs.checked", { when: timeText(sub.last_checked) })
-      : t("subs.never");
+    var usual = sub.smart && sub.smart.regular ? L.slotsText(sub.smart.slots, lang) : "";
+    var metaText = usual
+      ? (sub.last_checked
+        ? t("subs.usually_checked", { slots: usual, when: timeText(sub.last_checked) })
+        : t("subs.usually_never", { slots: usual }))
+      : (sub.last_checked
+        ? t("subs.checked", { when: timeText(sub.last_checked) })
+        : t("subs.never"));
     if (sub.target === "podcast") {
       metaText = t(sub.audio_only ? "subs.target_audio" : "subs.target_podcast") + " \u00b7 " + metaText;
     }
@@ -1018,11 +1023,26 @@
     return { minutes: defaultsData[prefix + "_poll_minutes"], at: defaultsData[prefix + "_poll_at"] || null };
   }
 
+  /* The server-wide check mode: "smart" until an admin changes it (#80). */
+  function defaultMode() {
+    return defaultsData && defaultsData.poll_mode === "fixed" ? "fixed" : "smart";
+  }
+
   function heightText(value) { return value === 0 ? t("yt.resolution_best") : value + "p"; }
 
   /* The row's summary: what this subscription uses, and that it follows the server if it does. */
   function scheduleSummary(sub) {
     var kind = sub.kind === "podcast" ? "podcast" : "channel";
+    var smart = sub.smart || {};
+    if ((smart.mode || sub.poll_mode || defaultMode()) === "smart" && sub.poll_minutes !== 0) {
+      if (smart.regular) return t("sched.smart_on");
+      var fallback = scheduleSummaryFixed(sub, kind);
+      return t("sched.smart_learning", { fallback: fallback });
+    }
+    return scheduleSummaryFixed(sub, kind);
+  }
+
+  function scheduleSummaryFixed(sub, kind) {
     var base = defaultSchedule(kind);
     var minutes = sub.poll_minutes == null ? (base ? base.minutes : null) : sub.poll_minutes;
     var at = sub.poll_at == null ? (base ? base.at : null) : (sub.poll_at || null);
@@ -1054,12 +1074,20 @@
   /* The interval and check-time controls inside `container`. `server` = the admin's defaults (no
      "server default" choice: empty means the initial .env value). Returns {fill, read, relabel,
      disable}. read() gives {ok, poll_minutes, poll_at} or {ok: false, error, vars}. */
-  function scheduleControls(container, prefix, kind, server) {
+  function scheduleControls(container, prefix, kind, server, showMode) {
     container.textContent = "";
     var intervalId = prefix + "-interval";
     var minutesId = prefix + "-minutes";
     var modeId = prefix + "-at-mode";
     var atId = prefix + "-at";
+
+    var modeRow = fieldRow(server ? "sd.mode" : "sched.mode", prefix + "-mode");
+    var modeSelect = document.createElement("select");
+    modeSelect.id = prefix + "-mode";
+    modeRow.appendChild(modeSelect);
+    var modeNote = document.createElement("p");
+    modeNote.className = "note";
+    modeNote.id = prefix + "-mode-note";
 
     var intervalRow = fieldRow("sched.interval", intervalId);
     var interval = document.createElement("select");
@@ -1088,6 +1116,10 @@
     paused.className = "note";
     paused.id = prefix + "-paused-note";
     paused.hidden = true;
+    modeRow.hidden = showMode === false;   // the admin's panel has one mode for both kinds
+    modeNote.hidden = showMode === false;
+    container.appendChild(modeRow);
+    container.appendChild(modeNote);
     container.appendChild(intervalRow);
     container.appendChild(atRow);
     container.appendChild(paused);
@@ -1101,11 +1133,21 @@
       minutes.hidden = interval.value !== "custom";
       at.hidden = mode.value !== "time";
       paused.hidden = interval.value !== "0";
+      var effective = modeSelect.value || defaultMode();
+      modeNote.textContent = effective === "smart" ? t("sched.smart_note") : "";
     }
 
     function relabel() {
       var keepInterval = interval.value;
       var keepMode = mode.value;
+      var keepCheckMode = modeSelect.value;
+      modeSelect.textContent = "";
+      if (!server) {
+        modeSelect.appendChild(optionEl("", t("sched.default_is", { value: t("sched.mode_short." + defaultMode()) })));
+      }
+      modeSelect.appendChild(optionEl("smart", t("sched.mode_smart")));
+      modeSelect.appendChild(optionEl("fixed", t("sched.mode_fixed")));
+      modeSelect.value = keepCheckMode;
       interval.textContent = "";
       interval.appendChild(optionEl("", server ? t("sched.initial") : defaultLabel()));
       interval.appendChild(optionEl("0", t("sched.paused_option")));
@@ -1132,9 +1174,11 @@
     ["change", "input"].forEach(function (type) {
       interval.addEventListener(type, show);
       mode.addEventListener(type, show);
+      modeSelect.addEventListener(type, show);
     });
 
-    function fill(ownMinutes, ownAt) {
+    function fill(ownMinutes, ownAt, ownMode) {
+      modeSelect.value = ownMode || (server ? defaultMode() : "");
       var inPresets = ownMinutes === 0
         || (PRESET_MINUTES.indexOf(ownMinutes) >= 0 && ownMinutes >= minMinutes(kind));
       if (ownMinutes == null) interval.value = "";
@@ -1166,11 +1210,11 @@
       } else if (mode.value === "none") {
         time = server ? null : "";
       }
-      return { ok: true, poll_minutes: wire, poll_at: time };
+      return { ok: true, poll_minutes: wire, poll_at: time, poll_mode: modeSelect.value || null };
     }
 
     function disable(off) {
-      [interval, minutes, mode, at].forEach(function (control) { control.disabled = off; });
+      [modeSelect, interval, minutes, mode, at].forEach(function (control) { control.disabled = off; });
     }
 
     relabel();
@@ -1208,6 +1252,19 @@
     $("sub-settings-error").textContent = text;
   }
 
+  /* What the smart mode has learned about a subscription: the usual times and the next intensive
+     check, or that there is not enough yet (#80). A fixed subscription runs no intensive check,
+     so its next window is not announced. */
+  function learnedText(sub) {
+    var smart = sub && sub.smart;
+    if (!smart || !smart.regular) return t("sched.learned_none");
+    var text = t("sched.learned_pattern", { slots: L.slotsText(smart.slots, lang) });
+    var next = smart.mode === "fixed" ? null : smart.next_window;
+    if (next && next.active) return text + " " + t("sched.learned_now");
+    var when = next ? L.whenText(next.start, defaultsData && defaultsData.timezone, lang) : "";
+    return when ? text + " " + t("sched.learned_next", { when: when }) : text;
+  }
+
   function renderSettings() {
     if (!settingsFor) return;
     var channel = settingsKind() === "channel";
@@ -1216,6 +1273,7 @@
     $("sub-settings-resolution-row").hidden = !channel;
     if (channel) fillSettingsResolution();
     settingsControls.relabel();
+    $("sub-settings-learned").textContent = learnedText(settingsFor);
     $("sub-settings-tz").textContent = defaultsData && defaultsData.timezone
       ? t("sched.tz", { zone: defaultsData.timezone }) : "";
     $("sub-settings-rule").textContent = t("sched.rule");
@@ -1240,7 +1298,10 @@
         fillSettingsResolution();
         $("sub-settings-resolution").value = sub.max_height == null ? "" : String(sub.max_height);
       }
-      settingsControls.fill(sub.poll_minutes == null ? null : sub.poll_minutes, sub.poll_at == null ? null : sub.poll_at);
+      settingsControls.fill(
+        sub.poll_minutes == null ? null : sub.poll_minutes,
+        sub.poll_at == null ? null : sub.poll_at,
+        sub.poll_mode || null);
       settingsError("");
       renderSettings();
       document.body.classList.add("modal-open");   // the page behind does not scroll
@@ -1281,7 +1342,7 @@
     var sub = settingsFor;
     var read = settingsControls.read();
     if (!read.ok) { settingsError(t(read.error, read.vars)); return; }
-    var body = { poll_minutes: read.poll_minutes, poll_at: read.poll_at };
+    var body = { poll_minutes: read.poll_minutes, poll_at: read.poll_at, poll_mode: read.poll_mode };
     if (settingsKind() === "channel") {
       var height = $("sub-settings-resolution").value;
       body.max_height = height === "" ? null : Number(height);
@@ -1318,6 +1379,7 @@
 
   /* ---- the admin's server-wide defaults (accounts page) */
 
+  var SMART_FIELDS = ["smart_before_minutes", "smart_after_minutes", "smart_step_minutes", "smart_base_minutes"];
   var serverForms = null;        // {channel, podcast} controls, built on the first render
   var serverDirty = false;       // the admin is editing: a refresh must not overwrite it
 
@@ -1327,10 +1389,15 @@
     $("sd-resolution").value = custom.max_height ? String(defaultsData.max_height) : "";
     serverForms.channel.fill(
       custom.subscription_poll_minutes ? defaultsData.subscription_poll_minutes : null,
-      custom.subscription_poll_at ? defaultsData.subscription_poll_at : null);
+      custom.subscription_poll_at ? defaultsData.subscription_poll_at : null,
+      defaultsData.poll_mode);
     serverForms.podcast.fill(
       custom.podcast_poll_minutes ? defaultsData.podcast_poll_minutes : null,
-      custom.podcast_poll_at ? defaultsData.podcast_poll_at : null);
+      custom.podcast_poll_at ? defaultsData.podcast_poll_at : null,
+      defaultsData.poll_mode);
+    SMART_FIELDS.forEach(function (name) {
+      $("sd-" + name).value = String(defaultsData[name]);
+    });
     $("sd-tz").textContent = defaultsData.timezone ? t("sched.tz", { zone: defaultsData.timezone }) : "";
   }
 
@@ -1340,7 +1407,7 @@
     if (first) {
       serverForms = {
         channel: scheduleControls($("sd-channel-schedule"), "sd-channel", "channel", true),
-        podcast: scheduleControls($("sd-podcast-schedule"), "sd-podcast", "podcast", true),
+        podcast: scheduleControls($("sd-podcast-schedule"), "sd-podcast", "podcast", true, false),
       };
     } else {
       serverForms.channel.relabel();
@@ -1359,7 +1426,25 @@
     var result = $("sd-result");
     if (bad) { result.className = "result bad"; result.textContent = t(bad.error, bad.vars); return; }
     var height = $("sd-resolution").value;
+    // one mode for channels and podcasts; the channel's select is the one shown for both
+    var smartNumbers = {};
+    var badNumber = null;
+    SMART_FIELDS.forEach(function (name) {
+      var limit = (defaultsData && defaultsData.limits && defaultsData.limits.smart || {})[name] || {};
+      var raw = String($("sd-" + name).value).trim();
+      var n = Number(raw);
+      if (!/^\d+$/.test(raw) || (limit.min != null && n < limit.min) || (limit.max != null && n > limit.max)) {
+        badNumber = badNumber || { error: "sd.err_smart", vars: { min: limit.min, max: limit.max } };
+      }
+      smartNumbers[name] = n;
+    });
+    if (badNumber) { result.className = "result bad"; result.textContent = t(badNumber.error, badNumber.vars); return; }
     var body = {
+      poll_mode: channel.poll_mode,
+      smart_before_minutes: smartNumbers.smart_before_minutes,
+      smart_after_minutes: smartNumbers.smart_after_minutes,
+      smart_step_minutes: smartNumbers.smart_step_minutes,
+      smart_base_minutes: smartNumbers.smart_base_minutes,
       max_height: height === "" ? null : Number(height),
       subscription_poll_minutes: channel.poll_minutes,
       subscription_poll_at: channel.poll_at,

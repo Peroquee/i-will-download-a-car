@@ -10,9 +10,10 @@ and an update while a page is open gets a banner. Since #44 it also covers the s
 sees only the form, a wrong password is refused and braked, the session cookie is HttpOnly and
 SameSite=Strict, logout ends the session, an admin and a user see different tabs, and the admin
 makes the user on the accounts page. Since #79 it opens a subscription's Settings window, changes
-the resolution and the check interval, and saves the server defaults. Not part of the pipeline:
-the image is large; run it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the
-browsers); the matching `playwright` package is installed with pip inside the container
+the resolution and the check interval, and saves the server defaults. Since #80 it switches the
+check mode in that window and saves the smart-mode numbers on the accounts page. Not part of the
+pipeline: the image is large; run it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python
+and the browsers); the matching `playwright` package is installed with pip inside the container
 (`YTP_PLAYWRIGHT_VERSION`).
 """
 
