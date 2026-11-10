@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
 
-from . import __version__, accounts, api, auth, auth_api, youtube_cookies
+from . import __version__, accounts, api, auth, auth_api, jobs, youtube_cookies
 from .auth import AuthMiddleware, LoginLimiter
 from .channel_videos import ChannelLister
 from .channels import ChannelResolver
@@ -87,6 +87,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
     if app.state.db is not None:
         _set_up_accounts(app.state.db, settings)
+    if app.state.db is not None and app.state.qbit is None:
+        # Without qBittorrent no magnet can transfer. An old hold state from before must not
+        # block the normal YouTube/podcast queues (#70); no priority manager will clear it.
+        jobs.set_magnet_transferring(app.state.db, False)
     # YouTube downloads (#18): the database is the queue, one worker thread runs it.
     app.state.youtube_worker = None
     app.state.youtube_worker_thread = None

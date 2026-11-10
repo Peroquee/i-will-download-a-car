@@ -31,6 +31,14 @@ while a high-priority download still runs would otherwise never be seen (the wat
 paused" policy. The status is read once per tick and passed on, so the resume path does not fetch
 it a second time.
 
+**A stuck high-priority torrent must not freeze the normal queues (#70).** A high-priority MAGNET
+job only holds the line while qBittorrent is really transferring its torrent. Paused and queued
+torrents release it at once; a torrent qBittorrent calls stalled (or checking/moving) keeps it for
+a short grace period (`HOLD_GRACE_SECONDS`), because that can be a momentary hiccup. The answer is
+stored through `jobs.set_magnet_transferring`, where `claim_next_queued` and the hold/resume
+decision below read it. Without that flag (no qBittorrent configured, or before the first tick) a
+magnet never holds: better to start the normal queue than to freeze it forever.
+
 qBittorrent trouble is normal (the VPN reconnects): a failed tick logs once per state change and
 tries again on the next run. A pause is only recorded after qBittorrent accepted it, so a lost
 connection can never make the app "remember" a pause it did not do.
@@ -39,6 +47,8 @@ connection can never make the app "remember" a pause it did not do.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from . import jobs
@@ -50,6 +60,10 @@ logger = logging.getLogger(__name__)
 
 PRIORITY_JOB_ID = "priority"
 PRIORITY_SECONDS = 5  # how quickly a high-priority download holds the line
+# How long a high-priority torrent that just stopped moving (stalled, checking, moving) still
+# holds the line: a short hiccup must not start the normal queue, a dead torrent must not freeze
+# it for days (#70).
+HOLD_GRACE_SECONDS = 120.0
 
 
 def _parse_time(value: object) -> datetime | None:
@@ -69,10 +83,15 @@ class PriorityManager:
         db: Database,
         qbit: QbitClient | None,
         watchdog: WatchdogStatusClient | None = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.db = db
         self.qbit = qbit
         self.watchdog = watchdog
+        self._clock = clock
+        # When each high-priority torrent was last seen transferring (for the stall grace).
+        self._last_transfer: dict[str, float] = {}
         self._last_problem: str | None = None
 
     def tick(self) -> None:
@@ -80,6 +99,7 @@ class PriorityManager:
         if self.qbit is None:
             return
         try:
+            self._update_magnet_transferring()
             # Read the watchdog once at the start (#66): its pause may start and end while a
             # high-priority download still runs, so the resume path alone would miss it.
             paused = jobs.app_paused_hashes(self.db)
@@ -95,6 +115,8 @@ class PriorityManager:
             else:
                 self._resume_app_paused(paused, status)
         except QbitError as exc:
+            # Cannot see the torrents: do not let a stale "transferring" hold the queue.
+            self._store_transferring(False)
             # The VPN is probably reconnecting; the next tick tries again.
             if self._last_problem != str(exc):
                 logger.warning(
@@ -105,6 +127,46 @@ class PriorityManager:
         if self._last_problem is not None:
             logger.info("priority: qBittorrent is usable again")
             self._last_problem = None
+
+    # ------------------------------------------------------------------ does a magnet hold?
+
+    def _update_magnet_transferring(self) -> None:
+        """Store whether a high-priority magnet is really moving data (#70).
+
+        Paused and queued torrents release the line at once. A torrent that just stopped
+        moving (stalled by qBittorrent, being checked or moved) keeps it for
+        `HOLD_GRACE_SECONDS`. Nothing is asked of qBittorrent when no high-priority magnet is
+        downloading.
+        """
+        hashes = jobs.high_priority_magnet_hashes(self.db)
+        if not hashes:
+            self._last_transfer.clear()
+            self._store_transferring(False)
+            return
+        torrents = {t.hash: t for t in self.qbit.list_torrents(hashes=hashes)}
+        now = self._clock()
+        moving = False
+        for infohash in hashes:
+            torrent = torrents.get(infohash)
+            if torrent is not None and torrent.transferring:
+                self._last_transfer[infohash] = now
+                moving = True
+            elif torrent is not None and (torrent.paused or torrent.queued):
+                # Deliberately not transferring (the user, the watchdog or qBittorrent's
+                # queue): the normal work must not wait for it.
+                self._last_transfer.pop(infohash, None)
+            elif (last := self._last_transfer.get(infohash)) is not None and (
+                now - last <= HOLD_GRACE_SECONDS
+            ):
+                moving = True  # a short stall: keep the line, it may start again any moment
+            else:
+                self._last_transfer.pop(infohash, None)
+        self._store_transferring(moving)
+
+    def _store_transferring(self, value: bool) -> None:
+        """Write the flag only when it changes (this ticks every five seconds)."""
+        if jobs.magnet_transferring(self.db) != value:
+            jobs.set_magnet_transferring(self.db, value)
 
     # ------------------------------------------------------------------ holding back
 

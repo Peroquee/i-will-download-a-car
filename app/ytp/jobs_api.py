@@ -107,6 +107,12 @@ class TorrentProgress:
 
     The page polls every few seconds; this keeps that from turning into a qBittorrent call per
     poll and per viewer. A failure gives an empty answer (progress unknown), never an error.
+
+    **No reader ever waits for qBittorrent (#70).** One caller refreshes while holding the
+    lock; every other caller gets the cached values immediately (empty before the first
+    answer). qBittorrent can take ten seconds or more to answer, and blocking the shared
+    `to_thread` pool on it would stall the whole API. The cache dicts are replaced as a whole,
+    never changed in place, so reading one without the lock is safe.
     """
 
     def __init__(self, client: QbitClient | None, ttl: float = PROGRESS_CACHE_SECONDS):
@@ -130,20 +136,27 @@ class TorrentProgress:
             self._torrents = {}
         self._fetched_at = time.monotonic()
 
+    def _maybe_refresh(self) -> None:
+        """Refresh if nobody else is: a reader must never wait for qBittorrent (#70)."""
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
+            self._refresh()
+        finally:
+            self._lock.release()
+
     def get(self) -> dict[str, int]:
         if self._client is None:
             return {}
-        with self._lock:
-            self._refresh()
-            return self._values
+        self._maybe_refresh()
+        return self._values
 
     def details(self) -> dict[str, Torrent]:
         """The torrents themselves (size, speed, ETA) from the same cached call (#38)."""
         if self._client is None:
             return {}
-        with self._lock:
-            self._refresh()
-            return self._torrents
+        self._maybe_refresh()
+        return self._torrents
 
 
 def job_progress(job: Job, torrents: dict[str, int], youtube: dict[int, int]) -> int | None:

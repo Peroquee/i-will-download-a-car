@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +14,7 @@ from starlette.testclient import TestClient
 
 from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
 from ytp import jobs
+from ytp.clients.qbittorrent import Torrent
 from ytp.config import Settings
 from ytp.jobs_api import TorrentProgress, job_label
 from ytp.main import create_app
@@ -266,6 +268,39 @@ def test_the_torrent_progress_is_cached_for_a_moment(fake):
     cache.get()
     cache.get()
     assert len(fake.calls("torrents/info")) == before
+
+
+def test_no_reader_waits_for_a_slow_qbittorrent_refresh():
+    """One thread refreshes; every other reader gets the cached answer immediately (#70)."""
+
+    class SlowClient:
+        def __init__(self):
+            self.gate = threading.Event()
+            self.calls = 0
+
+        def list_torrents(self):
+            self.calls += 1
+            self.gate.wait(5)
+            return [Torrent.from_api({"hash": HASH, "state": "downloading", "progress": 0.5})]
+
+    slow = SlowClient()
+    cache = TorrentProgress(slow, ttl=60)  # type: ignore[arg-type]
+    refresher = threading.Thread(target=cache.get)
+    refresher.start()
+    deadline = time.monotonic() + 5
+    while slow.calls == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert slow.calls == 1, "the refresher holds the lock and is inside qBittorrent"
+
+    started = time.monotonic()
+    assert cache.get() == {}, "the cached (still empty) value, not a wait for qBittorrent"
+    assert cache.details() == {}
+    assert time.monotonic() - started < 1
+
+    slow.gate.set()
+    refresher.join(5)
+    assert cache.get() == {HASH: 50}, "the refresh filled the cache"
+    assert sorted(cache.details()) == [HASH]
 
 
 def test_without_a_database_the_list_is_a_503(tmp_path):

@@ -12,8 +12,9 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from ytp import __version__
+from ytp import __version__, jobs
 from ytp.config import Settings
+from ytp.db import Database
 from ytp.main import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,6 +74,18 @@ def test_health_is_503_degraded_when_the_media_volume_is_missing(tmp_path):
     assert response.status_code == 503
     assert response.json()["status"] == "degraded"
     assert response.json()["checks"]["data_root"] == "missing"
+
+
+def test_start_without_qbittorrent_clears_an_old_priority_hold(tmp_path):
+    """Without qBittorrent nothing can transfer; an old hold must not block the queues (#70)."""
+    config = tmp_path / "config"
+    config.mkdir(exist_ok=True)
+    settings = Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config)})
+    db = Database.open(settings.database_path)
+    jobs.set_magnet_transferring(db, True)
+    db.close()
+    with TestClient(create_app(settings)) as client:
+        assert jobs.magnet_transferring(client.app.state.db) is False
 
 
 def test_health_does_not_depend_on_qbittorrent_or_jellyfin(tmp_path):

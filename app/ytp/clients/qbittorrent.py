@@ -163,6 +163,21 @@ class Torrent:
         """Paused by hand or pause_all(): `paused*` (qBittorrent 4.x) or `stopped*` (5.x) states."""
         return self.state.startswith(("paused", "stopped"))
 
+    @property
+    def queued(self) -> bool:
+        """Waiting in qBittorrent's own queue (`queuedDL`, `queuedUP`): not moving data now."""
+        return self.state.startswith("queued")
+
+    @property
+    def transferring(self) -> bool:
+        """qBittorrent is moving data for it right now (#70).
+
+        Deliberately narrow: `stalledDL` (no peers), paused, queued, checking and moving
+        states are not transferring. Callers that want a short grace period for a stall keep
+        that themselves.
+        """
+        return self.state in {"downloading", "forcedDL", "metaDL", "forcedMetaDL"}
+
     @classmethod
     def from_api(cls, item: Mapping[str, Any]) -> Torrent:
         try:
