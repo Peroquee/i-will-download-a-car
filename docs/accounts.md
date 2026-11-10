@@ -130,6 +130,8 @@ logged as `login` / `login failed` with the account id and the client address.
 | `GET /api/auth/me` | anyone | `200 {account}` or `401` |
 | `POST /api/auth/password` | logged in | `{current, new}`; `403` if `current` is wrong |
 | `PATCH /api/me/settings` | logged in | `{default_max_height}`; `403` without the resolution right (#65) |
+| `GET /api/settings/defaults` | logged in | the server-wide defaults in force, which of them an admin set, the time zone and the limits (#79) |
+| `PATCH /api/settings/defaults` | admin | one or more of `max_height`, `subscription_poll_minutes`, `subscription_poll_at`, `podcast_poll_minutes`, `podcast_poll_at`; `null` = back to the `.env` value (#79) |
 | `GET /api/accounts` | admin | list |
 | `POST /api/accounts` | admin | `{username, password, role?}` → `201`; `409` exists; `422` |
 | `PATCH /api/accounts/{id}` | admin | `{role?, disabled?, default_max_height?, can_set_resolution?}` (#65) |
@@ -161,6 +163,13 @@ changes both with `PATCH /api/accounts/{id}`, and a user with the right sets its
   history, update status or alerts for them. **Admins** also get *Accounts* (`/accounts`): create an
   account, make admin / user, disable, set a password, delete (two clicks), with the last-admin
   rule explained. A user who opens `/accounts` is sent back to the start page.
+* **Server defaults (#79):** below the cookies the *Accounts* page has a *Server defaults* panel
+  (admins only): the default resolution for new videos and, for YouTube channels and for podcasts
+  separately, the check interval and check time. "Initial setting (.env)" stands for the value
+  from `.env` (`YOUTUBE_MAX_HEIGHT`, `SUBSCRIPTION_POLL_MINUTES`, `PODCAST_POLL_MINUTES`) and is
+  what an install has until an admin saves one. A saved default applies at once, without a
+  restart, to every subscription that has no value of its own. Users can read the values (the
+  Settings window shows what "server default" means) but not change them.
 * **Subscriptions** show how many others follow the same channel (admins see the names, and a
   *Remove for everyone* button). Subscribing to a channel somebody follows says so.
 
