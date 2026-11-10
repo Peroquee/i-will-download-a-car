@@ -44,6 +44,7 @@ from . import (
     jobs_api,
     podcasts_api,
     resolution,
+    settings_api,
     subscriptions_api,
     youtube_cookies_api,
 )
@@ -240,7 +241,7 @@ async def youtube_download(body: DownloadRequest, request: Request) -> JSONRespo
             allowed=resolution.may_choose(account.is_admin, account.can_set_resolution),
             default_max_height=account.default_max_height,
             chosen=chosen,
-            server_default=request.app.state.settings.youtube_max_height,
+            server_default=request.app.state.defaults.max_height(),
         )
     except resolution.NotAllowed as error:
         return problem(403, str(error))
@@ -285,16 +286,16 @@ async def youtube_options(request: Request) -> JSONResponse:
     200 {"max_height": 1080, "choices": [0, 2160, 1440, 1080, 720, 480, 360], "can_choose": true}
 
     `max_height` is the account's effective default (#65): its `default_max_height` when set,
-    else `YOUTUBE_MAX_HEIGHT` from the environment (0 = best). `can_choose` says whether the
-    account may pick a resolution at all (an admin always may); the page disables the dropdown
-    when it is false. The list is fixed; no formats are fetched from YouTube.
+    else the server-wide default (an admin's value, #79, else `YOUTUBE_MAX_HEIGHT`; 0 = best).
+    `can_choose` says whether the account may pick a resolution at all (an admin always may); the
+    page disables the dropdown when it is false. The list is fixed; no formats are fetched from
+    YouTube.
     """
     account = request.state.account
-    settings = request.app.state.settings
     return JSONResponse(
         {
             "max_height": resolution.effective_default(
-                account.default_max_height, settings.youtube_max_height
+                account.default_max_height, request.app.state.defaults.max_height()
             ),
             "choices": list(resolution.MAX_HEIGHTS),
             "can_choose": resolution.may_choose(account.is_admin, account.can_set_resolution),
@@ -369,3 +370,4 @@ def register(app: FastAPI) -> None:
     subscriptions_api.register(app)
     podcasts_api.register(app)
     youtube_cookies_api.register(app)
+    settings_api.register(app)

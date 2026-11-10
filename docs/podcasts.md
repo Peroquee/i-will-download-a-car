@@ -175,7 +175,7 @@ fetching of podcast feeds, episodes and covers therefore goes through one module
 |---|---|---|
 | `MEDIA_DIR_PODCASTS` | `Podcasts` | Library folder, relative to `DATA_ROOT`. Must exist (`make layout`) and be distinct from the other library folders. |
 | `PODCAST_PROXY` | `http://gluetun:8888` | Where feeds and episodes go out. Empty = directly from the home line (some podcast hosts block VPN addresses). |
-| `PODCAST_POLL_MINUTES` | `240` | How often each feed is checked (30 to 1440, each with its own slightly different interval; 0 = never, *Check now* still works). After an error a feed is tried again after 10 minutes. |
+| `PODCAST_POLL_MINUTES` | `240` | How often each feed is checked (30 to 1440, each with its own slightly different interval; 0 = never, *Check now* still works). After an error a feed is tried again after 10 minutes. The initial value: an admin can change the podcast default in the app, and each podcast can have its own interval and check time (#79, [youtube.md](youtube.md#check-interval-and-check-time-79); for podcasts 0 or 30 to 1440 minutes). |
 
 All settings: [configuration.md](configuration.md).
 

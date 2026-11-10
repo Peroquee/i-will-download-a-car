@@ -3,11 +3,11 @@
 A scheduler job (every minute) calls `SubscriptionPoller.run_once`, which polls the channels that
 are DUE and hands new videos to the YouTube download queue (#18). Rules:
 
-* **Slow and spread out.** A channel is due once its own interval has passed: the base interval
-  (`SUBSCRIPTION_POLL_MINUTES`, default 60) times a fixed per-channel factor between 0.8 and 1.2,
-  so channels drift apart instead of all going at once. Within a run there are a few seconds of
-  pause between two channels. After a failure a channel is tried again after 10 minutes (or the
-  base interval if that is shorter), not after a full hour.
+* **Slow and spread out.** Which channels are due is decided by `poll_schedule.decide` (#79):
+  the channel's own interval and start time, else the server-wide default (an admin's value, else
+  `SUBSCRIPTION_POLL_MINUTES`, default 60); see that module for the rules (spread factor,
+  start-time anchor, retry after a failure, paused). Within a run there are a few seconds of
+  pause between two channels.
 * **Where the list comes from.** yt-dlp lists the channel's newest uploads first
   (`channel_videos.py`, the RSS feed answers 404 for whole networks); the RSS feed is the
   fallback if that fails. If both fail the error says it is YouTube (`feeds.SERVICE_*`), which the
@@ -44,14 +44,13 @@ are DUE and hands new videos to the YouTube download queue (#18). Rules:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import random
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from . import accounts, jobs, seen_videos, skipped_videos, subscriptions
 from .channel_videos import ChannelLister
@@ -67,6 +66,9 @@ from .feeds import (
     parse_time,
 )
 from .metadata import sanitize_name
+from .poll_schedule import RETRY_MINUTES as RETRY_MINUTES
+from .poll_schedule import Schedule, decide, effective, local_zone, spread_interval
+from .server_defaults import ServerDefaults
 from .subscriptions import Subscription
 from .video_filter import VideoTraits, skip_reason
 from .youtube import ProbeError, VideoRef, YoutubeProbe
@@ -76,7 +78,6 @@ logger = logging.getLogger(__name__)
 
 POLL_JOB_ID = "subscription-poll"
 POLL_JOB_SECONDS = 60
-RETRY_MINUTES = 10
 MAX_CHANNELS_PER_RUN = 20
 PAUSE_SECONDS = (3.0, 8.0)  # between two channels of one run
 PROBE_PAUSE_SECONDS = (1.0, 3.0)  # between two metadata probes (#39)
@@ -98,16 +99,6 @@ class RunResult:
     polled: int = 0
     queued: int = 0
     failed: int = 0
-
-
-def spread_interval(key: str, last_error: str | None, base_minutes: int) -> timedelta:
-    """How long to wait after the last check: the base interval times a factor in [0.8, 1.2]
-    (stable, derived from `key`), or the short retry time after an error."""
-    if last_error:
-        return timedelta(minutes=min(RETRY_MINUTES, base_minutes))
-    digest = hashlib.sha256(key.encode()).digest()
-    fraction = int.from_bytes(digest[:2], "big") / 0xFFFF
-    return timedelta(minutes=base_minutes * (0.8 + 0.4 * fraction))
 
 
 def interval_for(sub: Subscription, base_minutes: int) -> timedelta:
@@ -138,6 +129,8 @@ class SubscriptionPoller:
         worker: YoutubeWorker | None,
         *,
         poll_minutes: int,
+        defaults: ServerDefaults | None = None,
+        zone: tzinfo | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         sleep: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
@@ -149,7 +142,9 @@ class SubscriptionPoller:
         self.db = db
         self.feeds = feeds
         self.worker = worker
-        self.poll_minutes = poll_minutes
+        self.poll_minutes = poll_minutes  # used when no `defaults` (the admin's values) are given
+        self.defaults = defaults
+        self.zone = zone or (defaults.zone if defaults is not None else local_zone())
         self._now = now
         self._sleep = sleep
         self._rng = rng or random.Random()
@@ -165,8 +160,22 @@ class SubscriptionPoller:
     def _all(self) -> list[Subscription]:
         return subscriptions.list_all(self.db)
 
-    def _interval(self, sub: Subscription) -> timedelta:
-        return interval_for(sub, self.poll_minutes)
+    kind = "channel"  # which server default applies: "channel" or "podcast" (#79)
+
+    def _key(self, sub: Subscription) -> str:
+        """What spreads the intervals: the same subscription always gets the same factor."""
+        return sub.channel_id
+
+    def default_schedule(self) -> Schedule:
+        """The server-wide interval and start time for this kind (read from the database)."""
+        if self.defaults is not None:
+            return self.defaults.schedule(self.kind)
+        return Schedule(self.poll_minutes)
+
+    def schedule_of(self, sub: Subscription, default: Schedule | None = None) -> Schedule:
+        """The effective interval and start time: the subscription's own, else the server's."""
+        default = default or self.default_schedule()
+        return effective(sub.poll_minutes, sub.poll_at, default.minutes, default.at)
 
     def _record(self, sub: Subscription, error: str | None) -> None:
         subscriptions.record_poll(self.db, sub.id, error, self._now())
@@ -174,14 +183,23 @@ class SubscriptionPoller:
     # -- which channels ----------------------------------------------------------------------
 
     def due(self) -> list[Subscription]:
-        """Enabled channels whose interval has passed; never-checked first, then the longest ago."""
+        """Enabled subscriptions that are due; never-checked first, then the longest ago."""
         now = self._now()
+        default = self.default_schedule()  # read once per tick, not once per subscription
         result: list[tuple[datetime, Subscription]] = []
         for sub in self._all():
             if not sub.enabled:
                 continue
             checked = parse_time(sub.last_checked) if sub.last_checked else None
-            if checked is None or now - checked >= self._interval(sub):
+            decision = decide(
+                now=now,
+                last_checked=checked,
+                last_error=sub.last_error,
+                schedule=self.schedule_of(sub, default),
+                key=self._key(sub),
+                zone=self.zone,
+            )
+            if decision.due:
                 result.append((checked or datetime.min.replace(tzinfo=UTC), sub))
         result.sort(key=lambda pair: pair[0])
         return [sub for _, sub in result]

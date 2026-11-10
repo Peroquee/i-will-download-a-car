@@ -90,6 +90,7 @@ def test_the_migration_creates_app_state_without_touching_the_first_tables(datab
         "0014_job_priority.sql",
         "0015_resolution_rights.sql",
         "0016_job_note.sql",
+        "0017_poll_settings.sql",
     ]
 
 

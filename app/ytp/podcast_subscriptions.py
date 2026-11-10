@@ -32,6 +32,8 @@ class PodcastSubscription:
     created_at: str
     last_checked: str | None
     last_error: str | None
+    poll_minutes: int | None = None  # check interval (#79): 0 = paused, None = server default
+    poll_at: str | None = None  # start time "HH:MM" (#79): "" = none, None = server default
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> PodcastSubscription:
@@ -44,6 +46,8 @@ class PodcastSubscription:
             created_at=row["created_at"],
             last_checked=row["last_checked"],
             last_error=row["last_error"],
+            poll_minutes=row["poll_minutes"],
+            poll_at=row["poll_at"],
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -57,6 +61,8 @@ class PodcastSubscription:
             "created_at": self.created_at,
             "last_checked": self.last_checked,
             "last_error": self.last_error,
+            "poll_minutes": self.poll_minutes,
+            "poll_at": self.poll_at,
         }
 
 
@@ -86,6 +92,30 @@ def add(
 def get(db: Database, subscription_id: int) -> PodcastSubscription | None:
     rows = db.query("SELECT * FROM podcast_subscriptions WHERE id = ?", (subscription_id,))
     return PodcastSubscription.from_row(rows[0]) if rows else None
+
+
+SETTINGS_COLUMNS = ("poll_minutes", "poll_at")
+
+
+def update_settings(
+    db: Database, subscription_id: int, changes: dict[str, object]
+) -> PodcastSubscription | None:
+    """Change the given settings (`SETTINGS_COLUMNS`) of a feed in one step; None for a value
+    means "follow the server default" (#79). None is returned if there is no such feed."""
+    assert changes
+    assert set(changes) <= set(SETTINGS_COLUMNS)
+    assignments = ", ".join(f"{column} = ?" for column in changes)
+    with db.transaction() as conn:
+        updated = conn.execute(
+            f"UPDATE podcast_subscriptions SET {assignments} WHERE id = ?",
+            (*changes.values(), subscription_id),
+        ).rowcount
+        if updated != 1:
+            return None
+        row = conn.execute(
+            "SELECT * FROM podcast_subscriptions WHERE id = ?", (subscription_id,)
+        ).fetchone()
+    return PodcastSubscription.from_row(row)
 
 
 def list_all(db: Database) -> list[PodcastSubscription]:

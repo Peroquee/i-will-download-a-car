@@ -41,6 +41,7 @@ from .priority import PRIORITY_JOB_ID, PRIORITY_SECONDS, PriorityManager
 from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .safefetch import SafeFetcher
 from .scheduler import AppScheduler
+from .server_defaults import ServerDefaults
 from .subscription_poller import POLL_JOB_ID, POLL_JOB_SECONDS, SubscriptionPoller
 from .web import SecurityMiddleware, register_ui
 from .youtube import YoutubeProbe
@@ -102,6 +103,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             YoutubeDownloader(
                 proxy=settings.ytdlp_proxy,
                 max_height=settings.youtube_max_height,
+                # What an admin set as the server-wide default (#79) wins over the .env value.
+                max_height_source=app.state.defaults.max_height,
                 # The admin's YouTube login cookies, if one was stored (#46).
                 cookie_file=youtube_cookies.cookie_path(settings),
             ),
@@ -169,6 +172,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             FeedClient(settings.ytdlp_proxy),
             app.state.youtube_worker,
             poll_minutes=settings.subscription_poll_minutes or 60,
+            defaults=app.state.defaults,
             probe=app.state.youtube,  # lives, premieres and Shorts are left out (#39)
             # The list of a channel's newest videos comes from yt-dlp (the RSS feed is the
             # fallback: YouTube answers it with 404 for whole networks), through the same proxy.
@@ -176,34 +180,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 app.state.youtube, cookie_file=youtube_cookies.cookie_path(settings)
             ),
         )
-        if settings.subscription_poll_minutes > 0:
-            # New videos of subscribed channels go into the YouTube queue (#20). The feeds are
-            # fetched through the same proxy as yt-dlp.
-            app.state.scheduler.add_interval_job(
-                app.state.poller.run_once, job_id=POLL_JOB_ID, seconds=POLL_JOB_SECONDS
-            )
-        else:
-            logger.info("channel polling is off (SUBSCRIPTION_POLL_MINUTES=0)")
+        # New videos of subscribed channels go into the YouTube queue (#20). The feeds are
+        # fetched through the same proxy as yt-dlp. The job always runs: which channels are due
+        # is decided per subscription (#79), and an admin can switch polling on later.
+        app.state.scheduler.add_interval_job(
+            app.state.poller.run_once, job_id=POLL_JOB_ID, seconds=POLL_JOB_SECONDS
+        )
+        if settings.subscription_poll_minutes == 0:
+            logger.info("channel polling is paused by default (SUBSCRIPTION_POLL_MINUTES=0)")
         # Podcast feeds, the same way (#34); slower, and the "check now" button works regardless.
         app.state.podcast_poller = PodcastPoller(
             app.state.db,
             app.state.podcast_feeds,
             app.state.podcast_worker,
             poll_minutes=settings.podcast_poll_minutes or 240,
+            defaults=app.state.defaults,
         )
         # "All episodes" of a feed (#45): a few at a time into the queue, only while there is room.
         app.state.backlog_feeder = BacklogFeeder(app.state.db, app.state.podcast_worker, settings)
         app.state.scheduler.add_interval_job(
             app.state.backlog_feeder.tick, job_id=BACKLOG_JOB_ID, seconds=BACKLOG_SECONDS
         )
-        if settings.podcast_poll_minutes > 0:
-            app.state.scheduler.add_interval_job(
-                app.state.podcast_poller.run_once,
-                job_id=PODCAST_POLL_JOB_ID,
-                seconds=POLL_JOB_SECONDS,
-            )
-        else:
-            logger.info("podcast polling is off (PODCAST_POLL_MINUTES=0)")
+        app.state.scheduler.add_interval_job(
+            app.state.podcast_poller.run_once,
+            job_id=PODCAST_POLL_JOB_ID,
+            seconds=POLL_JOB_SECONDS,
+        )
+        if settings.podcast_poll_minutes == 0:
+            logger.info("podcast polling is paused by default (PODCAST_POLL_MINUTES=0)")
         # Notices what a person should know about and writes the alert log (#38).
         app.state.monitor = AlertMonitor(
             app.state.db, app.state.watchdog_status, settings.data_root
@@ -306,6 +310,7 @@ def create_app(
     app.state.jellyfin = LibraryRefresher(None)
     app.state.reconciler = None
     app.state.priority = None
+    app.state.defaults = ServerDefaults(lambda: app.state.db, resolved)
     app.state.poller = None
     app.state.podcast_feeds = None
     app.state.podcast_worker = None
