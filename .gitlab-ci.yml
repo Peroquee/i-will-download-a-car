@@ -166,7 +166,12 @@ lint:secrets:
     GIT_DEPTH: 0   # scan the full history, not just the last commit
   script:
     - mkdir -p reports
-    - gitleaks git --redact --verbose --report-format junit --report-path reports/junit-gitleaks.xml .
+    # Only the history of the commit this pipeline runs for. Without --log-opts gitleaks reads
+    # `git log --all`, i.e. every branch and merge-request ref the runner's clone holds, so a
+    # finding on one branch turned the pipelines of all the others red.
+    - >-
+      gitleaks git --redact --verbose --log-opts="--full-history HEAD"
+      --report-format junit --report-path reports/junit-gitleaks.xml .
   artifacts:
     when: always
     reports:
