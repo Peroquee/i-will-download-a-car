@@ -490,6 +490,27 @@
         </div>
         <p id="cookies-result" class="result" role="status" aria-live="polite"></p>
       </section>
+
+      <section id="server-defaults" class="panel" data-admin-only aria-labelledby="sd-title">
+        <h2 id="sd-title" class="subs-group-title" data-i18n="sd.title"></h2>
+        <p class="note" data-i18n="sd.help"></p>
+        <form id="sd-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
+          <div class="row">
+            <label class="field" for="sd-resolution" data-i18n="sd.resolution"></label>
+            <select id="sd-resolution"></select>
+          </div>
+          <h3 class="sched-kind" data-i18n="sd.channels"></h3>
+          <div id="sd-channel-schedule"></div>
+          <h3 class="sched-kind" data-i18n="sd.podcasts"></h3>
+          <div id="sd-podcast-schedule"></div>
+          <p id="sd-tz" class="note"></p>
+          <p id="sd-rule" class="note"></p>
+          <div class="actions">
+            <button type="submit" class="primary" id="sd-save" data-i18n="sd.save"></button>
+          </div>
+          <p id="sd-result" class="result" role="status" aria-live="polite"></p>
+        </form>
+      </section>
     </section>
       </div>
     </main>
@@ -532,6 +553,29 @@
       <button type="submit" class="primary" id="account-change" data-i18n="account.change"></button>
       <button type="button" class="ghost" id="account-logout" data-i18n="account.logout"></button>
       <button type="button" class="ghost" id="account-close" data-i18n="account.close"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="sub-settings" class="howto sub-settings" aria-labelledby="sub-settings-title">
+  <div class="howto-head">
+    <h2 id="sub-settings-title" class="jobs-title"></h2>
+    <button type="button" id="sub-settings-close" class="ghost small" data-i18n="sched.close"></button>
+  </div>
+  <form id="sub-settings-form" method="post" action="/reload-needed" autocomplete="off" novalidate>
+    <p class="note" data-i18n="sched.shared"></p>
+    <p id="sub-settings-readonly" class="note" data-i18n="sched.readonly" hidden></p>
+    <div id="sub-settings-resolution-row" class="row">
+      <label class="field" for="sub-settings-resolution" data-i18n="subs.resolution"></label>
+      <select id="sub-settings-resolution"></select>
+    </div>
+    <div id="sub-settings-schedule"></div>
+    <p id="sub-settings-tz" class="note"></p>
+    <p id="sub-settings-rule" class="note"></p>
+    <p id="sub-settings-error" class="error" role="alert"></p>
+    <div class="actions">
+      <button type="submit" class="primary" id="sub-settings-save" data-i18n="sched.save"></button>
+      <button type="button" class="ghost" id="sub-settings-cancel" data-i18n="sched.cancel"></button>
     </div>
   </form>
 </dialog>
@@ -1084,8 +1128,45 @@
     "subs.resolution_default": "Server-Standard",
     "subs.resolution_note": "Gilt für neue Videos dieses Abonnements.",
     "subs.resolution_meta": "Auflösung: {value}",
-    "subs.resolution_saved": "Die Auflösung wurde gespeichert.",
-    "subs.resolution_failed": "Die Auflösung konnte nicht geändert werden.",
+    "subs.settings": "Einstellungen",
+    "subs.schedule_meta": "Prüfung: {value}",
+    "subs.settings_saved": "Die Einstellungen wurden gespeichert.",
+    "sched.title": "Einstellungen: {name}",
+    "sched.close": "Schließen",
+    "sched.save": "Speichern",
+    "sched.cancel": "Abbrechen",
+    "sched.shared": "Gilt für alle, die diesem Abonnement folgen.",
+    "sched.readonly": "Nur Konten, die die Auflösung wählen dürfen, können diese Einstellungen ändern.",
+    "sched.interval": "Prüfintervall",
+    "sched.at": "Prüfzeit",
+    "sched.minutes_label": "Minuten",
+    "sched.default_is": "Server-Standard ({value})",
+    "sched.default_unknown": "Server-Standard",
+    "sched.initial": "Ursprüngliche Einstellung (.env)",
+    "sched.paused": "pausiert",
+    "sched.paused_option": "Pausiert (wird nicht automatisch geprüft)",
+    "sched.paused_note": "Solange es pausiert ist, wird nichts automatisch geprüft („Jetzt prüfen“ geht weiter); die Startzeit wird ignoriert.",
+    "sched.every": "alle {interval}",
+    "sched.hours": "{n} Std.",
+    "sched.minutes": "{n} Min.",
+    "sched.custom": "Anderer Wert …",
+    "sched.from": "ab {time}",
+    "sched.at_none": "Keine Startzeit",
+    "sched.at_none_short": "keine Startzeit",
+    "sched.at_time": "Mit Startzeit",
+    "sched.tz": "Uhrzeiten gelten in der Zeitzone des Servers: {zone}.",
+    "sched.rule": "Ohne Startzeit wird geprüft, sobald das Intervall seit der letzten Prüfung vergangen ist. Mit Startzeit wird zu festen Uhrzeiten geprüft: Jeder Tag beginnt mit der Startzeit und wiederholt das Intervall bis zur nächsten Startzeit. Beispiel: alle 6 Std. ab 06:00 prüft um 06:00, 12:00, 18:00 und 00:00; alle 5 Std. ab 06:00 prüft um 06:00, 11:00, 16:00, 21:00, 02:00 und dann wieder um 06:00.",
+    "sched.err_minutes": "Gib ganze Minuten von {min} bis {max} ein.",
+    "sched.err_time": "Gib eine Uhrzeit ein (hh:mm).",
+    "sched.save_failed": "Die Einstellungen konnten nicht gespeichert werden.",
+    "sd.title": "Server-Standards",
+    "sd.help": "Diese Werte gelten für jedes Abonnement ohne eigene Einstellung. Sie wirken sofort.",
+    "sd.resolution": "Standardauflösung für neue Videos",
+    "sd.channels": "YouTube-Kanäle prüfen",
+    "sd.podcasts": "Podcasts prüfen",
+    "sd.save": "Standards speichern",
+    "sd.saved": "Die Server-Standards wurden gespeichert.",
+    "sd.failed": "Die Server-Standards konnten nicht gespeichert werden.",
     "err.int_out_of_range": "Eine Zahl von 0 bis 15.",
     "howto.button": "Anleitung",
     "howto.title": "Anleitung",
@@ -1588,8 +1669,45 @@
     "subs.resolution_default": "Server default",
     "subs.resolution_note": "Applies to new videos of this subscription.",
     "subs.resolution_meta": "Resolution: {value}",
-    "subs.resolution_saved": "The resolution was saved.",
-    "subs.resolution_failed": "The resolution could not be changed.",
+    "subs.settings": "Settings",
+    "subs.schedule_meta": "Checks: {value}",
+    "subs.settings_saved": "The settings were saved.",
+    "sched.title": "Settings: {name}",
+    "sched.close": "Close",
+    "sched.save": "Save",
+    "sched.cancel": "Cancel",
+    "sched.shared": "Applies to everyone who follows this subscription.",
+    "sched.readonly": "Only accounts that may set the resolution can change these settings.",
+    "sched.interval": "Check interval",
+    "sched.at": "Check time",
+    "sched.minutes_label": "Minutes",
+    "sched.default_is": "Server default ({value})",
+    "sched.default_unknown": "Server default",
+    "sched.initial": "Initial setting (.env)",
+    "sched.paused": "paused",
+    "sched.paused_option": "Paused (never checked automatically)",
+    "sched.paused_note": "While paused nothing is checked automatically (\"Check now\" still works); the start time is ignored.",
+    "sched.every": "every {interval}",
+    "sched.hours": "{n} h",
+    "sched.minutes": "{n} min",
+    "sched.custom": "Other value …",
+    "sched.from": "from {time}",
+    "sched.at_none": "No start time",
+    "sched.at_none_short": "no start time",
+    "sched.at_time": "With a start time",
+    "sched.tz": "Times are in the server's time zone: {zone}.",
+    "sched.rule": "Without a start time, a feed is checked once the interval has passed since the last check. With a start time the checks run at fixed times: each day starts at the start time and repeats the interval until the next start time. Example: every 6 h from 06:00 checks at 06:00, 12:00, 18:00 and 00:00; every 5 h from 06:00 checks at 06:00, 11:00, 16:00, 21:00, 02:00 and then 06:00 again.",
+    "sched.err_minutes": "Enter whole minutes from {min} to {max}.",
+    "sched.err_time": "Enter a time of day (hh:mm).",
+    "sched.save_failed": "The settings could not be saved.",
+    "sd.title": "Server defaults",
+    "sd.help": "These values apply to every subscription that has no setting of its own. They take effect at once.",
+    "sd.resolution": "Default resolution for new videos",
+    "sd.channels": "Check YouTube channels",
+    "sd.podcasts": "Check podcasts",
+    "sd.save": "Save defaults",
+    "sd.saved": "The server defaults were saved.",
+    "sd.failed": "The server defaults could not be saved.",
     "err.int_out_of_range": "A number from 0 to 15.",
     "howto.button": "How to",
     "howto.title": "How to",

@@ -53,6 +53,8 @@
     hideAllConfirm();
     renderJobsMini();
     renderSubs();
+    renderSettings();
+    renderServerDefaults();
     if (dash) dash.render();
     if (auth) auth.render();
   }
@@ -735,7 +737,7 @@
   function loadSubs() {
     if (subsLoading) return;
     subsLoading = true;
-    Promise.all([getJson("/api/subscriptions"), getJson("/api/podcasts")])
+    Promise.all([getJson("/api/subscriptions"), getJson("/api/podcasts"), loadDefaults()])
       .then(function (answers) {
         var channels = answers[0].subscriptions.map(function (sub) { sub.kind = "channel"; return sub; });
         var podcasts = answers[1].podcasts;   // these carry kind: "podcast" already
@@ -745,7 +747,7 @@
         subsLoadFailed = false;
       })
       .catch(function () { subsLoadFailed = true; })
-      .then(function () { subsLoading = false; renderSubs(); });
+      .then(function () { subsLoading = false; renderSubs(); renderServerDefaults(); });
   }
 
   function subsRequest(method, path, body) { return request(method, path, body); }
@@ -796,63 +798,6 @@
     return label === key ? value + "p" : label;
   }
 
-  function addResolutionChoices(select) {
-    [[ "", "subs.resolution_default" ], [ "0", "yt.resolution_best" ]]
-      .concat([2160, 1440, 1080, 720, 480, 360].map(function (height) {
-        return [String(height), "yt.resolution_" + height];
-      }))
-      .forEach(function (choice) {
-        var option = document.createElement("option");
-        option.value = choice[0];
-        option.textContent = t(choice[1]);
-        select.appendChild(option);
-      });
-    return select;
-  }
-
-  function subResolutionRow(sub) {
-    var row = document.createElement("div");
-    row.className = "row";
-    var label = document.createElement("label");
-    label.className = "field";
-    label.textContent = t("subs.resolution");
-    var select = addResolutionChoices(document.createElement("select"));
-    select.id = "subs-resolution-" + sub.id;
-    label.setAttribute("for", select.id);
-    select.value = sub.max_height == null ? "" : String(sub.max_height);
-    if (!auth || !auth.canChooseResolution()) {
-      select.disabled = true;
-    } else {
-      select.addEventListener("change", function () { changeSubResolution(sub, select); });
-    }
-    row.appendChild(label);
-    row.appendChild(select);
-    return row;
-  }
-
-  function changeSubResolution(sub, select) {
-    var key = subKey(sub);
-    var value = select.value === "" ? null : Number(select.value);
-    subsBusy[key] = "resolution";
-    delete subsMessages[key];
-    renderSubs();
-    subsRequest("PATCH", subPath(sub), { max_height: value }).then(function (reply) {
-      if (reply.status === 200) {
-        subsMessages[key] = { ok: true, text: function () { return t("subs.resolution_saved"); } };
-      } else {
-        subsMessages[key] = {
-          ok: false,
-          text: function () { return failureText(reply, "subs.resolution_failed"); },
-        };
-      }
-    }).catch(function () {
-      subsMessages[key] = {
-        ok: false,
-        text: function () { return t("subs.resolution_failed") + " " + t("result.network"); },
-      };
-    }).then(function () { delete subsBusy[key]; loadSubs(); renderSubs(); });
-  }
-
   function subRow(sub) {
     var li = document.createElement("li");
     li.className = "job" + (sub.last_error ? " job-failed" : "");
@@ -876,9 +821,9 @@
     if (sub.kind !== "podcast") {
       metaText += " \u00b7 " + t("subs.resolution_meta", { value: resolutionLabel(sub.max_height) });
     }
+    metaText += " \u00b7 " + t("subs.schedule_meta", { value: scheduleSummary(sub) });
     meta.textContent = metaText;
     li.appendChild(meta);
-    if (sub.kind !== "podcast") li.appendChild(subResolutionRow(sub));
     var others = (sub.follower_count || 0) - (sub.following ? 1 : 0);
     if (sub.followers && sub.followers.length) {   // an admin sees who follows
       var who = document.createElement("div");
@@ -922,7 +867,16 @@
     remove.disabled = !!busy;
     remove.textContent = t(subsConfirm[rowKey] ? "subs.confirm" : "subs.remove");
     remove.addEventListener("click", function () { removeSub(sub); });
+    var settings = document.createElement("button");
+    settings.type = "button";
+    settings.id = "subs-settings-" + sub.kind + "-" + sub.id;
+    settings.className = "ghost small";
+    settings.disabled = !!busy;
+    settings.setAttribute("aria-haspopup", "dialog");
+    settings.textContent = t("subs.settings");
+    settings.addEventListener("click", function () { openSettings(sub, settings.id); });
     buttons.appendChild(poll);
+    buttons.appendChild(settings);
     buttons.appendChild(remove);
     if (auth && auth.isAdmin() && others > 0) {   // ends it for the others too
       var everyone = document.createElement("button");
@@ -953,8 +907,13 @@
     }
     var channels = subsData.filter(function (sub) { return sub.kind !== "podcast"; });
     var podcasts = subsData.filter(function (sub) { return sub.kind === "podcast"; });
+    // The rows are rebuilt on every refresh: a focused button of the list keeps the focus.
+    var focused = document.activeElement && /^subs-/.test(document.activeElement.id || "")
+      ? document.activeElement.id : "";
     fillSubs("subs-youtube-list", channels);
     fillSubs("subs-podcast-list", podcasts);
+    var again = focused ? $(focused) : null;
+    if (again && again !== document.activeElement && typeof again.focus === "function") again.focus();
     $("subs-youtube-group").hidden = channels.length === 0;
     $("subs-podcast-group").hidden = podcasts.length === 0;
     $("subs-empty").hidden = subsData.length > 0;
@@ -1017,6 +976,420 @@
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") loadSubs();
     });
+  }
+
+  /* ---------------------------------------------------------------- subscription settings (#79) */
+
+  /* The Settings window of a subscription (resolution, check interval, check time) and the admin's
+     server-wide defaults share one set of controls. "Server default" is a real choice: the value
+     is null on the wire and follows whatever the admin set (or .env says) at the time. */
+  var PRESET_MINUTES = [15, 30, 60, 120, 180, 360, 720, 1440];
+  var MINUTES_MAX = 1440;
+  var defaultsData = null;       // GET /api/settings/defaults: what "server default" means now
+
+  function loadDefaults() {
+    return getJson("/api/settings/defaults").then(function (data) {
+      defaultsData = data;
+      return data;
+    }).catch(function () { return null; });
+  }
+
+  function minMinutes(kind) {
+    var min = defaultsData && defaultsData.limits && defaultsData.limits.min_minutes
+      ? defaultsData.limits.min_minutes[kind === "podcast" ? "podcast" : "channel"] : 0;
+    return min || (kind === "podcast" ? 30 : 15);
+  }
+
+  function intervalText(minutes) {
+    if (minutes === 0) return t("sched.paused");
+    var amount = minutes % 60 === 0 ? t("sched.hours", { n: minutes / 60 }) : t("sched.minutes", { n: minutes });
+    return t("sched.every", { interval: amount });
+  }
+
+  function scheduleText(minutes, at) {
+    var text = intervalText(minutes);
+    return at && minutes !== 0 ? text + " · " + t("sched.from", { time: at }) : text;
+  }
+
+  /* The server's interval and start time for a kind of subscription, or null before they are known. */
+  function defaultSchedule(kind) {
+    if (!defaultsData) return null;
+    var prefix = kind === "podcast" ? "podcast" : "subscription";
+    return { minutes: defaultsData[prefix + "_poll_minutes"], at: defaultsData[prefix + "_poll_at"] || null };
+  }
+
+  function heightText(value) { return value === 0 ? t("yt.resolution_best") : value + "p"; }
+
+  /* The row's summary: what this subscription uses, and that it follows the server if it does. */
+  function scheduleSummary(sub) {
+    var kind = sub.kind === "podcast" ? "podcast" : "channel";
+    var base = defaultSchedule(kind);
+    var minutes = sub.poll_minutes == null ? (base ? base.minutes : null) : sub.poll_minutes;
+    var at = sub.poll_at == null ? (base ? base.at : null) : (sub.poll_at || null);
+    var follows = sub.poll_minutes == null && sub.poll_at == null;
+    if (minutes === null) return t("sched.default_unknown");
+    var text = scheduleText(minutes, at);
+    return follows ? t("sched.default_is", { value: text }) : text;
+  }
+
+  function optionEl(value, label) {
+    var option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }
+
+  function fieldRow(labelKey, forId) {
+    var row = document.createElement("div");
+    row.className = "row";
+    var label = document.createElement("label");
+    label.className = "field";
+    label.setAttribute("for", forId);
+    label.dataset.i18n = labelKey;
+    label.textContent = t(labelKey);
+    row.appendChild(label);
+    return row;
+  }
+
+  /* The interval and check-time controls inside `container`. `server` = the admin's defaults (no
+     "server default" choice: empty means the initial .env value). Returns {fill, read, relabel,
+     disable}. read() gives {ok, poll_minutes, poll_at} or {ok: false, error, vars}. */
+  function scheduleControls(container, prefix, kind, server) {
+    container.textContent = "";
+    var intervalId = prefix + "-interval";
+    var minutesId = prefix + "-minutes";
+    var modeId = prefix + "-at-mode";
+    var atId = prefix + "-at";
+
+    var intervalRow = fieldRow("sched.interval", intervalId);
+    var interval = document.createElement("select");
+    interval.id = intervalId;
+    var minutes = document.createElement("input");
+    minutes.id = minutesId;
+    minutes.type = "number";
+    minutes.step = "1";
+    minutes.hidden = true;
+    minutes.setAttribute("aria-label", t("sched.minutes_label"));
+    intervalRow.appendChild(interval);
+    intervalRow.appendChild(minutes);
+
+    var atRow = fieldRow("sched.at", modeId);
+    var mode = document.createElement("select");
+    mode.id = modeId;
+    var at = document.createElement("input");
+    at.id = atId;
+    at.type = "time";
+    at.hidden = true;
+    at.setAttribute("aria-label", t("sched.at"));
+    atRow.appendChild(mode);
+    atRow.appendChild(at);
+
+    var paused = document.createElement("p");
+    paused.className = "note";
+    paused.id = prefix + "-paused-note";
+    paused.hidden = true;
+    container.appendChild(intervalRow);
+    container.appendChild(atRow);
+    container.appendChild(paused);
+
+    function defaultLabel() {
+      var base = defaultSchedule(kind);
+      return base ? t("sched.default_is", { value: scheduleText(base.minutes, base.at) }) : t("sched.default_unknown");
+    }
+
+    function show() {
+      minutes.hidden = interval.value !== "custom";
+      at.hidden = mode.value !== "time";
+      paused.hidden = interval.value !== "0";
+    }
+
+    function relabel() {
+      var keepInterval = interval.value;
+      var keepMode = mode.value;
+      interval.textContent = "";
+      interval.appendChild(optionEl("", server ? t("sched.initial") : defaultLabel()));
+      interval.appendChild(optionEl("0", t("sched.paused_option")));
+      PRESET_MINUTES.forEach(function (n) {
+        if (n >= minMinutes(kind)) interval.appendChild(optionEl(String(n), intervalText(n)));
+      });
+      interval.appendChild(optionEl("custom", t("sched.custom")));
+      interval.value = keepInterval;
+      mode.textContent = "";
+      if (!server) {
+        var base = defaultSchedule(kind);
+        mode.appendChild(optionEl("", t("sched.default_is", {
+          value: base && base.at ? t("sched.from", { time: base.at }) : t("sched.at_none_short"),
+        })));
+      }
+      mode.appendChild(optionEl("none", t("sched.at_none")));
+      mode.appendChild(optionEl("time", t("sched.at_time")));
+      mode.value = keepMode;
+      minutes.min = String(minMinutes(kind));
+      minutes.max = String(MINUTES_MAX);
+      paused.textContent = t("sched.paused_note");
+      show();
+    }
+    ["change", "input"].forEach(function (type) {
+      interval.addEventListener(type, show);
+      mode.addEventListener(type, show);
+    });
+
+    function fill(ownMinutes, ownAt) {
+      var inPresets = ownMinutes === 0
+        || (PRESET_MINUTES.indexOf(ownMinutes) >= 0 && ownMinutes >= minMinutes(kind));
+      if (ownMinutes == null) interval.value = "";
+      else if (inPresets) interval.value = String(ownMinutes);
+      else interval.value = "custom";
+      minutes.value = ownMinutes != null && !inPresets ? String(ownMinutes) : "";
+      if (server) mode.value = ownAt ? "time" : "none";
+      else mode.value = ownAt == null ? "" : (ownAt === "" ? "none" : "time");
+      at.value = ownAt || "";
+      show();
+    }
+
+    function read() {
+      var wire = null;
+      if (interval.value === "custom") {
+        var typed = String(minutes.value).trim();
+        var n = Number(typed);
+        if (!/^\d+$/.test(typed) || n < minMinutes(kind) || n > MINUTES_MAX) {
+          return { ok: false, error: "sched.err_minutes", vars: { min: minMinutes(kind), max: MINUTES_MAX } };
+        }
+        wire = n;
+      } else if (interval.value !== "") {
+        wire = Number(interval.value);
+      }
+      var time = null;
+      if (mode.value === "time") {
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(at.value))) return { ok: false, error: "sched.err_time", vars: {} };
+        time = String(at.value);
+      } else if (mode.value === "none") {
+        time = server ? null : "";
+      }
+      return { ok: true, poll_minutes: wire, poll_at: time };
+    }
+
+    function disable(off) {
+      [interval, minutes, mode, at].forEach(function (control) { control.disabled = off; });
+    }
+
+    relabel();
+    return { fill: fill, read: read, relabel: relabel, disable: disable, first: interval };
+  }
+
+  /* ---- the Settings window of one subscription */
+
+  var settingsFor = null;        // the subscription the open window belongs to
+  var settingsOpener = "";       // id of the button that opened it (focus goes back there)
+  var settingsControls = null;
+  var settingsBusy = false;
+
+  function settingsKind() { return settingsFor && settingsFor.kind === "podcast" ? "podcast" : "channel"; }
+  function mayChangeSettings() { return !auth || auth.canChooseResolution(); }
+
+  function resolutionOptions(select, firstLabel) {
+    var keep = select.value;
+    select.textContent = "";
+    select.appendChild(optionEl("", firstLabel));
+    select.appendChild(optionEl("0", t("yt.resolution_best")));
+    [2160, 1440, 1080, 720, 480, 360].forEach(function (height) {
+      select.appendChild(optionEl(String(height), resolutionLabel(height)));
+    });
+    select.value = keep;
+  }
+
+  function fillSettingsResolution() {
+    var shown = defaultsData && defaultsData.max_height != null ? heightText(defaultsData.max_height) : "";
+    resolutionOptions($("sub-settings-resolution"),
+      shown ? t("sched.default_is", { value: shown }) : t("subs.resolution_default"));
+  }
+
+  function settingsError(text) {
+    $("sub-settings-error").textContent = text;
+  }
+
+  function renderSettings() {
+    if (!settingsFor) return;
+    var channel = settingsKind() === "channel";
+    var may = mayChangeSettings();
+    $("sub-settings-title").textContent = t("sched.title", { name: subName(settingsFor) });
+    $("sub-settings-resolution-row").hidden = !channel;
+    if (channel) fillSettingsResolution();
+    settingsControls.relabel();
+    $("sub-settings-tz").textContent = defaultsData && defaultsData.timezone
+      ? t("sched.tz", { zone: defaultsData.timezone }) : "";
+    $("sub-settings-rule").textContent = t("sched.rule");
+    $("sub-settings-readonly").hidden = may;
+    $("sub-settings-save").hidden = !may;
+    $("sub-settings-resolution").disabled = !may;
+    settingsControls.disable(!may);
+    $("sub-settings-save").disabled = settingsBusy;
+  }
+
+  function openSettings(sub, openerId) {
+    if (settingsFor) return;   // one window at a time: a second click while one opens must not rebuild it
+    settingsFor = sub;
+    settingsOpener = openerId;
+    settingsBusy = false;
+    loadDefaults().then(function () {
+      if (settingsFor !== sub) return;
+      var dialog = $("sub-settings");
+      if (dialog.open) return;   // already showing: never rebuild the controls under a user
+      settingsControls = scheduleControls($("sub-settings-schedule"), "sub-settings", settingsKind(), false);
+      if (settingsKind() === "channel") {
+        fillSettingsResolution();
+        $("sub-settings-resolution").value = sub.max_height == null ? "" : String(sub.max_height);
+      }
+      settingsControls.fill(sub.poll_minutes == null ? null : sub.poll_minutes, sub.poll_at == null ? null : sub.poll_at);
+      settingsError("");
+      renderSettings();
+      document.body.classList.add("modal-open");   // the page behind does not scroll
+      if (typeof dialog.showModal === "function") {
+        if (!dialog.open) dialog.showModal();   // Esc closes it, focus stays inside
+      } else {
+        dialog.setAttribute("open", "");
+      }
+      (settingsKind() === "channel" ? $("sub-settings-resolution") : settingsControls.first).focus();
+    }).catch(function () {
+      settingsFor = null;   // whatever went wrong: the next click must be able to try again
+      settingsOpener = "";
+    });
+  }
+
+  function closeSettings() {
+    var dialog = $("sub-settings");
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+    settingsClosed();   // at once: the browser's own "close" event comes later (and Esc has only that one)
+  }
+
+  /* Whatever closed it (Close, Cancel, Esc, a save): the page scrolls again and the focus goes back
+     to the button that opened it (looked up again: the list is rebuilt while the window is open). */
+  function settingsClosed() {
+    // The "close" event of an earlier closing can arrive after the window was opened again, or
+    // after closeSettings() has cleaned up already: neither may undo a newer open.
+    if ($("sub-settings").open || !settingsFor) return;
+    document.body.classList.remove("modal-open");
+    var opener = settingsOpener ? $(settingsOpener) : null;
+    settingsFor = null;
+    settingsOpener = "";
+    if (opener && typeof opener.focus === "function") opener.focus();
+  }
+
+  function saveSettings() {
+    if (!settingsFor || settingsBusy || !mayChangeSettings()) return;
+    var sub = settingsFor;
+    var read = settingsControls.read();
+    if (!read.ok) { settingsError(t(read.error, read.vars)); return; }
+    var body = { poll_minutes: read.poll_minutes, poll_at: read.poll_at };
+    if (settingsKind() === "channel") {
+      var height = $("sub-settings-resolution").value;
+      body.max_height = height === "" ? null : Number(height);
+    }
+    settingsBusy = true;
+    settingsError("");
+    $("sub-settings-save").disabled = true;
+    subsRequest("PATCH", subPath(sub), body).then(function (reply) {
+      if (reply.status === 200) {
+        subsMessages[subKey(sub)] = { ok: true, text: function () { return t("subs.settings_saved"); } };
+        closeSettings();
+        loadSubs();
+      } else {
+        settingsError(failureText(reply, "sched.save_failed"));
+      }
+    }).catch(function () {
+      settingsError(t("sched.save_failed") + " " + t("result.network"));
+    }).then(function () {
+      settingsBusy = false;
+      $("sub-settings-save").disabled = false;
+    });
+  }
+
+  function startSettings() {
+    var dialog = $("sub-settings");
+    $("sub-settings-close").addEventListener("click", closeSettings);
+    $("sub-settings-cancel").addEventListener("click", closeSettings);
+    $("sub-settings-save").addEventListener("click", saveSettings);
+    dialog.addEventListener("close", settingsClosed);
+    // A click on the dark area around the window (the dialog element itself) closes it.
+    dialog.addEventListener("click", function (event) { if (event.target === dialog) closeSettings(); });
+    $("sub-settings-form").addEventListener("submit", function (event) { event.preventDefault(); saveSettings(); });
+  }
+
+  /* ---- the admin's server-wide defaults (accounts page) */
+
+  var serverForms = null;        // {channel, podcast} controls, built on the first render
+  var serverDirty = false;       // the admin is editing: a refresh must not overwrite it
+
+  function fillServerDefaults() {
+    if (!defaultsData || !serverForms) return;
+    var custom = defaultsData.custom || {};
+    $("sd-resolution").value = custom.max_height ? String(defaultsData.max_height) : "";
+    serverForms.channel.fill(
+      custom.subscription_poll_minutes ? defaultsData.subscription_poll_minutes : null,
+      custom.subscription_poll_at ? defaultsData.subscription_poll_at : null);
+    serverForms.podcast.fill(
+      custom.podcast_poll_minutes ? defaultsData.podcast_poll_minutes : null,
+      custom.podcast_poll_at ? defaultsData.podcast_poll_at : null);
+    $("sd-tz").textContent = defaultsData.timezone ? t("sched.tz", { zone: defaultsData.timezone }) : "";
+  }
+
+  function renderServerDefaults() {
+    if (!$("server-defaults") || !auth || !auth.isAdmin()) return;
+    var first = !serverForms;
+    if (first) {
+      serverForms = {
+        channel: scheduleControls($("sd-channel-schedule"), "sd-channel", "channel", true),
+        podcast: scheduleControls($("sd-podcast-schedule"), "sd-podcast", "podcast", true),
+      };
+    } else {
+      serverForms.channel.relabel();
+      serverForms.podcast.relabel();
+    }
+    resolutionOptions($("sd-resolution"), t("sched.initial"));
+    $("sd-rule").textContent = t("sched.rule");
+    if (first || !serverDirty) fillServerDefaults();
+  }
+
+  function saveServerDefaults() {
+    if (!serverForms) return;
+    var channel = serverForms.channel.read();
+    var podcast = serverForms.podcast.read();
+    var bad = !channel.ok ? channel : (!podcast.ok ? podcast : null);
+    var result = $("sd-result");
+    if (bad) { result.className = "result bad"; result.textContent = t(bad.error, bad.vars); return; }
+    var height = $("sd-resolution").value;
+    var body = {
+      max_height: height === "" ? null : Number(height),
+      subscription_poll_minutes: channel.poll_minutes,
+      subscription_poll_at: channel.poll_at,
+      podcast_poll_minutes: podcast.poll_minutes,
+      podcast_poll_at: podcast.poll_at,
+    };
+    $("sd-save").disabled = true;
+    request("PATCH", "/api/settings/defaults", body).then(function (reply) {
+      if (reply.status === 200) {
+        defaultsData = reply.data;
+        serverDirty = false;
+        renderServerDefaults();
+        result.className = "result ok";
+        result.textContent = t("sd.saved");
+        renderSubs();
+      } else {
+        result.className = "result bad";
+        result.textContent = failureText(reply, "sd.failed");
+      }
+    }).catch(function () {
+      result.className = "result bad";
+      result.textContent = t("sd.failed") + " " + t("result.network");
+    }).then(function () { $("sd-save").disabled = false; });
+  }
+
+  function startServerDefaults() {
+    if (!$("server-defaults")) return;
+    $("server-defaults").addEventListener("change", function () { serverDirty = true; $("sd-result").textContent = ""; });
+    $("sd-save").addEventListener("click", saveServerDefaults);
+    $("sd-form").addEventListener("submit", function (event) { event.preventDefault(); saveServerDefaults(); });
   }
 
   /* ---------------------------------------------------------------- How to guide (#33) */
@@ -1103,6 +1476,8 @@
       clearErrors();
     });
     startHowto();
+    startSettings();
+    startServerDefaults();
     startVersionCheck();
     if (auth) auth.wire();
     $("js-warning").hidden = true;   // everything above ran: the scripts are alive

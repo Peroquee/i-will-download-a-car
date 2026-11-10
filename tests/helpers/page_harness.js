@@ -80,8 +80,8 @@ class El {
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   removeEventListener() {}
   dispatchEvent(e) { (this.listeners[e.type] || []).forEach((f) => f(e)); return true; }
-  focus() {} blur() {} select() {} scrollIntoView() { scrolled.push(this.id); } click() { this.dispatchEvent({ type: "click", target: this, preventDefault() {} }); }
-  showModal() { this.open = true; } close() { this.open = false; }
+  focus() { document.activeElement = this; } blur() {} select() {} scrollIntoView() { scrolled.push(this.id); } click() { this.dispatchEvent({ type: "click", target: this, preventDefault() {} }); }
+  showModal() { this.open = true; } close() { if (this.open) { this.open = false; fireEvent(this, "close"); } }
   closest(sel) { let n = this; while (n && n.nodeType === 1) { if (matches(n, parseCompound(sel.trim()))) return n; n = n.parentNode; } return null; }
   querySelectorAll(sel) { return queryAll(this, sel); }
   querySelector(sel) { return queryAll(this, sel)[0] || null; }
@@ -148,7 +148,7 @@ const fetched = [];
 const sent = [];
 const store = {};
 const document = {
-  visibilityState: "visible", documentElement: new El("html"), body: tree,
+  activeElement: null, visibilityState: "visible", documentElement: new El("html"), body: tree,
   getElementById: (id) => queryAll(tree, "#" + id)[0] || null,
   querySelector: (s) => queryAll(tree, s)[0] || null, querySelectorAll: (s) => queryAll(tree, s),
   createElement: (t) => new El(t), createTextNode: (t) => new TextNode(t),
@@ -202,8 +202,9 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
       else if ("fire" in step) { fireEvent(select(step.fire), step.type); }
       else if ("submit" in step) { prevented[step.submit] = fireEvent(select(step.submit), "submit").defaultPrevented; }
       else if ("click" in step) { fireEvent(select(step.click), "click"); }
+      else if ("close" in step) { select(step.close).close(); }   // what Esc does: closes, then "close"
       else if ("tick" in step) { const due = timers.filter((t) => t.once).splice(0); timers.splice(0, timers.length, ...timers.filter((t) => !t.once)); due.forEach((t) => { try { t.f(); } catch (e) { errors.push({ file: "timer", message: String(e && e.message), stack: String(e && e.stack).split("\n").slice(0, 5).join("\n") }); } }); }
-      else if ("read" in step) { const el = select(step.read); reads[step.read] = { text: el.textContent, hidden: el.hidden, value: el.value, checked: el.checked, children: el.children.length, disabled: el.disabled, cls: el.className }; }
+      else if ("read" in step) { const el = select(step.read); reads[step.read] = { text: el.textContent, hidden: el.hidden, value: el.value, checked: el.checked, children: el.children.length, disabled: el.disabled, cls: el.className, open: el.open, active: document.activeElement ? document.activeElement.id : null, bodyCls: tree.className }; }
     } catch (e) { errors.push({ file: "step " + JSON.stringify(step), message: String(e && e.message), stack: "" }); }
     await pause();
   }

@@ -9,9 +9,11 @@ navigation and the VPN bar go where they say, a page without its scripts ends on
 and an update while a page is open gets a banner. Since #44 it also covers the sign-in: a visitor
 sees only the form, a wrong password is refused and braked, the session cookie is HttpOnly and
 SameSite=Strict, logout ends the session, an admin and a user see different tabs, and the admin
-makes the user on the accounts page. Not part of the pipeline: the image is large; run
-it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the browsers); the matching
-`playwright` package is installed with pip inside the container (`YTP_PLAYWRIGHT_VERSION`).
+makes the user on the accounts page. Since #79 it opens a subscription's Settings window, changes
+the resolution and the check interval, and saves the server defaults. Not part of the pipeline:
+the image is large; run it on the VM. `YTP_PLAYWRIGHT_IMAGE` overrides the image (Python and the
+browsers); the matching `playwright` package is installed with pip inside the container
+(`YTP_PLAYWRIGHT_VERSION`).
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ import uvicorn
 
 from tests.helpers import docker
 from tests.helpers.accounts_app import ADMIN, PASSWORD, fast_hash
+from ytp import subscriptions
 from ytp.config import Settings
 from ytp.main import create_app
 from ytp.youtube import VideoInfo
@@ -114,6 +117,8 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     assert server.started, "the app did not start"
     app.state.youtube = StandInProbe()
     app.state.youtube_worker.downloader = NoDownload()
+    # one channel to open the Settings window of (#79); the admin sees every subscription
+    subscriptions.add(app.state.db, "UCSMOQeBJ2RAnuFungnQOxLg", "Blender")
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(timeout=15)

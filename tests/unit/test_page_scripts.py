@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """The page's real scripts against the real index.html in a small DOM (needs node).
 
 `tests/helpers/page_harness.js` loads index.html, runs dashboard.js, auth.js and app.js as the
@@ -11,6 +12,7 @@ dashboard.js never ran `app.js`.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 
@@ -510,6 +512,15 @@ ACCOUNTS = {
 
 def requests_made(out) -> list[str]:
     return [url for _, url in out["fetched"]]
+
+
+def sent_bodies(out, method, url):
+    """The JSON bodies of every request to method+url, in order."""
+    return [
+        json.loads(item["body"])
+        for item in out["sent"]
+        if item["method"] == method and item["url"] == url
+    ]
 
 
 def sent_body(out, method, url):
@@ -1631,34 +1642,463 @@ SUB_WITH_RESOLUTION = {
 }
 
 
-@needs_node
-def test_a_subscription_row_shows_its_resolution():
-    out = page(
-        "/",
-        answers={"/api/subscriptions": {"subscriptions": [SUB_WITH_RESOLUTION]}},
-        steps=[{"read": "#subs-youtube-list"}, {"read": "#subs-resolution-5"}],
-    )
+DEFAULTS = {
+    "max_height": 1080,
+    "subscription_poll_minutes": 60,
+    "subscription_poll_at": None,
+    "podcast_poll_minutes": 240,
+    "podcast_poll_at": None,
+    "custom": {
+        "max_height": False,
+        "subscription_poll_minutes": False,
+        "subscription_poll_at": False,
+        "podcast_poll_minutes": False,
+        "podcast_poll_at": False,
+    },
+    "timezone": "Europe/Berlin",
+    "limits": {
+        "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+        "min_minutes": {"channel": 15, "podcast": 30},
+        "max_minutes": 1440,
+    },
+}
+SUB_WITH_RESOLUTION = {
+    **SUB_WITH_RESOLUTION,
+    "kind": "channel",
+    "poll_minutes": None,
+    "poll_at": None,
+}
+PODCAST_SUB = {
+    "id": 3,
+    "kind": "podcast",
+    "feed_url": "https://example.org/feed.xml",
+    "title": "Cast",
+    "enabled": True,
+    "backfill": 0,
+    "created_at": "2026-10-01T00:00:00.000Z",
+    "last_checked": None,
+    "last_error": None,
+    "poll_minutes": None,
+    "poll_at": None,
+    "following": True,
+    "follower_count": 1,
+}
+SETTINGS_ANSWERS = {
+    "/api/subscriptions": {"subscriptions": [SUB_WITH_RESOLUTION]},
+    "/api/podcasts": {"podcasts": [PODCAST_SUB]},
+    "/api/settings/defaults": DEFAULTS,
+    "PATCH /api/subscriptions/5": SUB_WITH_RESOLUTION,
+    "PATCH /api/podcasts/3": PODCAST_SUB,
+}
+OPEN_CHANNEL = {"click": "#subs-settings-channel-5"}
+OPEN_PODCAST = {"click": "#subs-settings-podcast-3"}
+
+
+def settings_page(steps, answers=None, **kw):
+    out = page("/", answers={**SETTINGS_ANSWERS, **(answers or {})}, steps=steps, **kw)
     assert out["errors"] == [], out["errors"]
-    assert "Resolution: 720p (HD)" in out["reads"]["#subs-youtube-list"]["text"]
-    assert out["reads"]["#subs-resolution-5"]["value"] == "720"
+    return out
 
 
 @needs_node
-def test_changing_a_subscription_resolution_sends_a_patch():
-    out = page(
-        "/",
+def test_a_subscription_row_shows_its_resolution_and_checks_and_has_a_settings_button():
+    out = settings_page([{"read": "#subs-youtube-list"}, {"read": "#subs-podcast-list"}])
+    channel = out["reads"]["#subs-youtube-list"]["text"]
+    assert "Resolution: 720p (HD)" in channel
+    assert "Checks: Server default (every 1 h)" in channel
+    assert "Settings" in channel, "next to Check now and Remove"
+    assert "Checks: Server default (every 4 h)" in out["reads"]["#subs-podcast-list"]["text"]
+
+
+@needs_node
+def test_a_subscription_with_its_own_checks_shows_them():
+    own = {**SUB_WITH_RESOLUTION, "poll_minutes": 360, "poll_at": "06:00"}
+    paused = {**PODCAST_SUB, "poll_minutes": 0}
+    out = settings_page(
+        [{"read": "#subs-youtube-list"}, {"read": "#subs-podcast-list"}],
         answers={
-            "/api/subscriptions": {"subscriptions": [SUB_WITH_RESOLUTION]},
-            "PATCH /api/subscriptions/5": SUB_WITH_RESOLUTION,
+            "/api/subscriptions": {"subscriptions": [own]},
+            "/api/podcasts": {"podcasts": [paused]},
         },
-        steps=[
-            {"set": "#subs-resolution-5", "value": ""},
-            {"fire": "#subs-resolution-5", "type": "change"},
-        ],
     )
-    assert out["errors"] == [], out["errors"]
-    assert ["PATCH", "/api/subscriptions/5"] in out["fetched"]
-    assert sent_body(out, "PATCH", "/api/subscriptions/5") == {"max_height": None}
+    assert "Checks: every 6 h \u00b7 from 06:00" in out["reads"]["#subs-youtube-list"]["text"]
+    assert "Checks: paused" in out["reads"]["#subs-podcast-list"]["text"]
+
+
+@needs_node
+def test_the_inline_resolution_row_is_gone_from_the_list():
+    out = page(
+        "/",
+        answers={**SETTINGS_ANSWERS},
+        steps=[{"read": "#subs-resolution-5"}],
+    )
+    assert any("no element for #subs-resolution-5" in e["message"] for e in out["errors"])
+
+
+@needs_node
+def test_the_settings_window_opens_with_focus_inside_and_the_page_locked():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"read": "#sub-settings"},
+            {"read": "#sub-settings-resolution"},
+            {"read": "#sub-settings-interval"},
+            {"read": "#sub-settings-at-mode"},
+            {"read": "#sub-settings-title"},
+            {"read": "#sub-settings-tz"},
+            {"read": "#sub-settings-rule"},
+        ]
+    )
+    reads = out["reads"]
+    opened = reads["#sub-settings"]
+    assert opened["open"] is True
+    assert opened["active"] == "sub-settings-resolution", "focus moves into the window"
+    assert "modal-open" in opened["bodyCls"], "the background does not scroll"
+    assert reads["#sub-settings-resolution"]["value"] == "720"
+    assert "Server default (1080p)" in reads["#sub-settings-resolution"]["text"]
+    assert reads["#sub-settings-interval"]["value"] == "", "following the server default"
+    assert "Server default (every 1 h)" in reads["#sub-settings-interval"]["text"]
+    assert "Paused (never checked automatically)" in reads["#sub-settings-interval"]["text"]
+    assert "Server default (no start time)" in reads["#sub-settings-at-mode"]["text"]
+    assert reads["#sub-settings-title"]["text"] == "Settings: Blender"
+    assert (
+        reads["#sub-settings-tz"]["text"] == "Times are in the server's time zone: Europe/Berlin."
+    )
+    assert "every 5 h from 06:00" in reads["#sub-settings-rule"]["text"]
+
+
+@needs_node
+@pytest.mark.parametrize("closer", ["close-button", "cancel", "escape", "backdrop"])
+def test_the_settings_window_closes_and_the_focus_goes_back_to_its_button(closer):
+    close = {
+        "close-button": {"click": "#sub-settings-close"},
+        "cancel": {"click": "#sub-settings-cancel"},
+        "escape": {"close": "#sub-settings"},  # Esc: the browser closes it, then sends "close"
+        "backdrop": {"click": "#sub-settings"},
+    }[closer]
+    out = settings_page([OPEN_CHANNEL, close, {"read": "#sub-settings"}])
+    closed = out["reads"]["#sub-settings"]
+    assert closed["open"] is False
+    assert closed["active"] == "subs-settings-channel-5", "focus returns to the button"
+    assert "modal-open" not in closed["bodyCls"], "the page scrolls again"
+    assert not [call for call in out["fetched"] if call[0] == "PATCH"], "nothing was saved"
+
+
+@needs_node
+def test_a_late_close_event_of_the_previous_closing_does_not_undo_the_next_open():
+    """Browsers send "close" after the dialog is closed, as a task of its own: it can arrive when
+    the window was already opened again (an automated browser clicks that fast)."""
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"click": "#sub-settings-close"},
+            OPEN_CHANNEL,
+            {"fire": "#sub-settings", "type": "close"},  # the late event of the first closing
+            {"read": "#sub-settings"},
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"read": "#sub-settings-minutes"},
+        ]
+    )
+    opened = out["reads"]["#sub-settings"]
+    assert opened["open"] is True
+    assert "modal-open" in opened["bodyCls"], "the page behind stays locked"
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False, "the minutes field shows"
+
+
+@needs_node
+def test_a_second_click_while_the_window_opens_does_not_rebuild_it():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            OPEN_CHANNEL,  # a double click: the second one must not start another opening
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"read": "#sub-settings-minutes"},
+        ]
+    )
+    defaults_asked = [call for call in out["fetched"] if call == ["GET", "/api/settings/defaults"]]
+    assert len(defaults_asked) <= 2, "once for the list refresh, once for the opening"
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False
+
+
+@needs_node
+def test_the_input_event_also_shows_the_minutes_field():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "input"},
+            {"read": "#sub-settings-minutes"},
+        ]
+    )
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False
+
+
+@needs_node
+def test_saving_sends_the_resolution_interval_and_start_time_and_closes():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-resolution", "value": "480"},
+            {"set": "#sub-settings-interval", "value": "120"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"set": "#sub-settings-at-mode", "value": "time"},
+            {"fire": "#sub-settings-at-mode", "type": "change"},
+            {"set": "#sub-settings-at", "value": "06:00"},
+            {"click": "#sub-settings-save"},
+            {"read": "#sub-settings"},
+            {"read": "#subs-youtube-list"},
+        ]
+    )
+    assert sent_body(out, "PATCH", "/api/subscriptions/5") == {
+        "poll_minutes": 120,
+        "poll_at": "06:00",
+        "max_height": 480,
+    }
+    assert out["reads"]["#sub-settings"]["open"] is False
+    assert out["reads"]["#sub-settings"]["active"] == "subs-settings-channel-5"
+    assert "The settings were saved." in out["reads"]["#subs-youtube-list"]["text"]
+
+
+@needs_node
+def test_saving_server_defaults_and_none_send_null_and_empty():
+    own = {**SUB_WITH_RESOLUTION, "poll_minutes": 0, "poll_at": "06:00"}
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"read": "#sub-settings-interval"},
+            {"read": "#sub-settings-at-mode"},
+            {"set": "#sub-settings-resolution", "value": ""},
+            {"set": "#sub-settings-interval", "value": ""},
+            {"set": "#sub-settings-at-mode", "value": ""},
+            {"click": "#sub-settings-save"},
+        ],
+        answers={"/api/subscriptions": {"subscriptions": [own]}},
+    )
+    assert out["reads"]["#sub-settings-interval"]["value"] == "0", "paused shows as paused"
+    assert out["reads"]["#sub-settings-at-mode"]["value"] == "time"
+    assert sent_body(out, "PATCH", "/api/subscriptions/5") == {
+        "poll_minutes": None,
+        "poll_at": None,
+        "max_height": None,
+    }
+    none = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-at-mode", "value": "none"},
+            {"set": "#sub-settings-interval", "value": "0"},
+            {"click": "#sub-settings-save"},
+        ]
+    )
+    body = sent_body(none, "PATCH", "/api/subscriptions/5")
+    assert (body["poll_minutes"], body["poll_at"]) == (0, ""), "'' = explicitly no start time"
+
+
+@needs_node
+def test_a_failed_save_is_shown_inside_the_window_which_stays_open():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-interval", "value": "60"},
+            {"click": "#sub-settings-save"},
+            {"read": "#sub-settings"},
+            {"read": "#sub-settings-error"},
+            {"read": "#sub-settings-save"},
+        ],
+        answers={"PATCH /api/subscriptions/5": {"__status": 403, "body": {"detail": "no way"}}},
+    )
+    assert out["reads"]["#sub-settings"]["open"] is True
+    assert out["reads"]["#sub-settings-error"]["text"] == "The settings could not be saved. no way"
+    assert out["reads"]["#sub-settings-save"]["disabled"] is False, "it can be tried again"
+
+
+@needs_node
+def test_a_custom_interval_is_checked_before_it_is_sent():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"read": "#sub-settings-minutes"},
+            {"set": "#sub-settings-minutes", "value": "10"},
+            {"click": "#sub-settings-save"},
+            {"read": "#sub-settings-error"},
+            {"set": "#sub-settings-minutes", "value": "20"},
+            {"click": "#sub-settings-save"},
+        ]
+    )
+    assert out["reads"]["#sub-settings-minutes"]["hidden"] is False
+    assert out["reads"]["#sub-settings-error"]["text"] == "Enter whole minutes from 15 to 1440."
+    assert [b for b in sent_bodies(out, "PATCH", "/api/subscriptions/5")] == [
+        {"poll_minutes": 20, "poll_at": None, "max_height": 720}
+    ], "only the valid one was sent"
+
+
+@needs_node
+def test_a_start_time_must_be_filled_in():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-at-mode", "value": "time"},
+            {"fire": "#sub-settings-at-mode", "type": "change"},
+            {"click": "#sub-settings-save"},
+            {"read": "#sub-settings-error"},
+        ]
+    )
+    assert out["reads"]["#sub-settings-error"]["text"] == "Enter a time of day (hh:mm)."
+    assert not [call for call in out["fetched"] if call[0] == "PATCH"]
+
+
+@needs_node
+def test_a_podcast_has_the_interval_only_and_a_longer_minimum():
+    out = settings_page(
+        [
+            OPEN_PODCAST,
+            {"read": "#sub-settings-resolution-row"},
+            {"read": "#sub-settings-interval"},
+            {"set": "#sub-settings-interval", "value": "custom"},
+            {"fire": "#sub-settings-interval", "type": "change"},
+            {"set": "#sub-settings-minutes", "value": "20"},
+            {"click": "#sub-settings-save"},
+            {"read": "#sub-settings-error"},
+            {"set": "#sub-settings-minutes", "value": "45"},
+            {"click": "#sub-settings-save"},
+        ]
+    )
+    assert out["reads"]["#sub-settings-resolution-row"]["hidden"] is True
+    interval = out["reads"]["#sub-settings-interval"]["text"]
+    assert "every 30 min" in interval
+    assert "every 15 min" not in interval, "podcasts start at 30"
+    assert out["reads"]["#sub-settings-error"]["text"] == "Enter whole minutes from 30 to 1440."
+    assert sent_bodies(out, "PATCH", "/api/podcasts/3") == [{"poll_minutes": 45, "poll_at": None}]
+
+
+@needs_node
+def test_without_the_right_the_settings_are_shown_read_only():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"read": "#sub-settings-readonly"},
+            {"read": "#sub-settings-save"},
+            {"read": "#sub-settings-interval"},
+            {"read": "#sub-settings-resolution"},
+            {"click": "#sub-settings-save"},
+        ],
+        answers={"/api/auth/me": {"account": {**USER_ACCOUNT, "can_set_resolution": False}}},
+    )
+    assert out["reads"]["#sub-settings-readonly"]["hidden"] is False
+    assert out["reads"]["#sub-settings-save"]["hidden"] is True
+    assert out["reads"]["#sub-settings-interval"]["disabled"] is True
+    assert out["reads"]["#sub-settings-resolution"]["disabled"] is True
+    assert not [call for call in out["fetched"] if call[0] == "PATCH"]
+
+
+@needs_node
+def test_the_settings_window_switches_language_while_it_is_open():
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"click": "#lang"},
+            {"read": "#sub-settings-title"},
+            {"read": "#sub-settings-interval"},
+        ],
+        language="en-US",
+    )
+    assert out["reads"]["#sub-settings-title"]["text"] == "Einstellungen: Blender"
+    assert "Server-Standard (alle 1 Std.)" in out["reads"]["#sub-settings-interval"]["text"]
+
+
+@needs_node
+def test_the_admin_defaults_panel_shows_the_values_and_saves_them():
+    custom = {**DEFAULTS, "max_height": 720, "subscription_poll_minutes": 120, "subscription_poll_at": "06:00",
+              "podcast_poll_minutes": 0,
+              "custom": {**DEFAULTS["custom"], "max_height": True, "subscription_poll_minutes": True,
+                         "subscription_poll_at": True, "podcast_poll_minutes": True}}  # fmt: skip
+    out = settings_page(
+        [
+            {"read": "#sd-resolution"},
+            {"read": "#sd-channel-interval"},
+            {"read": "#sd-channel-at"},
+            {"read": "#sd-podcast-interval"},
+            {"read": "#sd-tz"},
+            {"set": "#sd-resolution", "value": "480"},
+            {"set": "#sd-channel-interval", "value": "60"},
+            {"set": "#sd-channel-at-mode", "value": "none"},
+            {"set": "#sd-podcast-interval", "value": ""},
+            {"click": "#sd-save"},
+            {"read": "#sd-result"},
+        ],
+        answers={
+            "/api/accounts": {"accounts": [ACCOUNT]},
+            "/api/settings/defaults": custom,
+            "PATCH /api/settings/defaults": {**custom, "max_height": 480},
+        },
+    )
+    reads = out["reads"]
+    assert reads["#sd-resolution"]["value"] == "720", "read before the edits: the saved value"
+    assert reads["#sd-channel-interval"]["value"] == "120"
+    assert reads["#sd-channel-at"]["value"] == "06:00"
+    assert reads["#sd-podcast-interval"]["value"] == "0"
+    assert sent_body(out, "PATCH", "/api/settings/defaults") == {
+        "max_height": 480,
+        "subscription_poll_minutes": 60,
+        "subscription_poll_at": None,
+        "podcast_poll_minutes": None,
+        "podcast_poll_at": None,
+    }
+    assert reads["#sd-result"]["text"] == "The server defaults were saved."
+    assert reads["#sd-tz"]["text"] == "Times are in the server's time zone: Europe/Berlin."
+
+
+@needs_node
+def test_the_admin_defaults_panel_starts_from_the_saved_values_and_none_means_initial():
+    custom = {**DEFAULTS, "subscription_poll_minutes": 120, "subscription_poll_at": "06:00",
+              "custom": {**DEFAULTS["custom"], "subscription_poll_minutes": True, "subscription_poll_at": True}}  # fmt: skip
+    out = settings_page(
+        [
+            {"read": "#sd-resolution"},
+            {"read": "#sd-channel-interval"},
+            {"read": "#sd-channel-at-mode"},
+            {"read": "#sd-channel-at"},
+            {"read": "#sd-podcast-interval"},
+        ],
+        answers={"/api/accounts": {"accounts": [ACCOUNT]}, "/api/settings/defaults": custom},
+    )
+    reads = out["reads"]
+    assert reads["#sd-resolution"]["value"] == "", "nothing saved: the initial .env value"
+    assert reads["#sd-channel-interval"]["value"] == "120"
+    assert reads["#sd-channel-at-mode"]["value"] == "time"
+    assert reads["#sd-channel-at"]["value"] == "06:00"
+    assert reads["#sd-podcast-interval"]["value"] == ""
+    assert "Initial setting (.env)" in reads["#sd-podcast-interval"]["text"]
+
+
+@needs_node
+def test_a_failed_save_of_the_defaults_is_shown():
+    out = settings_page(
+        [{"set": "#sd-resolution", "value": "480"}, {"click": "#sd-save"}, {"read": "#sd-result"}],
+        answers={
+            "/api/accounts": {"accounts": [ACCOUNT]},
+            "PATCH /api/settings/defaults": {"__status": 400, "body": {"detail": "bad value"}},
+        },
+    )
+    assert out["reads"]["#sd-result"]["text"] == "The server defaults could not be saved. bad value"
+    assert "bad" in out["reads"]["#sd-result"]["cls"]
+
+
+@needs_node
+def test_the_defaults_panel_is_for_admins_only():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    assert re.search(r'<section id="server-defaults"[^>]*data-admin-only', html), "hidden for users"
+    out = page(
+        "/",
+        answers={**SETTINGS_ANSWERS, "/api/auth/me": {"account": USER_ACCOUNT}},
+        steps=[{"read": "#sd-channel-interval"}],
+    )
+    assert any("no element for #sd-channel-interval" in e["message"] for e in out["errors"]), (
+        "a user's page does not even build the controls"
+    )
 
 
 @needs_node

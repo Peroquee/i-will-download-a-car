@@ -287,6 +287,72 @@ def subscriptions_scrolls_and_the_guide_opens_and_closes(ctx):
 
 
 @check
+def the_subscription_settings_window_saves_resolution_and_check_interval(ctx):
+    page = ctx.page
+    page.goto(BASE + "/#subscriptions")
+    row = page.locator("#subs-youtube-list li", has_text="Blender")
+    expect(row).to_be_visible(timeout=15000)
+    # the poll is switched off in this app (.env): that is what "server default" means here
+    expect(row).to_contain_text("Server default (paused)")
+    expect(row.locator("select")).to_have_count(0)  # the inline resolution row is gone
+    button = row.get_by_role("button", name="Settings")
+    button.click()
+    dialog = page.locator("#sub-settings")
+    expect(dialog).to_be_visible()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()
+    expect(page.locator("body")).to_have_class(re.compile(r"\bmodal-open\b"))
+    # Esc closes it and the focus goes back to the button
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_hidden()
+    expect(button).to_be_focused()
+    expect(page.locator("body")).not_to_have_class(re.compile(r"\bmodal-open\b"))
+    # the Close button too
+    button.click()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()  # the window is built and open
+    page.click("#sub-settings-close")
+    expect(dialog).to_be_hidden()
+    expect(button).to_be_focused()
+    # change the resolution and the interval and save
+    button.click()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()
+    page.select_option("#sub-settings-resolution", "480")
+    page.select_option("#sub-settings-interval", "120")
+    page.select_option("#sub-settings-at-mode", "time")
+    page.fill("#sub-settings-at", "06:00")
+    page.click("#sub-settings-save")
+    expect(dialog).to_be_hidden()
+    expect(row).to_contain_text("every 2 h")
+    expect(row).to_contain_text("from 06:00")
+    expect(row).to_contain_text("The settings were saved.")
+    expect(button).to_be_focused()  # the list was rebuilt: the focus came back to the new button
+    # a value the page refuses is shown inside the window, which stays open
+    button.click()
+    expect(page.locator("#sub-settings-resolution")).to_be_focused()
+    page.select_option("#sub-settings-interval", "custom")
+    expect(page.locator("#sub-settings-minutes")).to_be_visible()  # wait for the state, not a time
+    page.fill("#sub-settings-minutes", "5")
+    page.click("#sub-settings-save")
+    expect(page.locator("#sub-settings-error")).to_contain_text("15 to 1440")
+    expect(dialog).to_be_visible()
+    page.click("#sub-settings-cancel")
+    expect(dialog).to_be_hidden()
+
+
+@check
+def the_admin_saves_the_server_defaults_on_the_accounts_page(ctx):
+    page = ctx.page
+    page.goto(BASE + "/accounts")
+    expect(page.locator("#server-defaults")).to_be_visible(timeout=15000)
+    page.select_option("#sd-channel-interval", "60")
+    page.select_option("#sd-podcast-interval", "360")
+    page.click("#sd-save")
+    expect(page.locator("#sd-result")).to_have_text("The server defaults were saved.")
+    page.reload()
+    expect(page.locator("#sd-channel-interval")).to_have_value("60")
+    expect(page.locator("#sd-podcast-interval")).to_have_value("360")
+
+
+@check
 def on_a_phone_the_navigation_is_touchable_and_the_page_does_not_scroll_sideways(ctx):
     options = {"viewport": {"width": 360, "height": 740}, "has_touch": True}
     visitor = fresh_page(ctx, **options)

@@ -243,6 +243,12 @@ dialog.howto {
   overflow-y: auto;
 }
 dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
+/* The subscription's Settings window (#79): narrower than the guide; the page behind stays put. */
+dialog.sub-settings { width: min(520px, calc(100% - 24px)); }
+dialog.sub-settings form { display: grid; gap: 12px; }
+body.modal-open { overflow: hidden; }
+.sched-kind { font-size: 15px; margin: 8px 0 0; }
+.row input[type="number"], .row input[type="time"] { margin-top: 8px; }
 .howto-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; position: sticky; top: -20px; background: var(--panel); padding: 8px 0; }
 .howto h3 { font-size: 16px; margin: 0 0 8px; }
 .howto h4 { font-size: 14px; margin: 16px 0 6px; }

@@ -471,6 +471,23 @@ Below the job list: **Subscribed channels** and **Podcasts**, in two groups (#56
   queued (they show up in the job list). It works even when the channel (or the server default) is paused. One
   manual check runs at a time (429 otherwise); a failure answers 502/503 with the reason, which is
   also stored as the channel's last error.
+- **Settings (#79):** every row (channel or podcast) has a *Settings* button next to *Check now*
+  and *Remove*. It opens a modal window (a native `<dialog>`): focus moves into it, *Esc* and the
+  *Close* button close it, focus returns to the *Settings* button, and the page behind does not
+  scroll. It holds the resolution (channels only), the **check interval** and the optional
+  **check time**; each has a "Server default (...)" choice that shows what the default is right now
+  (`GET /api/settings/defaults`), so "follow the server" is explicit. The interval offers
+  *Paused*, 15 (podcasts: 30) minutes to 24 h in steps, and "Other value ..." (any whole number
+  of minutes in the allowed range, checked before it is sent). The check time is "no start time" or
+  a time of day in the server's time zone, shown in the window together with the rule and its
+  examples (see [youtube.md](youtube.md#check-interval-and-check-time-79)). *Save* sends
+  `PATCH /api/subscriptions/{id}` (or `/api/podcasts/{id}`; a podcast has no resolution); an error
+  from the server (or a value the page refuses) is shown **inside** the window, which stays open.
+  A subscription is shared: the values apply to everyone who follows it, and only accounts that
+  may set the resolution (#65; admins always) can change them: the others see the values
+  read-only. The list is rebuilt every 30 s; the window is not part of it, so it is never
+  reset while you edit. The row itself shows the resolution and "Checks: every 2 h from 06:00" (or
+  "Server default (every 1 h)", "paused").
 - **Remove:** two clicks ("Remove", then "Really remove?" for 5 seconds), no dialog. Videos that
   were already downloaded stay.
 
