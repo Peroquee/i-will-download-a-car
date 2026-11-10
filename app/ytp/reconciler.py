@@ -36,8 +36,9 @@ reach. The failed job stays retryable (#26): the retry adds the magnet link agai
 starts from zero.
 
 The organizer is passed in (`organize(job, torrent)`), so the file work of #16 plugs in without
-touching this module. Without one, finished torrents are left as `downloading` and the log says
-so once; nothing is lost and a later run organizes them.
+touching this module; a returned string becomes the job's note when it finishes `done` although
+some files were skipped (#69). Without an organizer, finished torrents are left as `downloading`
+and the log says so once; nothing is lost and a later run organizes them.
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ class OrganizeError(Exception):
     """An organizer's way to say what went wrong, in words a person can read (the job error)."""
 
 
-Organizer = Callable[[Job, Torrent], None]
+Organizer = Callable[[Job, Torrent], str | None]  # a note for a `done` job with skipped files (#69)
 
 
 @dataclass
@@ -301,7 +302,7 @@ class Reconciler:
         if not jobs.transition(self.db, job.id, "organizing", expected=("queued", "downloading")):
             return
         try:
-            self.organize(job, torrent)
+            note = self.organize(job, torrent)
         except OrganizeError as exc:
             self._fail(job, f"organizing failed: {exc}", result, expected=("organizing",))
         except Exception as exc:
@@ -313,7 +314,8 @@ class Reconciler:
                 expected=("organizing",),
             )
         else:
-            if jobs.transition(self.db, job.id, "done", expected=("organizing",)):
+            # `done` even when some files were left out; the organizer's note says so (#69).
+            if jobs.transition(self.db, job.id, "done", expected=("organizing",), note=note):
                 result.done.append(job.id)
                 logger.info("job done", extra={"job_id": job.id, "infohash": job.external_id})
 

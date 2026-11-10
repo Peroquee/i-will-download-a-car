@@ -244,6 +244,18 @@ def test_a_running_youtube_download_shows_the_workers_progress(client):
     assert list_jobs(client).json()["jobs"][0]["progress"] == 63
 
 
+def test_a_finished_job_can_carry_a_note(client):
+    """A `done` job whose organizer skipped files says so next to the status (#69)."""
+    job = add_magnet_job(client, status="downloading")
+    db = client.app.state.db
+    assert jobs.transition(db, job.id, "organizing", expected=("downloading",))
+    note = "3 of 10 files skipped: x.mkv: no episode"
+    assert jobs.transition(db, job.id, "done", expected=("organizing",), note=note)
+    listed = list_jobs(client).json()["jobs"][0]
+    assert listed["note"] == "3 of 10 files skipped: x.mkv: no episode"
+    assert listed["error"] is None
+
+
 def test_the_torrent_progress_is_cached_for_a_moment(fake):
     fake.torrents = [{"hash": HASH, "name": "x", "state": "downloading", "progress": 0.5}]
     from ytp.clients.qbittorrent import QbitClient
@@ -285,6 +297,42 @@ def test_retry_of_an_old_job_without_a_stored_link_uses_the_bare_infohash(client
     assert fake.calls("torrents/add")[0].form["urls"][0] == f"magnet:?xt=urn:btih:{HASH}"
 
 
+def test_retrying_a_magnet_whose_torrent_is_still_there_skips_the_add(client, fake):
+    """The reconciler fails a job but leaves its torrent in qBittorrent (#69).
+
+    Adding the magnet again would be refused ("Fails.") and the retry could never work;
+    the retry must not add it a second time.
+    """
+    job = add_magnet_job(client, status="failed", error="organizing failed: boom")
+    fake.torrents = [{"hash": HASH, "name": "x", "state": "stalledUP", "progress": 1.0}]
+    response = client.post(f"/api/jobs/{job.id}/retry")
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert fake.calls("torrents/add") == [], "qBittorrent already has it"
+    assert fake.calls("torrents/recheck") == [], "nothing is wrong with it"
+    assert fake.calls("torrents/start") == [], "it is not paused"
+    stored = jobs.get_job(client.app.state.db, job.id)
+    assert (stored.status, stored.error) == ("queued", None)
+
+
+def test_retrying_a_magnet_whose_torrent_is_in_an_error_state_rechecks_it(client, fake):
+    job = add_magnet_job(client, status="failed")
+    fake.torrents = [{"hash": HASH, "name": "x", "state": "error", "progress": 1.0}]
+    assert client.post(f"/api/jobs/{job.id}/retry").status_code == 200
+    assert fake.calls("torrents/add") == []
+    assert len(fake.calls("torrents/recheck")) == 1
+    assert fake.calls("torrents/recheck")[0].form["hashes"] == [HASH]
+
+
+def test_retrying_a_magnet_whose_torrent_is_paused_resumes_it(client, fake):
+    job = add_magnet_job(client, status="failed")
+    fake.torrents = [{"hash": HASH, "name": "x", "state": "pausedUP", "progress": 1.0}]
+    assert client.post(f"/api/jobs/{job.id}/retry").status_code == 200
+    assert fake.calls("torrents/add") == []
+    assert len(fake.calls("torrents/start")) == 1
+    assert fake.calls("torrents/start")[0].form["hashes"] == [HASH]
+
+
 def test_a_retry_that_fails_again_marks_the_job_failed_with_the_new_reason(client, fake):
     job = add_magnet_job(client, status="failed")
     fake.add_result = "Fails."
@@ -294,6 +342,14 @@ def test_a_retry_that_fails_again_marks_the_job_failed_with_the_new_reason(clien
     stored = jobs.get_job(client.app.state.db, job.id)
     assert stored.status == "failed"
     assert "Fails." in stored.error
+
+
+def test_retrying_a_job_clears_an_old_note(client, fake):
+    job = add_magnet_job(client, status="failed")
+    with client.app.state.db.transaction() as conn:
+        conn.execute("UPDATE jobs SET note = 'an old note' WHERE id = ?", (job.id,))
+    assert client.post(f"/api/jobs/{job.id}/retry").status_code == 200
+    assert jobs.get_job(client.app.state.db, job.id).note is None
 
 
 def test_retry_with_qbittorrent_down_is_a_503_and_the_job_stays_failed(tmp_path, fake):

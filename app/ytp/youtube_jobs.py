@@ -43,7 +43,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 from . import jobs
 from .audiotags import Tags, embed_tags
@@ -55,7 +55,7 @@ from .metadata import Name
 from .music import place_track
 from .podcasts import PodcastError, place_episode
 from .resolution import MAX_HEIGHTS
-from .youtube import ProbeError, VideoRef, parse_video_url
+from .youtube import InvalidVideoUrl, ProbeError, VideoRef, parse_video_url
 from .youtube_download import (
     Downloaded,
     DownloadFailed,
@@ -166,9 +166,14 @@ class YoutubeWorker:
     # ------------------------------------------------------------------ the loop
 
     def run(self, stop: threading.Event) -> None:
-        jobs.requeue_interrupted(self.db, JOB_TYPE)
+        requeued = False
         while not stop.is_set():
             try:
+                if not requeued:
+                    # Inside the guard: a database that is busy or locked at start must not
+                    # kill the thread (the API would keep accepting jobs nobody runs, #69).
+                    jobs.requeue_interrupted(self.db, JOB_TYPE)
+                    requeued = True
                 handled = self.run_one()
             except Exception:  # the worker must outlive any bug in one job
                 logger.exception("youtube worker failed")
@@ -203,7 +208,9 @@ class YoutubeWorker:
             meta = YoutubeJobMetadata.model_validate(job.metadata)
             video_id = job.external_id.partition("@")[0]
             ref = parse_video_url(f"https://www.youtube.com/watch?v={video_id}")
-        except Exception:
+        except (ValidationError, InvalidVideoUrl):
+            # Only data that really is invalid. Anything else is a bug and is logged (with its
+            # traceback) by `run_one`, instead of hiding as "the stored data is not valid" (#69).
             self._fail(job, "the stored job data is not valid any more; submit the video again")
             return
         if meta.video_id != ref.video_id or job.external_id != job_external_id(
@@ -288,10 +295,7 @@ class YoutubeWorker:
             downloaded.video, library, meta.channel, meta.album or "", meta.title,
             downloaded.video.suffix.lower(),
         )  # fmt: skip
-        if downloaded.thumbnail is not None and not downloaded.audio_only:
-            sidecar = target.with_suffix(".jpg")
-            if not sidecar.exists() and not sidecar.is_symlink():
-                shutil.move(str(downloaded.thumbnail), str(sidecar))
+        self._sidecar(downloaded, target, ref)
 
     def _file_podcast(
         self, ref: VideoRef, meta: YoutubeJobMetadata, downloaded: Downloaded, library: Path
@@ -326,10 +330,27 @@ class YoutubeWorker:
             downloaded.video, library, meta.channel, published, meta.title,
             downloaded.video.suffix.lower(),
         )  # fmt: skip
-        if downloaded.thumbnail is not None and not downloaded.audio_only:
-            sidecar = target.with_suffix(".jpg")
+        self._sidecar(downloaded, target, ref)
+
+    def _sidecar(self, downloaded: Downloaded, target: Path, ref: VideoRef) -> None:
+        """The thumbnail beside the media file. A failure here never fails the job (#69).
+
+        The media file is already in the library at this point; failing the job would only
+        make a retry file it a second time or hit a conflict. The podcast cover is handled
+        the same way (see `podcast_jobs.PodcastWorker._cover`).
+        """
+        if downloaded.thumbnail is None or downloaded.audio_only:
+            return
+        sidecar = target.with_suffix(".jpg")
+        try:
             if not sidecar.exists() and not sidecar.is_symlink():
                 shutil.move(str(downloaded.thumbnail), str(sidecar))
+        except OSError:
+            logger.warning(
+                "thumbnail not filed beside the media file",
+                exc_info=True,
+                extra={"video_id": ref.video_id, "target": str(sidecar)},
+            )
 
     def _fail(self, job: Job, reason: str) -> None:
         jobs.transition(

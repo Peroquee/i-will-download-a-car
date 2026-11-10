@@ -412,6 +412,53 @@ def test_stored_data_that_is_invalid_fails_the_job_instead_of_crashing(world):
     assert "not valid" in reason
 
 
+def test_an_unexpected_error_while_reading_the_job_is_logged(world, monkeypatch, caplog):
+    """Only really invalid data gives "not valid any more"; a bug is logged with its traceback."""
+    import logging
+
+    world.submit()
+
+    def broken(url):
+        raise RuntimeError("a bug, not bad data")
+
+    monkeypatch.setattr("ytp.youtube_jobs.parse_video_url", broken)
+    with caplog.at_level(logging.ERROR, logger="ytp.youtube_jobs"):
+        world.worker().run_one()
+    status, reason = world.status()
+    assert status == "failed"
+    assert reason == "the download failed: RuntimeError"
+    assert any(record.exc_info for record in caplog.records), "the traceback is in the log"
+
+
+def test_a_database_error_at_start_does_not_kill_the_worker(world, monkeypatch):
+    """requeue_interrupted runs inside the guarded loop and is retried until it works (#69)."""
+    import sqlite3
+
+    world.submit()
+    real = jobs.requeue_interrupted
+    attempts = []
+
+    def busy_at_first(db, job_type):
+        attempts.append(job_type)
+        if len(attempts) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(db, job_type)
+
+    monkeypatch.setattr("ytp.youtube_jobs.jobs.requeue_interrupted", busy_at_first)
+    stop = threading.Event()
+    worker = world.worker(idle_seconds=0.05)
+    thread = threading.Thread(target=worker.run, args=(stop,))
+    thread.start()
+    deadline = time.monotonic() + 5
+    while world.status()[0] != "done" and time.monotonic() < deadline:
+        time.sleep(0.02)
+    stop.set()
+    worker.wake()
+    thread.join(5)
+    assert len(attempts) >= 2, "the worker tried the requeue again"
+    assert world.status()[0] == "done", "the worker thread survived the database error"
+
+
 def test_a_job_with_a_mismatching_id_is_refused(world):
     world.submit()
     with world.db.transaction() as conn:

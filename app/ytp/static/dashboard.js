@@ -348,6 +348,7 @@
       li.appendChild(el("div", "job-meta", meta.join(" · ")));
       if (job.dismissed) li.classList.add("job-dismissed");
       if (job.status === "failed") li.appendChild(el("p", "job-error", job.error || t("jobs.no_reason")));
+      else if (job.note) li.appendChild(el("p", "job-note-warn", job.note));
       if (job.status === "failed") li.appendChild(dismissButton(job));
       if (job.can_retry) {
         var button = el("button", "ghost small", t(busy["retry:" + job.id] ? "jobs.retrying" : "jobs.retry"));

@@ -218,6 +218,7 @@ button.small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .skipped ul { margin: 6px 0 6px 18px; padding: 0; }
 .skipped li { overflow-wrap: anywhere; }
 .job-note { margin: 0; font-size: 13px; color: var(--good); }
+.job-note-warn { margin: 0; font-size: 13px; color: var(--warn); overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 /* Delete and remove buttons: crimson (#56, #58). */
 button.danger { background: var(--danger-bg); border-color: var(--danger-bg); color: var(--danger-ink); }

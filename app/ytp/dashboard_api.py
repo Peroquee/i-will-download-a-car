@@ -2,8 +2,8 @@
 
     {"active": [{id, type, kind, label, status, high_priority, progress, done_bytes,
                  total_bytes, speed, eta, created_at, updated_at}, ...],
-     "recent": [{id, type, kind, label, status, error, can_retry, dismissed, high_priority,
-                 created_at, updated_at}, ...],
+     "recent": [{id, type, kind, label, status, error, note, can_retry, dismissed,
+                 high_priority, created_at, updated_at}, ...],
      "dismissed": n,
      "vpn": {"current": {state, since, paused, egress, country}, "history": [{time, condition,
              paused, reason}, ...]},
@@ -21,7 +21,8 @@
 * `deploy` (#42) is the small status file the automatic update writes into the app's config
   folder (`autodeploy-status.json`: the installed version, the last result, paused or halted; no
   address and no secret), or null when automatic updates are not set up.
-* `recent`: the 20 newest done/failed jobs with the reason for a failure; `can_retry` is true for
+* `recent`: the 20 newest done/failed jobs with the reason for a failure (and the note of a done
+  job that skipped files, #69); `can_retry` is true for
   a failed one (the retry itself is POST /api/jobs/{id}/retry). Failed jobs the asking account
   dismissed (POST /api/jobs/{id}/dismiss) are left out unless `?dismissed=1` is given; `dismissed`
   counts them either way (the page's "show dismissed (N)" toggle).
@@ -115,6 +116,7 @@ def recent_row(job: Job, dismissed: bool = False) -> dict[str, Any]:
         "label": job_label(job),
         "status": job.status,
         "error": job.error,
+        "note": job.note,
         "can_retry": job.status == "failed",
         "dismissed": dismissed,
         "high_priority": job.priority > 0,

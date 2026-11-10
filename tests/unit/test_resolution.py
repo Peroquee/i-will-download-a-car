@@ -38,7 +38,10 @@ def test_the_migration_gives_existing_accounts_the_right_and_adds_the_columns(tm
     conn.execute(
         "INSERT INTO accounts (username, password_hash, role) VALUES ('old', 'scrypt:x', 'user')"
     )
-    assert dbmod.migrate(conn, migrations) == ["0015_resolution_rights.sql"]
+    assert dbmod.migrate(conn, migrations) == [
+        "0015_resolution_rights.sql",
+        "0016_job_note.sql",
+    ]
     row = conn.execute(
         "SELECT default_max_height, can_set_resolution FROM accounts WHERE username = 'old'"
     ).fetchone()

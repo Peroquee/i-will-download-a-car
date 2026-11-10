@@ -62,7 +62,7 @@ class World:
         path.write_bytes(content if content is not None else b"x" * size)
         return path
 
-    def run(self, metadata: dict, content: str, priority: int = 0) -> None:
+    def run(self, metadata: dict, content: str, priority: int = 0) -> str | None:
         job = Job(1, "magnet", "a" * 40, metadata, "organizing", None, "", "", priority=priority)
         path = str(self.downloads / content)
         torrent = Torrent.from_api(
@@ -74,7 +74,7 @@ class World:
                 "content_path": path,
             }
         )
-        self.organizer(job, torrent)
+        return self.organizer(job, torrent)
 
     def tree(self, library: str) -> list[str]:
         root = self.data / library
@@ -174,6 +174,36 @@ def test_a_conflict_among_other_files_is_skipped_not_fatal(world, caplog):
     assert clash.read_text() == "mine"
     assert "Big Buck Bunny (2008).mkv" in "".join(world.tree("Filme"))
     assert "not overwriting" in caplog.text
+
+
+def test_files_that_were_not_overwritten_are_reported_in_the_note(world):
+    """A conflict does not fail the job, but the note says a file was left out (#69)."""
+    world.make("rel/Movie.mkv", 100)
+    world.make("rel/Movie.de.srt", 10)
+    clash = world.data / "Filme/Big Buck Bunny (2008)/Big Buck Bunny (2008).de.srt"
+    clash.parent.mkdir(parents=True)
+    clash.write_text("mine")
+    note = world.run(MOVIE, "rel")
+    assert note == (
+        "1 of 2 files already in the library with other content, not overwritten: "
+        "Big Buck Bunny (2008)/Big Buck Bunny (2008).de.srt"
+    )
+
+
+def test_a_pack_that_skips_files_says_so_in_the_note(world):
+    """The job stays `done`, but what was left out is visible without reading the log (#69)."""
+    world.make("pack/Tatort.S03E01.mkv", 100)
+    world.make("pack/Tatort.S03E02.mkv", 100)
+    world.make("pack/Tatort.Behind.The.Scenes.mkv", 100)
+    note = world.run(PACK, "pack")
+    assert note == (
+        "1 of 3 files skipped: Tatort.Behind.The.Scenes.mkv: no episode number in the name"
+    )
+
+
+def test_a_completely_filed_job_has_no_note(world):
+    world.make("rel/Movie.mkv", 100)
+    assert world.run(MOVIE, "rel") is None
 
 
 def test_a_symlink_at_the_target_is_not_followed(world, tmp_path):
@@ -490,6 +520,21 @@ def test_files_outside_downloads_are_refused(world, content_path):
     )
     with pytest.raises(OrganizeError):
         world.organizer(job, torrent)
+
+
+@pytest.mark.security
+def test_a_folder_that_cannot_be_read_fails_the_job(world, monkeypatch):
+    """os.walk must not silently drop a folder and plan a job that only looks fine (#69)."""
+    world.make("rel/Movie.mkv", 100)
+
+    def unreadable(root, *, followlinks=False, onerror=None):
+        assert onerror is not None, "os.walk was called without an onerror"
+        onerror(OSError(errno.EACCES, "Permission denied", str(root)))
+        return iter(())
+
+    monkeypatch.setattr(org.os, "walk", unreadable)
+    with pytest.raises(OrganizeError, match="cannot read the folder"):
+        world.run(MOVIE, "rel")
 
 
 @pytest.mark.security

@@ -220,6 +220,18 @@ def test_the_recent_list_has_reasons_and_retry_for_failed_jobs(client):
     assert "secret" not in client.get("/api/dashboard").text
 
 
+def test_a_done_job_with_a_note_shows_it_in_the_recent_list(client):
+    """A job that finished although files were left out says so on the dashboard (#69)."""
+    done = add_job(client, "magnet", H1, MOVIE, "done")
+    with client.app.state.db.transaction() as conn:
+        conn.execute(
+            "UPDATE jobs SET note = '2 of 10 files skipped: x.mkv: no episode' WHERE id = ?",
+            (done.id,),
+        )
+    row = client.get("/api/dashboard").json()["recent"][0]
+    assert row["note"] == "2 of 10 files skipped: x.mkv: no episode"
+
+
 def test_the_recent_list_is_limited(client):
     for i in range(25):
         add_job(client, "youtube", f"{i:011d}", VIDEO, "done")

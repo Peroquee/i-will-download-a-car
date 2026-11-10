@@ -1,16 +1,18 @@
 """The job list and the retry action (issue #26).
 
 GET /api/jobs?limit=50&status=failed
-    {"jobs": [{"id", "type", "kind", "label", "status", "error", "progress", "can_retry",
-               "dismissed", "high_priority", "created_at", "updated_at"}, ...],
+    {"jobs": [{"id", "type", "kind", "label", "status", "error", "note", "progress",
+               "can_retry", "dismissed", "high_priority", "created_at", "updated_at"}, ...],
      "counts": {"queued": n, "downloading": n, "organizing": n, "done": n, "failed": n,
                 "dismissed": n}}
 
     Newest first. `kind` is the library (movies, series, audiobooks, music, youtube), `label` a
     readable name made from the stored metadata, `progress` 0-100 or null when unknown (queued,
-    failed, or qBittorrent cannot be asked right now). The magnet link is never part of the answer.
-    `counts.failed` leaves out the failed jobs the asking account dismissed (that is the number
-    the input page shows in red); `counts.dismissed` is how many those are.
+    failed, or qBittorrent cannot be asked right now). `note` is a short line about a finished
+    job (e.g. files the organizer skipped, #69), null when there is nothing to say. The magnet
+    link is never part of the answer. `counts.failed` leaves out the failed jobs the asking
+    account dismissed (that is the number the input page shows in red); `counts.dismissed` is
+    how many those are.
 
 POST /api/jobs/{id}/retry
     Only for a `failed` job: it goes back to `queued` and is handed over again (a torrent to
@@ -164,6 +166,7 @@ def summarize(
         "label": job_label(job),
         "status": job.status,
         "error": job.error,
+        "note": job.note,
         "progress": job_progress(job, torrents, youtube),
         "can_retry": job.status == "failed",
         "dismissed": dismissed,
@@ -255,10 +258,43 @@ async def retry_job(job_id: int, request: Request):
     if outcome != "requeued":
         return problem(409, "only a failed job can be retried", job.id)
     category = str(job.metadata.get("type", ""))
+    # The reconciler fails a job but leaves its torrent in qBittorrent (organizer errors,
+    # torrent.failed, ...). Adding the magnet again would then be refused ("Fails.") and the
+    # retry could never succeed; ask first and simply revive a torrent that is still there (#69).
+    try:
+        existing = await asyncio.to_thread(qbit.list_torrents, hashes=[queued.external_id.lower()])
+    except QbitError as exc:
+        logger.warning(
+            "could not ask qBittorrent whether the torrent is still there",
+            extra={"job_id": job.id, "error": str(exc)},
+        )
+        existing = []
+    if existing:
+        await _revive_torrent(qbit, existing[0], job.id)
+        return summarize(queued, {}, {})
     answer = await hand_to_qbittorrent(db, qbit, queued, magnet, category)
     if answer is not None:
         return answer
     return summarize(queued, {}, {})
+
+
+async def _revive_torrent(qbit: QbitClient, torrent: Torrent, job_id: int) -> None:
+    """Make a torrent that is still in qBittorrent usable for a retried job (#69).
+
+    An error state would make the reconciler fail the job again at its next run, so the torrent
+    is re-checked; a paused one is resumed. A refusal is only logged: the job stays `queued`
+    and the reconciler says what is wrong with the torrent.
+    """
+    try:
+        if torrent.failed:
+            await asyncio.to_thread(qbit.recheck_torrents, [torrent.hash])
+        elif torrent.paused:
+            await asyncio.to_thread(qbit.resume_torrents, [torrent.hash])
+    except QbitError as exc:
+        logger.warning(
+            "could not revive the torrent of a retried job",
+            extra={"job_id": job_id, "infohash": torrent.hash, "error": str(exc)},
+        )
 
 
 async def _own_job(request: Request, job_id: int):

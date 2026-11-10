@@ -25,7 +25,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from . import accounts, jobs, podcast_subscriptions
 from .clients.jellyfin import LibraryRefresher
@@ -122,9 +122,14 @@ class PodcastWorker:
         self._wake.set()
 
     def run(self, stop: threading.Event) -> None:
-        jobs.requeue_interrupted(self.db, JOB_TYPE)
+        requeued = False
         while not stop.is_set():
             try:
+                if not requeued:
+                    # Inside the guard: a database that is busy or locked at start must not
+                    # kill the thread (the API would keep accepting jobs nobody runs, #69).
+                    jobs.requeue_interrupted(self.db, JOB_TYPE)
+                    requeued = True
                 handled = self.run_one()
             except Exception:  # the worker must outlive any bug in one job
                 logger.exception("podcast worker failed")
@@ -157,7 +162,9 @@ class PodcastWorker:
     def _process(self, job: Job) -> None:
         try:
             meta = PodcastJobMetadata.model_validate(job.metadata)
-        except Exception:
+        except ValidationError:
+            # Only data that really is invalid. Anything else is a bug and is logged (with its
+            # traceback) by `run_one`, instead of hiding as "the stored data is not valid" (#69).
             self._fail(job, "the stored job data is not valid any more; pick the episode again")
             return
         library = self.settings.library_path("podcasts")
