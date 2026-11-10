@@ -28,6 +28,7 @@ from ytp.main import create_app
 from ytp.youtube import ProbeError, VideoRef
 from ytp.youtube_download import (
     AUDIO_FORMAT,
+    STALL_SECONDS,
     DownloadFailed,
     YoutubeDownloader,
     download_options,
@@ -269,6 +270,44 @@ def test_a_download_that_stops_making_progress_is_aborted(tmp_path):
     downloader = YoutubeDownloader(download=stuck, min_free_bytes=0, clock=clock)
     with pytest.raises(DownloadFailed, match="stalled: no data arrived for 10 minutes"):
         downloader.download(VideoRef(ID), tmp_path / "w")
+
+
+def test_two_files_count_their_progress_on_their_own(tmp_path):
+    """Video and audio are separate files (`bv+ba`); the audio restarting at zero is not a stall.
+
+    The second file is smaller than the first and grows slowly, so a global maximum of
+    `downloaded_bytes` would see no progress at all and fail it as stalled (#70 review).
+    """
+    clock = Clock()
+
+    def two_files(url, options):
+        hook = options["progress_hooks"][0]
+        hook(
+            {
+                "status": "finished",
+                "downloaded_bytes": 1000,
+                "total_bytes": 1000,
+                "filename": "video",
+            }
+        )
+        step = STALL_SECONDS * 0.75  # less than the stall per step, more in total
+        for done in (10, 20, 30):
+            clock.advance(step)
+            hook(
+                {
+                    "status": "downloading",
+                    "downloaded_bytes": done,
+                    "total_bytes": 30,
+                    "filename": "audio",
+                }
+            )
+        home = Path(options["paths"]["home"])
+        (home / f"{ID}.mp4").write_bytes(b"data")
+        return dict(INFO)
+
+    downloader = YoutubeDownloader(download=two_files, min_free_bytes=0, clock=clock)
+    result = downloader.download(VideoRef(ID), tmp_path / "w")
+    assert result.video.name == f"{ID}.mp4"
 
 
 def test_a_download_that_takes_too_long_is_aborted_even_while_data_flows(tmp_path):

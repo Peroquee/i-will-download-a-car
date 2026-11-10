@@ -164,8 +164,10 @@ class ProgressWatchdog:
     """The job's progress hook, with a stall and an overall limit around it (#70).
 
     Raising inside a yt-dlp progress hook aborts the download; yt-dlp does not swallow it.
-    A gap with new bytes counts as progress; only a callback that brings no new bytes after
-    `stall_seconds` fails.
+    Progress is counted PER FILE: yt-dlp downloads video and audio as two files (`bv+ba`) and
+    `downloaded_bytes` starts at 0 again for the second, so a global maximum would treat a
+    slow audio part as a stall while data is arriving. Any change of a file's byte count
+    counts as progress; only a callback that brings no change after `stall_seconds` fails.
     """
 
     def __init__(
@@ -182,14 +184,17 @@ class ProgressWatchdog:
         self._deadline = deadline_seconds
         self._started = clock()
         self._last_change = self._started
-        self._seen = -1
+        self._seen: dict[str, int] = {}
 
     def __call__(self, data: dict[str, Any]) -> None:
         now = self._clock()
         downloaded = data.get("downloaded_bytes")
-        if isinstance(downloaded, int) and downloaded > self._seen:
-            self._seen = downloaded
-            self._last_change = now
+        if isinstance(downloaded, int):
+            name = data.get("filename")
+            key = name if isinstance(name, str) else ""
+            if self._seen.get(key) != downloaded:
+                self._seen[key] = downloaded
+                self._last_change = now
         if now - self._started > self._deadline:
             raise DownloadFailed(
                 f"the download did not finish within {_hours_text(self._deadline)}"
@@ -208,6 +213,9 @@ def popen_timeout(seconds: float) -> Iterator[None]:
 
     yt-dlp's `Popen.run` accepts a timeout, but its ffmpeg postprocessors never pass one; a
     hung merge would otherwise keep the single YouTube worker busy forever.
+
+    This patches yt-dlp's class PROCESS-WIDE, and nested or concurrent use would restore the
+    wrong function. That is fine here: only the one YouTube worker thread downloads at a time.
     """
     from yt_dlp.utils import Popen
 
