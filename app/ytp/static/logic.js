@@ -215,7 +215,6 @@
       var last = loc[loc.length - 1];
       var field;
       if (loc[1] === "magnet" || loc[1] === "url" || loc[1] === "feed") field = "link";
-      else if (loc[1] === "metadata") field = typeof last === "string" ? last : "link";
       else field = typeof last === "string" ? last : "link";
       if (!(field in result)) result[field] = { type: item.type, msg: item.msg };
     });
@@ -234,15 +233,14 @@
   }
 
   /* The one-line summary of the downloads on the input page, from an /api/jobs answer:
-     {running, waiting, failed, progress}. The counts come from the server's totals when it sends
-     them (the list holds only the newest jobs); progress is the mean of the downloads that report
-     one, rounded, or null when none does. */
+     {running, waiting, failed, progress}. The counts come from the server's totals (the list
+     holds only the newest jobs; /api/jobs always sends them); progress is the mean of the
+     downloads that report one, rounded, or null when none does. */
   function jobsSummary(data) {
     var jobs = data && Array.isArray(data.jobs) ? data.jobs : [];
-    var counts = data && data.counts && typeof data.counts === "object" ? data.counts : null;
+    var counts = data && data.counts && typeof data.counts === "object" ? data.counts : {};
     function count(status) {
-      if (counts && typeof counts[status] === "number") return counts[status];
-      return jobs.filter(function (job) { return job && job.status === status; }).length;
+      return typeof counts[status] === "number" ? counts[status] : 0;
     }
     var shares = jobs.filter(function (job) {
       return job && job.status === "downloading" && typeof job.progress === "number" && isFinite(job.progress);

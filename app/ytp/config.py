@@ -11,7 +11,6 @@ All problems are collected and reported together, so a bad .env is fixed in one 
 from __future__ import annotations
 
 import ipaddress
-import logging
 import os
 import re
 from collections.abc import Mapping
@@ -372,7 +371,3 @@ def valid_folder_name(name: str) -> bool:
         and not name.startswith("-")
         and name.isprintable()
     )
-
-
-def log_level_number(level: str) -> int:
-    return int(getattr(logging, level))

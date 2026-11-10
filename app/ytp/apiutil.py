@@ -28,11 +28,6 @@ PROBE_STATUS = {
 }  # fmt: skip
 
 
-def account_of(request: Request):
-    """The logged-in account (the login check has already refused anyone else)."""
-    return request.state.account
-
-
 def visible_to(request: Request) -> int | None:
     """What a query must be limited to: None for an admin (sees everything), else the account id."""
     account = request.state.account

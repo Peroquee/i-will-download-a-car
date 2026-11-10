@@ -161,12 +161,6 @@ def any_exists(db: Database) -> bool:
     return bool(db.query("SELECT 1 FROM accounts LIMIT 1"))
 
 
-def count_active_admins(db: Database) -> int:
-    return db.query("SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin' AND disabled = 0")[0][
-        "n"
-    ]
-
-
 def _would_remove_last_admin(conn: sqlite3.Connection, account_id: int) -> bool:
     others = conn.execute(
         "SELECT COUNT(*) FROM accounts WHERE role = 'admin' AND disabled = 0 AND id <> ?",
@@ -236,7 +230,7 @@ def update(
             f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?", (*values, account_id)
         )
         if disabled is True:
-            conn.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
+            end_all_sessions(conn, account_id)
         row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
     return Account.from_row(row)
 
@@ -387,9 +381,9 @@ def end_session(db: Database, token: str) -> None:
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
 
 
-def end_all_sessions(db: Database, account_id: int) -> None:
-    with db.transaction() as conn:
-        conn.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
+def end_all_sessions(conn: sqlite3.Connection, account_id: int) -> None:
+    """End every session of one account, inside the caller's transaction (`update`)."""
+    conn.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
 
 
 # ------------------------------------------------------------------------------------ ownership

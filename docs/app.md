@@ -552,7 +552,7 @@ error per field (`loc`, a machine-readable `type` such as `missing`, `name_empty
 `year_out_of_range`, `extra_forbidden`, and a readable `msg`); used as a FastAPI body
 (`body: Metadata`) it becomes the usual 422 response. Unknown extra fields are refused.
 `metadata_to_json` gives the JSON object stored in `jobs.metadata` (no nulls, so a season pack
-has no `episode` key); `metadata_from_json` reads it back.
+has no `episode` key); reading it back is `parse_metadata(json.loads(...))`.
 
 All text values go through `safe_path_component` because they become folder names (#16): it
 strips, normalises to NFC (one "ö", not "o" + diaeresis), and refuses empty or longer than

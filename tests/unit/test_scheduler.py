@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,6 @@ from ytp.scheduler import (
     STALE_AFTER_HEARTBEATS,
     AppScheduler,
     get_state,
-    next_run_in,
     set_state,
 )
 
@@ -55,6 +55,14 @@ def run_for(seconds: float, scheduler: AppScheduler, then=None) -> None:
         scheduler.shutdown()
 
     asyncio.run(main())
+
+
+def next_run_in(scheduler: AppScheduler, job_id: str) -> timedelta | None:
+    """How long until a job runs next (test-only; the app has no use for it)."""
+    job = scheduler._scheduler.get_job(job_id)
+    if job is None or job.next_run_time is None:
+        return None
+    return job.next_run_time - datetime.now(UTC)
 
 
 # --- app_state ----------------------

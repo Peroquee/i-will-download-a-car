@@ -306,10 +306,3 @@ def metadata_to_json(metadata: _Metadata) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
-
-
-def metadata_from_json(
-    text: str,
-) -> MovieMetadata | SeriesMetadata | AudiobookMetadata | MusicMetadata:
-    """Read back what `metadata_to_json` stored."""
-    return _adapter.validate_json(text)

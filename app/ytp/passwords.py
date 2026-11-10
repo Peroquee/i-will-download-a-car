@@ -29,7 +29,6 @@ KEY_BYTES = 32
 SALT_BYTES = 16
 MIN_LENGTH = 12
 MAX_LENGTH = 200
-_MAXMEM = 128 * N * R * 4  # 4x what scrypt needs: room, but still bounded
 PREFIX = "scrypt"
 
 
