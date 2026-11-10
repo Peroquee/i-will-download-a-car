@@ -9,9 +9,11 @@ plain numbered SQL file per change can be read in full when something goes wrong
   virtiofs share.
 * Migrations are `ytp/migrations/NNNN_name.sql`, applied in order at every start. Each file
   and its bookkeeping row (`schema_migrations`: version, name, SHA-256 of the file) are one
-  transaction. The app refuses to start (instead of guessing) when an applied file was
-  edited afterwards, or the database holds a version this code does not know (an older image
-  started on a newer database).
+  transaction. Foreign keys are off while a file runs, so rebuilding a table does not cascade
+  into its children; `PRAGMA foreign_key_check` runs before every COMMIT and a migration that
+  would leave broken references is rolled back. The app refuses to start (instead of guessing)
+  when an applied file was edited afterwards, or the database holds a version this code does
+  not know (an older image started on a newer database).
 * One connection, shared between threads, with a lock around every use. Every statement here
   is short, so one serialised connection is simpler and safer than a pool.
 
@@ -171,22 +173,39 @@ def migrate(conn: sqlite3.Connection, migrations: Sequence[Migration] | None = N
     for migration in wanted:
         if migration.version in done:
             continue
-        # The name is validated (a-z, 0-9, _ and .sql) and the checksum is hex, so inlining
-        # them is safe; executescript() cannot take parameters.
-        script = (
-            f"BEGIN IMMEDIATE;\n{migration.sql}\n"
-            "INSERT INTO schema_migrations (version, name, checksum) "
-            f"VALUES ({migration.version}, '{migration.name}', '{migration.checksum}');\n"
-            "COMMIT;"
-        )
+        # A migration may rebuild a table (CREATE x_new, INSERT, DROP x, RENAME). With foreign
+        # keys on, the DROP would cascade into the child tables and silently delete their rows,
+        # so they are off for the migration. The pragma does nothing inside a transaction, so it
+        # must run before BEGIN. executescript() cannot take parameters, hence the separate
+        # bookkeeping statement.
+        conn.execute("PRAGMA foreign_keys = OFF")
         try:
-            conn.executescript(script)
+            conn.executescript(f"BEGIN IMMEDIATE;\n{migration.sql}")
+            violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                broken = ", ".join(
+                    f"{row[0]} row {row[1]} refers to missing {row[2]}" for row in violations[:5]
+                )
+                raise MigrationError(
+                    f"migration {migration.name} would leave broken foreign keys: {broken}"
+                )
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, checksum) VALUES (?, ?, ?)",
+                (migration.version, migration.name, migration.checksum),
+            )
+            conn.execute("COMMIT")
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
             raise MigrationError(
                 f"migration {migration.name} failed and was rolled back: {exc}"
             ) from exc
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
         logger.info("migration applied", extra={"migration": migration.name})
         ran.append(migration.name)
     return ran
@@ -221,10 +240,16 @@ class Database:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield self._conn
+                self._conn.execute("COMMIT")
             except BaseException:
-                self._conn.execute("ROLLBACK")
+                # COMMIT itself can fail (SQLITE_BUSY after busy_timeout, an I/O error, a full
+                # disk) and then the transaction is still open on the shared connection: every
+                # later BEGIN would fail with "cannot start a transaction within a transaction".
+                # Roll it back - but only if SQLite has not already rolled back by itself (for
+                # example SQLITE_FULL), where an explicit ROLLBACK only hides the real error.
+                if self._conn.in_transaction:
+                    self._conn.execute("ROLLBACK")
                 raise
-            self._conn.execute("COMMIT")
 
     def query(self, sql: str, params: Sequence[Any] | dict[str, Any] = ()) -> list[sqlite3.Row]:
         """Run a read-only statement and return all rows."""
