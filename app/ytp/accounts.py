@@ -156,6 +156,11 @@ def list_all(db: Database) -> list[Account]:
     ]
 
 
+def any_exists(db: Database) -> bool:
+    """Is there at least one account? One row, no account loaded (#76)."""
+    return bool(db.query("SELECT 1 FROM accounts LIMIT 1"))
+
+
 def count_active_admins(db: Database) -> int:
     return db.query("SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin' AND disabled = 0")[0][
         "n"
@@ -170,69 +175,95 @@ def _would_remove_last_admin(conn: sqlite3.Connection, account_id: int) -> bool:
     return others == 0
 
 
-def set_role(db: Database, account_id: int, role: str) -> Account:
-    if role not in ROLES:
+UNCHANGED = object()  # "leave this field alone" for update()
+_UNCHANGED = UNCHANGED  # the old name, kept for the callers that spelled it with an underscore
+
+
+def update(
+    db: Database,
+    account_id: int,
+    *,
+    role: str | object = UNCHANGED,
+    disabled: bool | object = UNCHANGED,
+    default_max_height: int | None | object = UNCHANGED,
+    can_set_resolution: bool | object = UNCHANGED,
+) -> Account:
+    """Change several fields of an account in ONE transaction (#76).
+
+    Every value is validated before anything is written, so a request can never be applied
+    halfway. `UNCHANGED` leaves a field alone; `default_max_height=None` clears the personal
+    default. The last-active-admin rule is judged on the result that would be written.
+    """
+    if role is not UNCHANGED and (not isinstance(role, str) or role not in ROLES):
         raise AccountError("invalid", "the role must be admin or user")
+    if disabled is not UNCHANGED and not isinstance(disabled, bool):
+        raise AccountError("invalid", "disabled must be true or false")
+    if (
+        default_max_height is not UNCHANGED
+        and default_max_height is not None
+        and not resolution.valid(default_max_height)
+    ):
+        raise AccountError("invalid", resolution.DETAIL)
+    if can_set_resolution is not UNCHANGED and not isinstance(can_set_resolution, bool):
+        raise AccountError("invalid", "can_set_resolution must be true or false")
+    updates: list[str] = []
+    values: list[Any] = []
+    if role is not UNCHANGED:
+        updates.append("role = ?")
+        values.append(role)
+    if disabled is not UNCHANGED:
+        updates.append("disabled = ?")
+        values.append(int(disabled))
+    if default_max_height is not UNCHANGED:
+        updates.append("default_max_height = ?")
+        values.append(default_max_height)
+    if can_set_resolution is not UNCHANGED:
+        updates.append("can_set_resolution = ?")
+        values.append(int(can_set_resolution))
+    if not updates:
+        raise AccountError("invalid", "nothing to change")
     with db.transaction() as conn:
         row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
         if row is None:
             raise AccountError("not_found", "no such account")
-        if role == "user" and row["role"] == "admin" and _would_remove_last_admin(conn, account_id):
+        new_role = row["role"] if role is UNCHANGED else role
+        new_disabled = bool(row["disabled"]) if disabled is UNCHANGED else bool(disabled)
+        active_now = row["role"] == "admin" and not row["disabled"]
+        active_after = new_role == "admin" and not new_disabled
+        if active_now and not active_after and _would_remove_last_admin(conn, account_id):
             raise LastAdmin
-        conn.execute("UPDATE accounts SET role = ? WHERE id = ?", (role, account_id))
-        row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
-    return Account.from_row(row)
-
-
-def set_disabled(db: Database, account_id: int, disabled: bool) -> Account:
-    with db.transaction() as conn:
-        row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
-        if row is None:
-            raise AccountError("not_found", "no such account")
-        if disabled and row["role"] == "admin" and _would_remove_last_admin(conn, account_id):
-            raise LastAdmin
-        conn.execute("UPDATE accounts SET disabled = ? WHERE id = ?", (int(disabled), account_id))
-        if disabled:
+        conn.execute(
+            f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?", (*values, account_id)
+        )
+        if disabled is True:
             conn.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
         row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
     return Account.from_row(row)
 
 
-_UNCHANGED = object()
+def set_role(db: Database, account_id: int, role: str) -> Account:
+    return update(db, account_id, role=role)
+
+
+def set_disabled(db: Database, account_id: int, disabled: bool) -> Account:
+    return update(db, account_id, disabled=disabled)
 
 
 def set_resolution_settings(
     db: Database,
     account_id: int,
     *,
-    default_max_height: int | None | object = _UNCHANGED,
-    can_set_resolution: bool | object = _UNCHANGED,
+    default_max_height: int | None | object = UNCHANGED,
+    can_set_resolution: bool | object = UNCHANGED,
 ) -> Account:
-    """Change one or both resolution settings of an account (#65). `_UNCHANGED` leaves a setting
+    """Change one or both resolution settings of an account (#65). `UNCHANGED` leaves a setting
     alone; `default_max_height=None` clears the personal default."""
-    updates: list[str] = []
-    values: list[Any] = []
-    if default_max_height is not _UNCHANGED:
-        if default_max_height is not None and not resolution.valid(default_max_height):
-            raise AccountError("invalid", resolution.DETAIL)
-        updates.append("default_max_height = ?")
-        values.append(default_max_height)
-    if can_set_resolution is not _UNCHANGED:
-        if not isinstance(can_set_resolution, bool):
-            raise AccountError("invalid", "can_set_resolution must be true or false")
-        updates.append("can_set_resolution = ?")
-        values.append(int(can_set_resolution))
-    if not updates:
-        raise AccountError("invalid", "no resolution setting to change")
-    with db.transaction() as conn:
-        if conn.execute("SELECT 1 FROM accounts WHERE id = ?", (account_id,)).fetchone() is None:
-            raise AccountError("not_found", "no such account")
-        conn.execute(
-            f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?",
-            (*values, account_id),
-        )
-        row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
-    return Account.from_row(row)
+    return update(
+        db,
+        account_id,
+        default_max_height=default_max_height,
+        can_set_resolution=can_set_resolution,
+    )
 
 
 def set_default_max_height(db: Database, account_id: int, max_height: int | None) -> Account:
@@ -417,6 +448,24 @@ def followed_ids(db: Database, kind: str, account_id: int) -> set[int]:
         (account_id,),
     )
     return {r["subscription_id"] for r in rows}
+
+
+def follower_names_by_subscription(db: Database, kind: str) -> dict[int, list[str]]:
+    """The follower names of EVERY subscription of a kind, in one query (#76).
+
+    The list routes used to ask `followers` and `follower_names` once per row; this is the
+    same answer for the whole page.
+    """
+    table = FOLLOW_TABLES[kind]
+    rows = db.query(
+        f"SELECT f.subscription_id AS subscription_id, a.username AS name FROM {table} f "
+        "JOIN accounts a ON a.id = f.account_id "
+        "ORDER BY f.subscription_id, a.username COLLATE NOCASE"
+    )
+    names: dict[int, list[str]] = {}
+    for row in rows:
+        names.setdefault(row["subscription_id"], []).append(row["name"])
+    return names
 
 
 def follower_names(db: Database, kind: str, subscription_id: int) -> list[str]:

@@ -38,6 +38,7 @@ in a log.
 | `PROXY_QBT_PORT` | `8081` | yes | qBittorrent's Web UI through the proxy. |
 | `PROXY_USER` | `admin` | yes | Login name. |
 | `PROXY_PASSWORD_HASH` | `changeme` | yes, **secret** | bcrypt hash of the password. Do not edit by hand: `make proxy-password` writes both lines. Until then the proxy refuses everyone. [proxy.md](proxy.md) |
+| `TRUSTED_PROXY` | `proxy` | no | The peer whose `X-Forwarded-For` the app believes for its login brake: the compose service `proxy`, resolved on the compose network (a host name or IP address). **Empty = believe no header**: the brake then counts the peer's own address. Every container on the bridge is private, so a header from any of them is otherwise a free choice of key. [accounts.md](accounts.md) |
 
 ## VPN (gluetun)
 
