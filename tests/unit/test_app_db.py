@@ -372,6 +372,63 @@ def test_a_failing_migration_changes_nothing_and_is_not_recorded(tmp_path, folde
     assert migrate(conn, load_migrations(folder)) == ["0002_bad.sql"]
 
 
+def test_a_migration_may_rebuild_a_parent_table_without_cascading_into_children(tmp_path, folder):
+    """#68: with foreign keys on, DROP TABLE of a rebuilt parent would wipe its children."""
+    write(
+        folder,
+        "0001_a.sql",
+        "CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+        "CREATE TABLE children ("
+        " id INTEGER PRIMARY KEY,"
+        " parent_id INTEGER NOT NULL REFERENCES parents(id) ON DELETE CASCADE);\n"
+        "INSERT INTO parents (id, name) VALUES (1, 'one'), (2, 'two');\n"
+        "INSERT INTO children (id, parent_id) VALUES (10, 1), (11, 1), (12, 2);\n",
+    )
+    conn = fresh(tmp_path)
+    migrate(conn, load_migrations(folder))
+    write(
+        folder,
+        "0002_rebuild.sql",
+        "CREATE TABLE parents_new (id INTEGER PRIMARY KEY, name TEXT NOT NULL, extra TEXT);\n"
+        "INSERT INTO parents_new (id, name) SELECT id, name FROM parents;\n"
+        "DROP TABLE parents;\n"
+        "ALTER TABLE parents_new RENAME TO parents;\n",
+    )
+    assert migrate(conn, load_migrations(folder)) == ["0002_rebuild.sql"]
+    assert [tuple(r) for r in conn.execute("SELECT id, parent_id FROM children ORDER BY id")] == [
+        (10, 1),
+        (11, 1),
+        (12, 2),
+    ]
+    assert conn.execute("SELECT name, extra FROM parents WHERE id = 2").fetchone()[:] == (
+        "two",
+        None,
+    )
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1, "the pragma must be back on"
+
+
+def test_a_migration_that_would_leave_broken_foreign_keys_is_rolled_back(tmp_path, folder):
+    write(
+        folder,
+        "0001_a.sql",
+        "CREATE TABLE parents (id INTEGER PRIMARY KEY);\n"
+        "CREATE TABLE children ("
+        " id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parents(id));\n"
+        "INSERT INTO parents (id) VALUES (1);\n"
+        "INSERT INTO children (id, parent_id) VALUES (10, 1);\n",
+    )
+    conn = fresh(tmp_path)
+    migrate(conn, load_migrations(folder))
+    write(folder, "0002_orphans.sql", "DELETE FROM parents;\n")
+    with pytest.raises(MigrationError, match="broken foreign keys"):
+        migrate(conn, load_migrations(folder))
+    assert conn.execute("SELECT COUNT(*) FROM parents").fetchone()[0] == 1, "rolled back"
+    assert not conn.in_transaction
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1, "the pragma must be back on"
+    assert [r[0] for r in conn.execute("SELECT name FROM schema_migrations")] == ["0001_a.sql"]
+
+
 def test_an_edited_migration_is_refused(tmp_path, folder):
     write(folder, "0001_a.sql", "CREATE TABLE a (x);")
     conn = fresh(tmp_path)
@@ -461,6 +518,79 @@ def test_a_transaction_commits_on_success_and_rolls_back_on_error(database):
         fail_inside_a_transaction()
     assert [r["external_id"] for r in database.query("SELECT external_id FROM jobs")] == ["kept"]
     assert not database._conn.in_transaction
+
+
+class CommitFails:
+    """A connection proxy whose COMMIT raises, optionally after SQLite rolled back itself."""
+
+    def __init__(self, conn: sqlite3.Connection, error: sqlite3.Error, *, rolled_back: bool):
+        self._conn = conn
+        self._error = error
+        self._rolled_back = rolled_back
+
+    @property
+    def in_transaction(self) -> bool:
+        return self._conn.in_transaction
+
+    def execute(self, sql, params=()):
+        if sql.strip().upper() == "COMMIT":
+            if self._rolled_back:
+                self._conn.execute("ROLLBACK")
+            raise self._error
+        return self._conn.execute(sql, params)
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+@pytest.mark.parametrize("sqlite_rolled_back", [False, True])
+def test_a_failed_commit_rolls_back_and_the_connection_stays_usable(database, sqlite_rolled_back):
+    """#68: a COMMIT error must not leave the shared connection inside a transaction."""
+    real = database._conn
+    error = sqlite3.OperationalError("database or disk is full")
+    database._conn = CommitFails(real, error, rolled_back=sqlite_rolled_back)
+    with pytest.raises(sqlite3.OperationalError) as raised, database.transaction() as conn:
+        insert_job(conn, external_id="not-committed")
+    assert raised.value is error, "a ROLLBACK must not hide the error COMMIT raised"
+    assert not real.in_transaction
+    database._conn = real
+    with database.transaction() as conn:
+        insert_job(conn, external_id="after")
+    assert [r["external_id"] for r in database.query("SELECT external_id FROM jobs")] == ["after"]
+
+
+def test_an_error_after_sqlite_rolled_back_by_itself_reaches_the_caller(database):
+    """SQLITE_FULL-style: SQLite ends the transaction, then the statement raises."""
+
+    class RollsBackByItself:
+        def __init__(self, conn):
+            self._conn = conn
+
+        @property
+        def in_transaction(self):
+            return self._conn.in_transaction
+
+        def execute(self, sql, params=()):
+            if sql.lstrip().upper().startswith("INSERT INTO JOBS"):
+                self._conn.execute("ROLLBACK")
+                raise sqlite3.OperationalError("database or disk is full")
+            return self._conn.execute(sql, params)
+
+        def close(self):
+            self._conn.close()
+
+    real = database._conn
+    database._conn = RollsBackByItself(real)
+    with (
+        pytest.raises(sqlite3.OperationalError, match="disk is full"),
+        database.transaction() as conn,
+    ):
+        insert_job(conn, external_id="lost")
+    assert not real.in_transaction
+    database._conn = real
+    with database.transaction() as conn:
+        insert_job(conn, external_id="after")
+    assert [r["external_id"] for r in database.query("SELECT external_id FROM jobs")] == ["after"]
 
 
 def test_two_writers_wait_for_each_other_instead_of_failing(database):
