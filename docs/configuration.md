@@ -23,7 +23,7 @@ in a log.
 
 | Variable | Default | Required | Meaning |
 |---|---|---|---|
-| `DATA_ROOT` | `/data` | yes | Mount point of the media volume. `downloads/` and all library folders must be on **one filesystem** so hardlinks work ([host-setup.md](host-setup.md)). |
+| `DATA_ROOT` | `/data` | yes | **Host** path of the media volume. `downloads/` and all library folders must be on **one filesystem** so hardlinks work ([host-setup.md](host-setup.md)). Compose mounts it at `/data` and never passes this value to the app: inside the container the app reads its own `DATA_ROOT` (default `/data`). Do not give the app service `env_file: .env`, or it would look for the host path (#73). |
 | `MEDIA_DIR_MOVIES`, `MEDIA_DIR_SERIES`, `MEDIA_DIR_AUDIOBOOKS`, `MEDIA_DIR_MUSIC`, `MEDIA_DIR_PODCASTS`, `MEDIA_DIR_YOUTUBE` | `Filme`, `Serien`, `Hörbücher`, `Musik`, `Podcasts`, `Youtube` | yes | Library folder per type, relative to `DATA_ROOT`: the folders Jellyfin's libraries point at. Must be distinct and match the folders on disk exactly (umlauts included). Downloads go to `downloads/<type>` first and are hardlinked here when finished. |
 
 ## Network and the login
@@ -83,7 +83,8 @@ ExpressVPN has no port forwarding: do not add `VPN_PORT_FORWARDING`.
 | Variable | Default | Required | Meaning |
 |---|---|---|---|
 | `YTDLP_PROXY` | `http://gluetun:8888` | no | Where yt-dlp and the channel feeds go out: gluetun's HTTP proxy, i.e. through the VPN. **Set but empty** = ask YouTube directly from the home line (the owner's decision; unset = the default). |
-| `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels (144 to 4320); `0` = no limit. A disk-space knob. |
+| `YOUTUBE_MAX_HEIGHT` | `1080` | no | Tallest video in pixels: `0` (best, no cap) or one of `2160`, `1440`, `1080`, `720`, `480`, `360` — the same fixed list the download form, the account settings and the database use. Any other value stops the app at start with a clear error. A disk-space knob. |
+| `YOUTUBE_PROBE_TIMEOUT` | `25` | no | Seconds a YouTube probe (the metadata check before a download) may take (3 to 120). |
 | `SUBSCRIPTION_POLL_MINUTES` | `60` | no | How often each subscribed channel is checked (15 to 1440; each channel gets its own slightly different interval); `0` = never poll (the "Check now" button still works). |
 
 ## Podcasts ([podcasts.md](podcasts.md))
@@ -117,14 +118,13 @@ defaults; they matter when running the code outside the stack (tests, developmen
 
 | Variable | Value in the stack | Meaning |
 |---|---|---|
-| `APP_HOST`, `APP_PORT` | `0.0.0.0`, `8000` | Where the app listens inside its container (never published). |
+| `APP_HOST`, `APP_PORT` | `0.0.0.0`, `8000` | Dev/test only: compose never passes them. The image (`EXPOSE 8000`, health check), the Caddyfile and the published ports assume 8000. |
 | `CONFIG_DIR` | `/config` | The app's folder (`config/app` on the host): the database. |
 | `QBIT_URL` | `http://gluetun:8080` | qBittorrent as seen from the bridge network (it lives in gluetun's namespace). |
 | `WATCHDOG_STATUS_URL` | `http://watchdog:8090` | The watchdog's status page, read by the app for the VPN bar. |
 | `WATCHDOG_STATUS_PORT` | `8090` | Where the watchdog serves it. |
 | `GLUETUN_CONTROL_URL` | `http://gluetun:8000` | gluetun's control server, read by the watchdog. |
 | `WATCHDOG_HEARTBEAT_FILE` | `/tmp/watchdog.alive` | The file its health check reads. |
-| `YOUTUBE_PROBE_TIMEOUT` | `25` | Seconds a YouTube probe may take (3 to 120). Not in the compose file: the default is used. |
 
 ## Variables of the test and ops scripts
 
