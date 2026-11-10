@@ -139,6 +139,7 @@ def test_the_app_exposes_only_the_known_routes(tmp_path):
         "/api/auth/me",
         "/api/auth/password",
         "/api/me/settings",  # the own default resolution (#65)
+        "/api/settings/defaults",  # the server-wide defaults (#79)
         "/api/accounts",
         "/api/accounts/{account_id}",
         "/api/accounts/{account_id}/password",

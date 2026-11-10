@@ -32,7 +32,16 @@ POST /api/podcasts         {"feed": "...", "name": "<folder, optional>", "backfi
     Subscribes (201, or 200 `duplicate: true`). `backfill` (0-20): how many of the feed's existing
     episodes the first poll also takes; 0 = only episodes published after subscribing.
 GET    /api/podcasts            {"podcasts": [{id, kind: "podcast", feed_url, title, enabled,
-                                 backfill, created_at, last_checked, last_error}, ...]}
+                                 backfill, created_at, last_checked, last_error,
+                                 poll_minutes, poll_at}, ...]}
+PATCH  /api/podcasts/{id}       {"poll_minutes": 240|0|null, "poll_at": "06:00"|""|null}  (#79)
+    How often the feed is looked at: 0 = paused (only "check now" looks at it), otherwise 30..1440
+    minutes (podcast hosts get a longer minimum than channels); `poll_at` is an optional start
+    time of day ("HH:MM", server time zone) that anchors the interval: every local day restarts
+    at the start time and steps by the interval until the next start time ("every 5 h from 06:00"
+    is 06:00, 11:00, 16:00, 21:00, 02:00 and then 06:00 again). null = the server default for
+    podcasts (`GET /api/settings/defaults`), "" = no start time. Followers (and admins) with the
+    right to set resolutions (#65) may change it. 200 with the podcast; 400 bad value; 403; 404.
 DELETE /api/podcasts/{id}       204; episodes already downloaded stay where they are.
 POST   /api/podcasts/{id}/poll  "Check now": 200 with the subscription and `queued`.
 
@@ -54,7 +63,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from pydantic_core import PydanticCustomError
 
-from . import accounts, jobs, podcast_backlog, podcast_subscriptions
+from . import accounts, jobs, podcast_backlog, podcast_subscriptions, poll_schedule, resolution
 from .apiutil import followed_view, may_use, problem, visible_to
 from .metadata import Name, sanitize_name
 from .podcast_jobs import JOB_TYPE, PodcastWorker, episode_metadata
@@ -365,6 +374,47 @@ async def list_podcasts(request: Request) -> JSONResponse:
     )
 
 
+async def update_podcast(subscription_id: int, request: Request) -> JSONResponse:
+    """PATCH /api/podcasts/{id} {"poll_minutes": 240|0|null, "poll_at": "06:00"|""|null} (#79):
+    how often the feed is looked at (0 = paused, else 30..1440 minutes) and the optional start
+    time of day that anchors the interval; null = the server default for podcasts
+    (`GET /api/settings/defaults`). The rules are those of the channel poll (see
+    `PATCH /api/subscriptions/{id}`). The caller must follow the podcast (or be an admin) and
+    may set subscription settings (the resolution right; an admin always may)."""
+    db = request.app.state.db
+    if db is None:
+        return problem(503, "The database is not available; see /health.")
+    account = request.state.account
+    if not await may_use(db, "podcast", subscription_id, account):
+        return problem(404, "no such podcast")
+    try:
+        data = await request.json()
+    except ValueError:
+        return problem(422, "the request is not JSON")
+    if (
+        not isinstance(data, dict)
+        or not data
+        or not set(data) <= set(podcast_subscriptions.SETTINGS_COLUMNS)
+    ):
+        return problem(422, "send poll_minutes and/or poll_at")
+    try:
+        changes = poll_schedule.check_poll_fields("podcast", data)
+    except ValueError as error:
+        return problem(400, str(error))
+    if not resolution.may_choose(account.is_admin, account.can_set_resolution):
+        return problem(403, resolution.SETTINGS_NOT_ALLOWED)
+    fresh = await asyncio.to_thread(
+        podcast_subscriptions.update_settings, db, subscription_id, changes
+    )
+    if fresh is None:
+        return problem(404, "no such podcast")
+    logger.info(
+        "podcast settings changed",
+        extra={"podcast_id": subscription_id, "fields": sorted(changes)},
+    )
+    return JSONResponse(fresh.as_dict())
+
+
 async def unsubscribe(subscription_id: int, request: Request, everyone: int = 0) -> Response:
     """Stop following; the subscription ends when nobody follows it. Admins: `?everyone=1`."""
     db = request.app.state.db
@@ -413,5 +463,6 @@ def register(app: FastAPI) -> None:
     app.add_api_route("/api/podcasts/backlog/{backlog_id}", cancel_backlog, methods=["DELETE"])
     app.add_api_route("/api/podcasts", subscribe, methods=["POST"])
     app.add_api_route("/api/podcasts", list_podcasts, methods=["GET"])
+    app.add_api_route("/api/podcasts/{subscription_id}", update_podcast, methods=["PATCH"])
     app.add_api_route("/api/podcasts/{subscription_id}", unsubscribe, methods=["DELETE"])
     app.add_api_route("/api/podcasts/{subscription_id}/poll", poll_now, methods=["POST"])

@@ -389,8 +389,8 @@ def test_a_bad_poll_interval_is_refused_with_the_name_of_the_setting(value):
         Settings.from_env({**MEDIA_ENV, "SUBSCRIPTION_POLL_MINUTES": value})
 
 
-@pytest.mark.parametrize(("minutes", "scheduled"), [("60", True), ("0", False)])
-def test_the_app_schedules_the_poller_unless_it_is_switched_off(tmp_path, minutes, scheduled):
+@pytest.mark.parametrize("minutes", ["60", "0"])
+def test_the_app_always_schedules_the_poller_and_a_zero_default_pauses_it(tmp_path, minutes):
     from starlette.testclient import TestClient
 
     from ytp.config import Settings
@@ -406,5 +406,7 @@ def test_the_app_schedules_the_poller_unless_it_is_switched_off(tmp_path, minute
     }
     app = create_app(Settings.from_env(env))
     with TestClient(app):
-        assert ("subscription-poll" in app.state.scheduler.job_ids()) is scheduled
+        # which channel is due is decided per subscription (#79): 0 pauses, an admin can change it
+        assert "subscription-poll" in app.state.scheduler.job_ids()
         assert app.state.poller is not None, "it also serves the check-now button"
+        assert app.state.defaults.schedule("channel").minutes == int(minutes)
