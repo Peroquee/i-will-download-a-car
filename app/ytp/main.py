@@ -42,6 +42,7 @@ from .reconciler import RECONCILE_JOB_ID, RECONCILE_SECONDS, Reconciler
 from .safefetch import SafeFetcher
 from .scheduler import AppScheduler
 from .server_defaults import ServerDefaults
+from .storage import StorageSampler
 from .subscription_poller import POLL_JOB_ID, POLL_JOB_SECONDS, SubscriptionPoller
 from .web import SecurityMiddleware, register_ui
 from .youtube import YoutubeProbe
@@ -92,6 +93,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Without qBittorrent no magnet can transfer. An old hold state from before must not
         # block the normal YouTube/podcast queues (#70); no priority manager will clear it.
         jobs.set_magnet_transferring(app.state.db, False)
+    # The dashboard's storage sizes (#82): a background walk after downloads finish (debounced)
+    # and once at start when nothing is cached yet. Never while the dashboard polls.
+    app.state.storage = None
+    if app.state.db is not None:
+        app.state.storage = StorageSampler(app.state.db, settings)
+        app.state.storage.start()
+        app.state.storage.ensure_cached()
     # YouTube downloads (#18): the database is the queue, one worker thread runs it.
     app.state.youtube_worker = None
     app.state.youtube_worker_thread = None
@@ -109,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cookie_file=youtube_cookies.cookie_path(settings),
             ),
             app.state.jellyfin,
+            on_done=app.state.storage.request,
         )
         app.state.youtube_worker_thread = threading.Thread(
             target=app.state.youtube_worker.run, args=(worker_stop,), name="youtube", daemon=True
@@ -123,7 +132,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.podcast_worker_thread = None
     if app.state.db is not None:
         app.state.podcast_worker = PodcastWorker(
-            app.state.db, settings, app.state.podcast_feeds, app.state.jellyfin
+            app.state.db,
+            settings,
+            app.state.podcast_feeds,
+            app.state.jellyfin,
+            on_done=app.state.storage.request,
         )
         app.state.podcast_worker_thread = threading.Thread(
             target=app.state.podcast_worker.run, args=(worker_stop,), name="podcasts", daemon=True
@@ -146,6 +159,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 app.state.db,
                 app.state.qbit,
                 app.state.organizer,
+                on_organized=app.state.storage.request,
                 stall_seconds=settings.magnet_stall_days * 86400,
                 downloads_dir=settings.downloads_dir,
             )
@@ -232,6 +246,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.podcast_poller.stop.set()
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown()
+        if app.state.storage is not None:
+            app.state.storage.stop()
         if app.state.db is not None:
             app.state.db.close()
         logger.info("stopped")
@@ -327,6 +343,7 @@ def create_app(
     app.state.youtube_worker_thread = None
     app.state.podcast_worker_thread = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
+    app.state.storage = None  # the dashboard's cached category sizes (#82)
     app.state.limiter = LoginLimiter()
     app.state.test_account = test_account  # tests only (#76)
     app.state.trusted_proxies = auth.TrustedProxies(resolved.trusted_proxy)

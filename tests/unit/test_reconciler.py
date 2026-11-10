@@ -144,6 +144,16 @@ def test_a_note_from_the_organizer_is_stored_on_the_done_job(fake, database):
     assert stored.note == "3 of 10 files skipped: S03E08.mkv: no episode number in the name"
 
 
+def test_organizing_a_torrent_asks_for_new_storage_sizes(fake, database):
+    """The dashboard's storage bar is recomputed after every organized torrent (#82)."""
+    job = add_job(database, H1, "downloading")
+    fake.torrents = [torrent(H1, **DONE)]
+    calls = []
+    reconciler, _ = make(fake, database, on_organized=lambda: calls.append(1))
+    assert reconciler.run_once().done == [job.id]
+    assert calls == [1]
+
+
 def test_a_torrent_that_finished_while_the_app_was_down_is_organized_at_first_sight(fake, database):
     job = add_job(database, H1, "queued")  # never saw it downloading
     fake.torrents = [torrent(H1, **DONE)]
