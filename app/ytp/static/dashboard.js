@@ -468,7 +468,6 @@
         $("dash-recent-empty").hidden = true;
         renderRecentTools();
       }
-      focusVpn();
     }
 
     function alertItem(alert, target) {
@@ -580,16 +579,6 @@
       setCurrent($("nav-accounts"), view === "accounts");
     }
 
-    /* The VPN indicator links to /dashboard#vpn: bring that part into view and frame it once. */
-    var focusedVpn = false;
-    function focusVpn() {
-      if (view !== "dashboard" || root.location.hash !== "#vpn" || focusedVpn) return;
-      focusedVpn = true;
-      var section = $("dash-vpn");
-      section.classList.add("alert-target");
-      section.scrollIntoView({ block: "start" });
-    }
-
     function applyView() {
       document.querySelectorAll("[data-view]").forEach(function (node) {
         node.hidden = node.dataset.view !== view;
@@ -624,16 +613,12 @@
         }
         renderNav();
         applyDashTab();
-        focusedVpn = false;
-        $("dash-vpn").classList.remove("alert-target");
-        focusVpn();
         renderAlertLog();
       });
       applyView();
       applyDashTab();
       refreshAlerts();
       if (view !== "dashboard") return;
-      focusVpn();
       refreshDashboard();
       root.setInterval(function () {
         if (document.visibilityState !== "hidden") refreshDashboard();

@@ -409,7 +409,9 @@ def test_without_a_watchdog_configured_it_stays_unknown(client):
 # --- the pieces in a fake DOM (needs node) ---------------------------------------------------
 
 
-def smoke(path: str, hash_: str, dashboard: dict | None = None, vpn: dict | None = None) -> dict:
+def smoke(
+    path: str, hash_: str, dashboard: dict | None = None, vpn: dict | None = None, polls: int = 0
+) -> dict:
     ids = sorted(set(re.findall(r'\bid="([\w-]+)"', HTML)) - {"i18n"})
     scenario = {
         "ids": ids,
@@ -437,6 +439,7 @@ def smoke(path: str, hash_: str, dashboard: dict | None = None, vpn: dict | None
             "/api/jobs": {"jobs": [], "counts": {}},
         },
         "click": None,
+        "polls": polls,
     }
     result = subprocess.run(
         [
@@ -457,21 +460,15 @@ def smoke(path: str, hash_: str, dashboard: dict | None = None, vpn: dict | None
 
 
 @needs_node
-def test_opening_dashboard_vpn_brings_the_vpn_part_into_view():
+def test_opening_the_dashboard_vpn_tab_shows_it_without_a_frame_or_a_scroll():
     out = smoke("/dashboard", "#vpn")
     section = out["nodes"]["dash-vpn"]
-    assert section["scrolled"] is True
-    assert "alert-target" in section["cls"]
+    assert out["scrolls"] == [], "a tab is not a place to scroll to"
+    assert "alert-target" not in section["cls"], "no gold frame around the VPN part"
+    assert out["nodes"]["dash-vpn-view"]["hidden"] is False
     assert out["nodes"]["dash-vpn-now"]["text"], "the current VPN state is shown"
     assert out["nodes"]["dash-tab-vpn"]["attrs"].get("aria-current") == "page"
     assert out["nodes"]["nav-dashboard"]["attrs"].get("aria-current") == "page"
-
-
-@needs_node
-def test_the_dashboard_without_the_hash_does_not_scroll_to_the_vpn_part():
-    out = smoke("/dashboard", "")
-    assert out["nodes"]["dash-vpn"]["scrolled"] is False
-    assert "alert-target" not in out["nodes"]["dash-vpn"]["cls"]
 
 
 @needs_node
