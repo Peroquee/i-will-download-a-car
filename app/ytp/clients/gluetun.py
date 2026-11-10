@@ -1,15 +1,20 @@
-"""Gluetun's HTTP control server, read-only (issue #21).
+"""Gluetun's HTTP control server (issues #21, #81).
 
-Only one question is asked of it: `GET /v1/vpn/status`, which answers `{"status": "running"}`
-while the VPN is up (`stopped`, `crashed` and the like otherwise). Gluetun keeps every route of
-the control server private, so the watchdog gets its own API key with a role that may do
-exactly that one GET (`scripts/watchdog/setup_key.py` writes `config/gluetun/auth/config.toml`).
-The key goes in the `X-API-Key` header and is never logged.
+The watchdog asks it three things: `GET /v1/vpn/status`, which answers `{"status": "running"}`
+while gluetun's VPN *process loop* runs (`stopped`, `crashed` and the like otherwise; "running"
+does NOT mean the tunnel is connected: it also says running while OpenVPN fails its handshake
+again and again, #81), `GET /v1/publicip/ip` (empty while there is no tunnel), and, only when
+the owner allows the watchdog to restart a stuck VPN, `PUT /v1/vpn/status`. Gluetun keeps every
+route of the control server private, so the watchdog gets its own API key with a role for exactly
+these routes (`scripts/watchdog/setup_key.py` writes `config/gluetun/auth/config.toml`). The key
+goes in the `X-API-Key` header and is never logged.
 
 Failures are told apart on purpose, because the watchdog acts differently on them:
 
 * `GluetunUnreachable`: refused, timeout, DNS, a 5xx, a garbled answer. Gluetun is down or busy:
   that counts as a VPN failure.
+* `GluetunNoAddress` (a kind of `GluetunUnreachable`): gluetun answered, but has no public
+  address, i.e. no tunnel (#81). The watchdog tells this apart from "cannot ask".
 * `GluetunAuthError`: 401/403/404. The watchdog is not set up right (no config file, wrong key,
   an older gluetun without the route). That is a configuration problem to shout about, not
   evidence that the VPN is down.
@@ -31,6 +36,10 @@ class GluetunUnreachable(GluetunError):
     """Cannot reach the control server, or it answered nonsense or a server error."""
 
 
+class GluetunNoAddress(GluetunUnreachable):
+    """Gluetun answered but has no public address: the tunnel is not connected."""
+
+
 class GluetunAuthError(GluetunError):
     """The control server refused the key or does not have the route: a setup problem."""
 
@@ -50,35 +59,47 @@ class GluetunControl:
     def __repr__(self) -> str:
         return f"GluetunControl({self.base_url!r})"
 
-    def _get_json(self, path: str) -> object:
-        """GET a route of the control server with the key; typed errors as described above."""
+    def _request(
+        self, method: str, path: str, payload: object | None = None, *, json_answer: bool = True
+    ) -> object:
+        """Call a route of the control server with the key; typed errors as described above."""
         conn_class = (
             http.client.HTTPSConnection if self._scheme == "https" else http.client.HTTPConnection
         )
         conn = conn_class(self._host, self._port, timeout=self._timeout)
+        headers = {"X-API-Key": self._api_key}
+        body = None
+        if payload is not None:
+            body = json.dumps(payload)
+            headers["Content-Type"] = "application/json"
         try:
-            conn.request("GET", path, headers={"X-API-Key": self._api_key})
+            conn.request(method, path, body=body, headers=headers)
             response = conn.getresponse()
             status = response.status
-            body = response.read().decode("utf-8", errors="replace")
+            text = response.read().decode("utf-8", errors="replace")
         except (OSError, http.client.HTTPException) as exc:
             raise GluetunUnreachable(f"cannot reach gluetun at {self.base_url}: {exc}") from exc
         finally:
             conn.close()
         if status in (401, 403, 404):
             raise GluetunAuthError(
-                f"gluetun's control server answered {status} for {path}: the watchdog key or "
-                "config/gluetun/auth/config.toml is missing, wrong or out of date "
+                f"gluetun's control server answered {status} for {method} {path}: the watchdog "
+                "key or config/gluetun/auth/config.toml is missing, wrong or out of date "
                 "(make watchdog-key, then recreate gluetun)"
             )
         if status != 200:
             raise GluetunUnreachable(f"gluetun's control server answered {status}")
+        if not json_answer:
+            return None
         try:
-            return json.loads(body)
+            return json.loads(text)
         except ValueError as exc:
             raise GluetunUnreachable(
                 "gluetun's control server returned an unreadable answer"
             ) from exc
+
+    def _get_json(self, path: str) -> object:
+        return self._request("GET", path)
 
     def vpn_status(self) -> str:
         """The VPN's status word ("running", "stopped", ...)."""
@@ -88,12 +109,21 @@ class GluetunControl:
             raise GluetunUnreachable("gluetun's control server returned an unreadable status")
         return value.lower()
 
+    def set_vpn_status(self, status: str) -> None:
+        """`PUT /v1/vpn/status {"status": "stopped" | "running"}`: stop or start the VPN.
+
+        Needs the extra route in the watchdog's role (setup_key.py); without it this raises
+        `GluetunAuthError`. Used only for the watchdog's restart of a stuck VPN (#81)."""
+        if status not in {"running", "stopped"}:
+            raise ValueError("status must be 'running' or 'stopped'")
+        self._request("PUT", "/v1/vpn/status", {"status": status}, json_answer=False)
+
     def public_ip(self) -> PublicIP:
         """The address gluetun sees as its own, and where it is (`GET /v1/publicip/ip`)."""
         data = self._get_json("/v1/publicip/ip")
         ip = data.get("public_ip") if isinstance(data, dict) else None
         if not isinstance(ip, str) or not ip:
-            raise GluetunUnreachable("gluetun has no public address (the tunnel may be restarting)")
+            raise GluetunNoAddress("gluetun has no public address (the tunnel may be restarting)")
         assert isinstance(data, dict)
         return PublicIP(
             ip=ip,

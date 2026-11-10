@@ -609,9 +609,8 @@
     var info = L.vpnView(vpnStale ? null : vpnData);
     var label = vpnStale ? t("vpn.stale") : t("vpn." + info.view);
     var parts = [];
-    if (!vpnStale && ["down", "mismatch", "blind", "starting", "unknown"].indexOf(info.view) >= 0) {
-      parts.push(t("vpn.d." + info.view));
-    }
+    var detailKey = vpnStale ? null : L.vpnDetailKey(info);
+    if (detailKey) parts.push(t(detailKey));
     if (!vpnStale && info.paused) parts.push(t("vpn.paused"));
     if (!vpnStale && info.since && info.view !== "unknown") {
       var age = L.age(info.since, Date.now());

@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help venv lint test test-unit test-integration test-smoke test-system test-regression \
-        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories admin-password proxy-password proxy-check watchdog-key vpn-abuse-test backup backup-list update-check recovery-prepare recovery-verify install update test-ui
+        smoke-host host-check snapshot clean vpn-config up killswitch-test layout categories admin-password proxy-password proxy-check watchdog-key vpn-abuse-test tunnel-test tunnel-restart-test backup backup-list update-check recovery-prepare recovery-verify install update test-ui
 
 help:
 	@echo "venv              create .venv with test and lint tools"
@@ -23,6 +23,8 @@ help:
 	@echo "proxy-check     from a LAN machine: proxy login on the qBittorrent port, app answers its own 401, backend ports closed"
 	@echo "watchdog-key    create the VPN watchdog's read-only gluetun key (.env and gluetun's auth file)"
 	@echo "vpn-abuse-test  on the VM: drop the VPN CYCLES times (default 5), check the watchdog, leaks and recovery"
+	@echo "tunnel-test    on the VM: cut the tunnel while gluetun's process keeps running (it still says 'running'): the watchdog must go down, name the cause, pause, and recover (#81)"
+	@echo "tunnel-restart-test  as tunnel-test, and wait until the watchdog restarts the VPN by itself (needs WATCHDOG_RESTART_AFTER=120 in .env)"
 	@echo "backup           back up the database, config/ and .env to <DATA_ROOT>/.youtube-premium-backups (mode 600; DRY=1 to only show)"
 	@echo "backup-list      list the backups"
 	@echo "update-check     is the pinned yt-dlp the newest release? (exit 10 = newer exists); lists the pinned image tags"
@@ -94,6 +96,13 @@ watchdog-key:
 CYCLES ?= 5
 vpn-abuse-test:
 	scripts/vpn/vpn-abuse-test.sh --cycles $(CYCLES)
+
+# The scenario of the incident of 2026-11-10 (#81): the VPN process runs, the tunnel does not.
+tunnel-test:
+	scripts/vpn/vpn-abuse-test.sh --cycles 1 --modes tunnel
+
+tunnel-restart-test:
+	scripts/vpn/vpn-abuse-test.sh --cycles 1 --modes tunnel-restart
 
 DRY ?=
 backup:

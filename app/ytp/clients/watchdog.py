@@ -46,5 +46,6 @@ class WatchdogStatusClient:
         keys = (
             "state", "since", "reason", "paused", "last_poll", "auto_resume",
             "egress", "egress_checked", "egress_country",
+            "cause", "tunnel", "tunnel_since", "probe", "restart", "restarts",  # #81
         )  # fmt: skip
         return {key: data[key] for key in keys if key in data}

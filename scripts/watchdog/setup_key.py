@@ -2,8 +2,11 @@
 """setup_key.py: give the VPN watchdog its own read-only key for gluetun's control server (#21).
 
 Gluetun keeps every route of its control server private. The watchdog only needs
-`GET /v1/vpn/status` and, for the egress check, `GET /v1/publicip/ip`, so this script creates a role
-that may do exactly those two reads and nothing else (not stop the VPN, not change the server):
+`GET /v1/vpn/status`, `GET /v1/publicip/ip` (the egress check and the tunnel check, #81) and, so
+that it can restart a VPN whose tunnel stays dead for a long time (#81, WATCHDOG_RESTART_AFTER),
+`PUT /v1/vpn/status`. This script creates a role for exactly those three routes and nothing else
+(no other setting of the server can be changed; the PUT can only stop or start the VPN, and a
+stopped VPN blocks all traffic, so it can never open a leak):
 
 * writes `config/gluetun/auth/config.toml` (mode 600), which gluetun reads at start as
   `/gluetun/auth/config.toml` (the folder is already mounted at /gluetun);
@@ -35,10 +38,11 @@ PLACEHOLDER = "changeme"
 KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{20,}")
 
 TOML = """# Written by scripts/watchdog/setup_key.py: do not edit, do not commit.
-# One role for the VPN watchdog, allowed to read the VPN status and the public address only.
+# One role for the VPN watchdog: read the VPN status and the public address, and stop/start the VPN
+# (only used to restart a VPN whose tunnel has stayed dead for a long time).
 [[roles]]
 name = "watchdog"
-routes = ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+routes = ["GET /v1/vpn/status", "GET /v1/publicip/ip", "PUT /v1/vpn/status"]
 auth = "apikey"
 apikey = "{key}"
 """

@@ -48,10 +48,16 @@ def test_creates_a_key_in_both_places_and_they_match(files):
 
 
 @pytest.mark.security
-def test_the_role_may_read_the_vpn_status_and_the_public_address_and_nothing_else(files):
+def test_the_role_has_exactly_the_three_routes_it_needs_and_nothing_else(files):
+    """Status and public address are reads; the PUT only stops or starts the VPN (#81 restart)."""
     run(files)
     (role,) = tomllib.loads(files[1].read_text())["roles"]
-    assert role["routes"] == ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+    assert role["routes"] == [
+        "GET /v1/vpn/status",
+        "GET /v1/publicip/ip",
+        "PUT /v1/vpn/status",
+    ]
+    assert not [r for r in role["routes"] if "settings" in r or "dns" in r or "updater" in r]
 
 
 def test_modes_the_env_keeps_and_the_auth_file_is_private(files):
@@ -136,5 +142,9 @@ def test_an_auth_file_from_an_older_version_gains_the_new_route_on_rerun(files):
     )
     run(files)
     role = tomllib.loads(auth.read_text())["roles"][0]
-    assert role["routes"] == ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+    assert role["routes"] == [
+        "GET /v1/vpn/status",
+        "GET /v1/publicip/ip",
+        "PUT /v1/vpn/status",
+    ]
     assert role["apikey"] == key == key_in_env(env)

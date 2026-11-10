@@ -7,18 +7,28 @@ whatever the app is doing. It keeps working when the app is stuck, because it sh
 with it but the image.
 
 ```
-watchdog ──every second──► gluetun:8000  GET /v1/vpn/status   (read-only key)
+watchdog ──every second──► gluetun:8000  GET /v1/vpn/status, GET /v1/publicip/ip   (key)
+   │      every 10 s ────► gluetun:8888  HTTP proxy: CONNECT to a public address (the tunnel probe)
    │   3 failures in a row
    └────────────────────► gluetun:8080  qBittorrent API: pause all
 ```
+
+> **"Running" is not "connected" (#81).** gluetun's `/v1/vpn/status` answers `running` whenever
+> its OpenVPN *process loop* runs, also while OpenVPN fails its TLS handshake again and again. On
+> 2026-11-10 the tunnel was dead for about three hours (gluetun's kill switch held, nothing
+> leaked) and the watchdog showed the VPN as up, sent no alert and paused nothing. Since then
+> "up" needs evidence that the tunnel is connected: see [Tunnel evidence](#tunnel-evidence-and-the-restart-issue-81).
 
 ## Set up (once, on the VM)
 
 1. `QBIT_USER` / `QBIT_PASSWORD` in `.env` must be set (the same login the app uses).
 2. `make watchdog-key`: creates a random key, writes it to `.env` as `GLUETUN_CONTROL_APIKEY`
-   and writes `config/gluetun/auth/config.toml`, a gluetun role that may do **exactly one thing**,
-   `GET /v1/vpn/status` (it cannot stop the VPN or change anything). Mode 600, never in Git, never
-   printed. Re-running keeps the key; `--rotate` makes a new one.
+   and writes `config/gluetun/auth/config.toml`, a gluetun role with **exactly three routes**:
+   `GET /v1/vpn/status`, `GET /v1/publicip/ip` and `PUT /v1/vpn/status` (the last one only to
+   restart a stuck VPN, see below: it can stop or start the VPN and nothing else, and a stopped
+   VPN blocks all traffic). Mode 600, never in Git, never printed. Re-running keeps the key, adds
+   routes a file written by an older version lacks, and `--rotate` makes a new key. After an
+   update of a running install: `make watchdog-key`, then the `--force-recreate` below.
 3. `docker compose up -d --force-recreate gluetun watchdog` (gluetun reads its auth file only at
    start; `up -d` builds the watchdog from the app image).
 4. `docker compose ps`: the watchdog must be `healthy`. If it says `unhealthy`, look at
@@ -31,7 +41,8 @@ published, and only containers on the stack's bridge network can reach it.
 
 | Situation | What it does |
 |---|---|
-| status `running` | nothing (it notes every 30 s which torrents are running) |
+| status `running` **and** a public address **and** the probe gets out | nothing (it notes every 30 s which torrents are running) |
+| status `running` but the tunnel is not connected | waits `WATCHDOG_TUNNEL_GRACE` (180 s), then counts like a stopped VPN (below) |
 | 1 or 2 failed polls | nothing: a blip does not thrash (`WATCHDOG_THRESHOLD`, default 3) |
 | threshold reached (status not `running`, or gluetun unreachable) | logs an error and pauses all torrents at once |
 | qBittorrent cannot be reached to pause | retries every 5 s, logged once per outage. (qBittorrent shares gluetun's network: while gluetun is down it is unreachable, and then it cannot send anything anyway) |
@@ -45,6 +56,55 @@ Settings in `.env`: `WATCHDOG_INTERVAL` (seconds between polls, default 1),
 
 Only changes are logged, not every poll: `docker compose logs watchdog` shows `VPN unhealthy:
 pausing all torrents`, `all torrents paused`, `VPN is running again`, `torrents resumed`.
+
+## Tunnel evidence and the restart (issue #81)
+
+**Up means connected.** With the status `running` the watchdog also needs
+
+1. a **public address**: `GET /v1/publicip/ip` must answer one (it is empty without a tunnel; this
+   is what showed during the incident: "gluetun has no public address");
+2. a **probe through the tunnel**: every `TUNNEL_PROBE_INTERVAL` seconds (10) it asks gluetun's own
+   HTTP proxy (`http://gluetun:8888`, inside the stack's network only, the one the app's yt-dlp
+   uses) to open a TCP connection to a public address (`TUNNEL_PROBE_TARGETS`, default
+   `1.1.1.1:443,8.8.8.8:443`, public addresses only: a LAN address would pass without the tunnel,
+   so the watchdog refuses to start with one; **one success is enough**). Only the `CONNECT` is done: no byte is
+   sent, the connection is closed at once. The proxy runs inside gluetun's network namespace, whose
+   firewall lets nothing out except through the tunnel, so success proves that traffic gets out.
+   `TUNNEL_PROBE_CONFIRM` (2) failed probes in a row make it count. It catches a tunnel that dies
+   *after* it was up, when gluetun still shows the old address.
+   `TUNNEL_PROBE_PROXY=` (empty) or `TUNNEL_PROBE_INTERVAL=0` switches it off (then only 1 counts).
+
+*Why these two and not gluetun's health endpoint:* it listens on `127.0.0.1:9999` inside gluetun;
+making it reachable from the watchdog means changing gluetun's bind address (and exposing a port
+on the stack's network), and its own checks run every few minutes. The probe checks exactly what
+matters (bytes get out), needs no new exposure, and works the same on every gluetun version.
+
+**Grace, then the same outage.** gluetun reconnects by itself, and a normal reconnect takes two to
+three minutes (2026-11-09 14:37 to 14:39), so a tunnel that is not connected must stay so for
+`WATCHDOG_TUNNEL_GRACE` seconds (default 180; the page shows "VPN reconnecting" meanwhile, no alarm).
+After that it is the **same outage as a stopped VPN**: `WATCHDOG_THRESHOLD` more polls, then the
+alert, the pause and the red state, with the cause `tunnel` and the reason "Tunnel not connected:
+gluetun reports the VPN as running but has no public address" (or "...nothing gets through the
+tunnel"). The dashboard card says "The VPN process runs, but nothing goes through the tunnel", the
+alert is its own kind (`vpn_tunnel`), and "VPN back" fires when the tunnel is up again. A VPN that is
+**stopped or unreachable** still counts after the threshold with no grace, as before.
+
+**Restart of a stuck VPN (`WATCHDOG_RESTART_AFTER`, default 900 s, 0 = never).** A dead tunnel
+while gluetun says `running` can last for hours (the incident: every handshake went to the same
+server); stopping and starting the VPN makes gluetun pick a server again, which is what fixed it
+by hand. So after `WATCHDOG_RESTART_AFTER` seconds of dead tunnel the watchdog does
+`PUT /v1/vpn/status` `stopped` then `running`. Safeguards: only when gluetun says `running` (a VPN
+somebody stopped is never started by the watchdog); at most `WATCHDOG_RESTART_MAX` (5) times per
+outage, each wait twice as long as the one before (capped at 6 h), then it gives up with one urgent
+alert; one alert per restart ("VPN restarted by the watchdog"); it runs on its own thread, so the
+pause and the polls are never held up; if the VPN was stopped and could not be started again it
+keeps trying every 30 s and alerts urgently. The kill switch stays on throughout: a restart can
+never open a leak. If the key may not do the PUT (a key from before #81) it says so once, in the log
+and as an alert, and carries on without restarting (run `make watchdog-key` and recreate).
+
+The status page (`/status`, read by the app) gains `cause` (`stopped`, `unreachable`, `tunnel`),
+`tunnel` (`connected`, `reconnecting`, `down`), `tunnel_since`, `probe`, `restart` (`off`, `armed`,
+`denied`) and `restarts`; none holds an address.
 
 ## Egress sanity check (issue #23)
 
@@ -88,6 +148,24 @@ once: `curl -4 https://ifconfig.me` and `curl -6 https://ifconfig.me` (your own 
 service; the stack never asks one). Put what you find in `.env`, for example
 `HOME_PUBLIC_IP=84.150.20.30, 2003:abcd:1200::/56`. Prefixes survive provider re-assignments of
 the exact address better than single addresses; update it if your provider renumbers you.
+
+## The scenario "process running, tunnel down" (issue #81)
+
+`make tunnel-test` (= `scripts/vpn/vpn-abuse-test.sh --cycles 1 --modes tunnel`, on the VM). It
+cuts the way to the VPN server **inside gluetun's network namespace** (everything that leaves on
+the outer interface to a non-private address is dropped; the LAN, the control server and qBittorrent
+still work), so OpenVPN and gluetun's control server keep running and the control server keeps
+saying `running`, while the tunnel is dead: the incident. It checks that gluetun said `running`
+before the watchdog went down (otherwise it did not reproduce the incident), that the watchdog goes
+down within `WATCHDOG_TUNNEL_GRACE` plus about a minute, names the cause `tunnel` with the reason
+"Tunnel not connected...", logged the outage, sent an alert (if `ALERT_URL` is set), paused all
+torrents, that nothing leaked (qBittorrent never showed the home address and had no connection),
+and that everything recovers when the cut is removed (OpenVPN retries every few minutes: up to ten
+minutes). It takes about 5 to 15 minutes, always removes the cut (also on Ctrl-C), and resumes the
+torrents it paused. `make tunnel-restart-test` additionally keeps the cut until the watchdog has
+restarted the VPN by itself; for it set `WATCHDOG_RESTART_AFTER=120` in `.env` and recreate the
+watchdog, and put the value back afterwards. The plain `make vpn-abuse-test` rotates through this
+mode as its fifth mode.
 
 ## Abuse test (issue #24)
 

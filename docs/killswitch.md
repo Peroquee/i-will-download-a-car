@@ -22,6 +22,7 @@ the abuse test's recovery step.)
 |---|---|---|
 | after the first start, and after any change to the VPN, firewall, compose network or image tags | `make killswitch-test` | 2 to 5 min |
 | after changing the watchdog, `WATCHDOG_*` settings, gluetun or qBittorrent versions | `make vpn-abuse-test` | about 2 min per cycle |
+| after changing the watchdog's tunnel check or restart, or when the VPN misbehaves while gluetun says `running` | `make tunnel-test` (and `make tunnel-restart-test`) | 5 to 15 min |
 | now and then (for example every few months) | both; with `CYCLES=20` for the abuse test | |
 
 Both need the stack up and healthy (`docker compose ps`), run on the media VM, and print **only

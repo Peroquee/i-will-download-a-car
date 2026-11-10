@@ -65,6 +65,7 @@
       "FIREWALL_OUTBOUND_SUBNETS": "192.168.178.0/24",
       "HTTPPROXY": "on",
       "HTTPPROXY_LOG": "off",
+      "HTTP_CONTROL_SERVER_LOG": "off",
       "OPENVPN_CUSTOM_CONFIG": "/gluetun/custom/expressvpn.ovpn",
       "OPENVPN_PASSWORD": "changeme",
       "OPENVPN_USER": "changeme",
@@ -212,11 +213,18 @@
       "QBIT_PASSWORD": "",
       "QBIT_URL": "http://gluetun:8080",
       "QBIT_USER": "admin",
+      "TUNNEL_PROBE_CONFIRM": "2",
+      "TUNNEL_PROBE_INTERVAL": "10",
+      "TUNNEL_PROBE_PROXY": "http://gluetun:8888",
+      "TUNNEL_PROBE_TARGETS": "1.1.1.1:443,8.8.8.8:443",
       "TZ": "Europe/Berlin",
       "WATCHDOG_INTERVAL": "1",
+      "WATCHDOG_RESTART_AFTER": "900",
+      "WATCHDOG_RESTART_MAX": "5",
       "WATCHDOG_RESUME_AFTER": "0",
       "WATCHDOG_STATUS_PORT": "8090",
-      "WATCHDOG_THRESHOLD": "3"
+      "WATCHDOG_THRESHOLD": "3",
+      "WATCHDOG_TUNNEL_GRACE": "180"
     },
     "healthcheck": {
       "interval": "10s",

@@ -1,4 +1,5 @@
-"""A fake gluetun control server: GET /v1/vpn/status behind an X-API-Key."""
+"""A fake gluetun control server: GET /v1/vpn/status, GET /v1/publicip/ip and PUT /v1/vpn/status
+behind an X-API-Key."""
 
 from __future__ import annotations
 
@@ -10,22 +11,27 @@ from dataclasses import dataclass, field
 API_KEY = "watchdog-test-key-0123456789"  # a test value, not a secret
 
 
+DEFAULT_PUBLIC = {
+    "public_ip": "185.107.12.34",
+    "country": "Germany",
+    "region": "Hesse",
+    "city": "Frankfurt",
+    "organization": "AS64500 Example Hosting",
+}
+
+
 @dataclass
 class FakeGluetun:
     status: str = "running"
     http_status: int = 200  # forced answer for the status route, e.g. 500
     body: str | None = None  # raw body override
     hits: list[dict] = field(default_factory=list)
-    public: dict | None = field(
-        default_factory=lambda: {
-            "public_ip": "185.107.12.34",
-            "country": "Germany",
-            "region": "Hesse",
-            "city": "Frankfurt",
-            "organization": "AS64500 Example Hosting",
-        }
-    )
+    public: dict | None = field(default_factory=lambda: dict(DEFAULT_PUBLIC))
     public_http_status: int = 200
+    put_http_status: int = 200  # forced answer for PUT /v1/vpn/status, e.g. 403 = no such route
+    puts: list[str] = field(default_factory=list)  # the statuses PUT so far, in order
+    heal_on_start: bool = True  # a PUT "running" gives the tunnel back (a new server was chosen)
+    fail_start: int = 0  # the next N PUTs of "running" answer 500 (the VPN stays stopped)
 
     def __post_init__(self) -> None:
         self.server: http.server.ThreadingHTTPServer | None = None
@@ -74,7 +80,28 @@ class FakeGluetun:
                 )
 
             def do_PUT(self):
-                self.reply(405)
+                headers = {k.lower(): v for k, v in self.headers.items()}
+                length = int(headers.get("content-length") or 0)
+                raw = self.rfile.read(length).decode() if length else ""
+                fake.hits.append({"path": self.path, "headers": headers, "method": "PUT"})
+                if self.path != "/v1/vpn/status":
+                    return self.reply(404)
+                if headers.get("x-api-key") != API_KEY:
+                    return self.reply(401, "unauthorized")
+                if fake.put_http_status != 200:
+                    return self.reply(fake.put_http_status, "no")
+                try:
+                    wanted = json.loads(raw)["status"]
+                except (ValueError, KeyError, TypeError):
+                    return self.reply(400, "bad body")
+                if wanted == "running" and fake.fail_start > 0:
+                    fake.fail_start -= 1
+                    return self.reply(500, "boom")
+                fake.puts.append(wanted)
+                fake.status = wanted
+                if wanted == "running" and fake.heal_on_start:
+                    fake.public = dict(DEFAULT_PUBLIC)
+                self.reply(200, json.dumps({"outcome": wanted}))
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
         threading.Thread(

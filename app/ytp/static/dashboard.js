@@ -268,9 +268,8 @@
       var vpnTone = info.view === "ok" ? "ok"
         : (info.view === "down" || info.view === "mismatch" || info.view === "blind") ? "bad" : "warn";
       var vpnParts = [];
-      if (["down", "mismatch", "blind", "starting", "unknown"].indexOf(info.view) >= 0 && has("vpn.d." + info.view)) {
-        vpnParts.push(t("vpn.d." + info.view));
-      }
+      var detailKey = L.vpnDetailKey(info);
+      if (detailKey && has(detailKey)) vpnParts.push(t(detailKey));
       if (info.paused) vpnParts.push(t("vpn.paused"));
       if (info.since && info.view !== "unknown") {
         var since = ctx.timeText(info.since);

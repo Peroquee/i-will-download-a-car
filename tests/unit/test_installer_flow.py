@@ -313,7 +313,9 @@ def test_a_failing_step_stops_with_a_plain_hint_and_keeps_the_finished_ones(repo
     assert (
         'The step "Build and start the services, wait until everything runs" failed.' in term.text
     )
-    assert "wrong VPN credentials" in term.text
+    assert "VPN tunnel is not connected" in term.text, "not 'wrong credentials' for every failure"
+    assert "wrong VPN credentials" in term.text, "still named as one possible cause"
+    assert 'grep -v "http server"' in term.text, "the control server's request lines hide the error"
     assert "never the file .env" in term.text
     assert "config/installer.log" in term.text
     state = State.load(repo / "config" / "installer-state.json")

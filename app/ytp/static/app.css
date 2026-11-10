@@ -347,6 +347,7 @@ dialog.howto::backdrop { background: rgba(0, 0, 0, 0.65); }
 }
 .dash-vpn-now { margin: 0 0 6px; font-weight: 600; }
 .dash-vpn-now.vpn-ok { color: var(--good); }
+.dash-vpn-now.vpn-reconnecting { color: var(--warn); }
 .dash-vpn-now.vpn-down, .dash-vpn-now.vpn-mismatch, .dash-vpn-now.vpn-blind { color: var(--bad); }
 .dash-events { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .dash-event { overflow-wrap: anywhere; }
