@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .db import Database
+from .scheduler import get_state, set_state
 
 MAX_ERROR_LENGTH = 500
 MAX_NOTE_LENGTH = 500
@@ -132,18 +133,22 @@ def claim_next_queued(db: Database, job_type: str) -> Job | None:
     """Take the highest-priority `queued` job of a type and mark it `downloading`.
 
     High priority wins first, then the oldest (#51). While a high-priority job of ANY type is
-    `downloading`, a normal YouTube/podcast job is not claimed at all: it waits in `queued`
-    until the high-priority download is done. A high-priority job is always claimable.
+    really downloading, a normal YouTube/podcast job is not claimed at all: it waits in
+    `queued` until the high-priority download is done. A high-priority job is always claimable.
+    A high-priority MAGNET only counts while its torrent is transferring (#70): a paused,
+    queued or stalled torrent must not freeze the normal queues for days.
 
     The claim is one transaction, so two workers can never take the same job.
     """
+    holds = 1 if magnet_transferring(db) else 0
     with db.transaction() as conn:
         row = conn.execute(
             "SELECT * FROM jobs WHERE type = ? AND status = 'queued' "
             "AND (priority > 0 OR NOT EXISTS ("
-            " SELECT 1 FROM jobs hi WHERE hi.status = 'downloading' AND hi.priority > 0)) "
+            " SELECT 1 FROM jobs hi WHERE hi.status = 'downloading' AND hi.priority > 0 "
+            " AND (hi.type <> 'magnet' OR ?))) "
             "ORDER BY priority DESC, id LIMIT 1",
-            (job_type,),
+            (job_type, holds),
         ).fetchone()
         if row is None:
             return None
@@ -379,10 +384,46 @@ def get_source(db: Database, job_id: int) -> str | None:
 # --- high priority (#51) -------------------------------------------------------------------
 
 
+KEY_MAGNET_TRANSFERRING = "priority.magnet_transferring"
+
+
+def high_priority_magnet_hashes(db: Database) -> list[str]:
+    """Infohashes of the high-priority magnet jobs that are `downloading` (#70)."""
+    rows = db.query(
+        "SELECT external_id FROM jobs WHERE type = 'magnet' AND priority > 0 "
+        "AND status = 'downloading' ORDER BY id"
+    )
+    return [row["external_id"] for row in rows]
+
+
+def set_magnet_transferring(db: Database, value: bool) -> None:
+    """Remember whether a high-priority torrent is really transferring (#70).
+
+    The priority manager writes this from what qBittorrent reports; `claim_next_queued` and
+    `high_priority_downloading` read it. It lives in `app_state`, so it survives between the
+    manager's ticks and is consistent for every worker thread.
+    """
+    set_state(db, KEY_MAGNET_TRANSFERRING, "1" if value else "0")
+
+
+def magnet_transferring(db: Database) -> bool:
+    """Did the priority manager last see a high-priority torrent transferring data?"""
+    return get_state(db, KEY_MAGNET_TRANSFERRING) == "1"
+
+
 def high_priority_downloading(db: Database) -> bool:
-    """Is at least one high-priority job downloading right now?"""
+    """Is at least one high-priority job really downloading right now?
+
+    A YouTube or podcast job counts while it is `downloading` (its worker runs it). A magnet
+    job counts only while its torrent is actually transferring (#70): paused, queued or
+    stalled torrents must not hold the normal queues back.
+    """
     return bool(
-        db.query("SELECT 1 FROM jobs WHERE priority > 0 AND status = 'downloading' LIMIT 1")
+        db.query(
+            "SELECT 1 FROM jobs WHERE priority > 0 AND status = 'downloading' "
+            "AND (type <> 'magnet' OR ?) LIMIT 1",
+            (1 if magnet_transferring(db) else 0,),
+        )
     )
 
 

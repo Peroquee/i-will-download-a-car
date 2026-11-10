@@ -432,6 +432,35 @@ def test_paused_is_decided_by_the_state_not_by_a_filter(state, paused):
     assert torrent.paused is paused
 
 
+@pytest.mark.parametrize(
+    ("state", "transferring"),
+    [
+        ("downloading", True),
+        ("forcedDL", True),
+        ("metaDL", True),
+        ("forcedMetaDL", True),
+        ("stalledDL", False),
+        ("queuedDL", False),
+        ("pausedDL", False),
+        ("stoppedDL", False),
+        ("checkingDL", False),
+        ("uploading", False),
+    ],
+)
+def test_transferring_is_decided_by_the_state(state, transferring):
+    torrent = Torrent.from_api({"hash": HASH, "name": "x", "state": state, "progress": 0.5})
+    assert torrent.transferring is transferring
+
+
+@pytest.mark.parametrize(
+    ("state", "queued"),
+    [("queuedDL", True), ("queuedUP", True), ("downloading", False), ("pausedDL", False)],
+)
+def test_queued_is_decided_by_the_state(state, queued):
+    torrent = Torrent.from_api({"hash": HASH, "name": "x", "state": state, "progress": 0.5})
+    assert torrent.queued is queued
+
+
 def test_no_filter_sends_no_filter_parameter(fake):
     client_for(fake).list_torrents()
     assert fake.calls("torrents/info")[0].query == {}

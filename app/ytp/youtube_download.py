@@ -19,6 +19,9 @@ by the video id, so nothing untrusted decides a path until we build it ourselves
   address in them, which must not sit in a library Jellyfin reads. We write a small summary of
   the harmless fields instead (title, channel, duration, upload date, description, tags).
 * A failure never leaves a partial file in the library; the work folder is removed either way.
+* **Bounded (#70):** a download that brings no new bytes for 10 minutes, runs longer than 6
+  hours, or leaves an ffmpeg helper running for 15 minutes fails with a readable reason instead
+  of holding the single download worker forever.
 
 **Audio only** (issues #35, #36): `audio_only=True` asks yt-dlp for the best audio stream and keeps
 it as it is. YouTube serves AAC in an mp4 container and Opus in webm; yt-dlp's
@@ -31,12 +34,16 @@ re-encode of a lossy stream). Tags and the cover are added afterwards by `ytp.au
 
 from __future__ import annotations
 
+import contextlib
 import errno
+import functools
 import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+import subprocess
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -53,6 +60,13 @@ VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov")
 AUDIO_EXTENSIONS = (".m4a", ".opus", ".ogg", ".aac", ".mp3")
 AUDIO_FORMAT = "ba[ext=m4a]/ba[acodec^=mp4a]/ba"  # AAC first, then whatever audio is best
 THUMBNAIL_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+# Bounds on one download (#70): yt-dlp's socket_timeout only limits one read, so a trickling
+# stream or a hung ffmpeg merge would hold the single download worker forever. No new bytes
+# for STALL_SECONDS fails the job; DEADLINE_SECONDS caps the whole download; every helper
+# subprocess (ffmpeg) is killed after SUBPROCESS_TIMEOUT_SECONDS.
+STALL_SECONDS = 600.0
+DEADLINE_SECONDS = 6 * 3600.0
+SUBPROCESS_TIMEOUT_SECONDS = 900.0
 # The resolutions the input form offers and the API accepts live in `ytp.resolution` (#47, #65).
 INFO_KEYS = (
     "id", "title", "channel", "channel_id", "uploader", "uploader_id", "duration",
@@ -135,11 +149,87 @@ def download_options(
     return options
 
 
+def _minutes_text(seconds: float) -> str:
+    minutes = max(1, round(seconds / 60))
+    return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
+
+
+def _hours_text(seconds: float) -> str:
+    hours = max(1.0, round(seconds / 3600, 1))
+    text = f"{hours:g}"
+    return f"{text} hour" if hours == 1 else f"{text} hours"
+
+
+class ProgressWatchdog:
+    """The job's progress hook, with a stall and an overall limit around it (#70).
+
+    Raising inside a yt-dlp progress hook aborts the download; yt-dlp does not swallow it.
+    A gap with new bytes counts as progress; only a callback that brings no new bytes after
+    `stall_seconds` fails.
+    """
+
+    def __init__(
+        self,
+        forward: Callable[[dict[str, Any]], None] | None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        stall_seconds: float = STALL_SECONDS,
+        deadline_seconds: float = DEADLINE_SECONDS,
+    ):
+        self._forward = forward
+        self._clock = clock
+        self._stall = stall_seconds
+        self._deadline = deadline_seconds
+        self._started = clock()
+        self._last_change = self._started
+        self._seen = -1
+
+    def __call__(self, data: dict[str, Any]) -> None:
+        now = self._clock()
+        downloaded = data.get("downloaded_bytes")
+        if isinstance(downloaded, int) and downloaded > self._seen:
+            self._seen = downloaded
+            self._last_change = now
+        if now - self._started > self._deadline:
+            raise DownloadFailed(
+                f"the download did not finish within {_hours_text(self._deadline)}"
+            )
+        if now - self._last_change > self._stall:
+            raise DownloadFailed(
+                f"the download stalled: no data arrived for {_minutes_text(self._stall)}"
+            )
+        if self._forward is not None:
+            self._forward(data)
+
+
+@contextlib.contextmanager
+def popen_timeout(seconds: float) -> Iterator[None]:
+    """Give every subprocess yt-dlp starts a timeout (#70).
+
+    yt-dlp's `Popen.run` accepts a timeout, but its ffmpeg postprocessors never pass one; a
+    hung merge would otherwise keep the single YouTube worker busy forever.
+    """
+    from yt_dlp.utils import Popen
+
+    original = Popen.run.__func__
+
+    @functools.wraps(original)
+    def run_with_timeout(cls, *args, **kwargs):
+        kwargs.setdefault("timeout", seconds)
+        return original(cls, *args, **kwargs)
+
+    Popen.run = classmethod(run_with_timeout)
+    try:
+        yield
+    finally:
+        Popen.run = classmethod(original)
+
+
 def _download_with_ytdlp(url: str, options: dict[str, Any]) -> dict[str, Any]:
     import yt_dlp
 
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
+        with popen_timeout(SUBPROCESS_TIMEOUT_SECONDS), yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as exc:
         raise classify(str(exc)) from exc
@@ -190,6 +280,9 @@ class YoutubeDownloader:
         download: Callable[[str, dict[str, Any]], dict[str, Any]] = _download_with_ytdlp,
         min_free_bytes: int = MIN_FREE_BYTES,
         cookie_file: Path | None = None,
+        stall_seconds: float = STALL_SECONDS,
+        deadline_seconds: float = DEADLINE_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.proxy = proxy
         self.max_height = max_height
@@ -197,6 +290,9 @@ class YoutubeDownloader:
         self._download = download
         self._min_free = min_free_bytes
         self.cookie_file = cookie_file  # the admin's YouTube login cookies (#46)
+        self._stall = stall_seconds
+        self._deadline = deadline_seconds
+        self._clock = clock
 
     def download(
         self,
@@ -224,12 +320,18 @@ class YoutubeDownloader:
         # Each run gets its own throwaway copy: yt-dlp truncates and rewrites the cookiefile
         # in place, and several runs share the stored login (#46 follow-up).
         with youtube_cookies.private_copy(self.cookie_file) as cookie_copy:
+            watchdog = ProgressWatchdog(
+                progress,
+                clock=self._clock,
+                stall_seconds=self._stall,
+                deadline_seconds=self._deadline,
+            )
             options = download_options(
                 workdir,
                 proxy=self.proxy,
                 max_height=self.max_height if max_height is None else max_height,
                 socket_timeout=self._socket_timeout,
-                progress_hook=progress,
+                progress_hook=watchdog,
                 audio_only=audio_only,
                 cookie_file=cookie_copy,
             )
@@ -242,6 +344,11 @@ class YoutubeDownloader:
                 raise
             except DownloadFailed:
                 raise
+            except subprocess.TimeoutExpired as exc:
+                raise DownloadFailed(
+                    "a helper program did not finish within "
+                    f"{_minutes_text(SUBPROCESS_TIMEOUT_SECONDS)}"
+                ) from exc
             except OSError as exc:
                 raise DownloadFailed(
                     f"could not write the download: {exc.strerror or exc}"

@@ -9,6 +9,8 @@ database queue, the names, the failure paths and the HTTP layer.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -240,6 +242,71 @@ def test_errors_keep_their_meaning(tmp_path):
         YoutubeDownloader(download=fake_download(error=KeyError("x")), min_free_bytes=0).download(
             VideoRef(ID), tmp_path / "c"
         )
+
+
+class Clock:
+    def __init__(self, now: float = 1000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_a_download_that_stops_making_progress_is_aborted(tmp_path):
+    """A trickling or stuck stream must not hold the single worker forever (#70)."""
+    clock = Clock()
+
+    def stuck(url, options):
+        hook = options["progress_hooks"][0]
+        hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes": 100})
+        clock.advance(11 * 60)
+        hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes": 100})
+        raise AssertionError("the watchdog must have aborted")
+
+    downloader = YoutubeDownloader(download=stuck, min_free_bytes=0, clock=clock)
+    with pytest.raises(DownloadFailed, match="stalled: no data arrived for 10 minutes"):
+        downloader.download(VideoRef(ID), tmp_path / "w")
+
+
+def test_a_download_that_takes_too_long_is_aborted_even_while_data_flows(tmp_path):
+    clock = Clock()
+
+    def endless(url, options):
+        hook = options["progress_hooks"][0]
+        for done in range(1, 500):
+            clock.advance(60)
+            hook({"status": "downloading", "downloaded_bytes": done, "total_bytes": 10**6})
+        raise AssertionError("the watchdog must have aborted")
+
+    downloader = YoutubeDownloader(
+        download=endless, min_free_bytes=0, clock=clock, deadline_seconds=3600
+    )
+    with pytest.raises(DownloadFailed, match="did not finish within 1 hour"):
+        downloader.download(VideoRef(ID), tmp_path / "w")
+
+
+def test_a_hung_helper_program_fails_the_job_readably(tmp_path):
+    def hung(url, options):
+        raise subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=900)
+
+    downloader = YoutubeDownloader(download=hung, min_free_bytes=0)
+    with pytest.raises(DownloadFailed, match="helper program did not finish within 15 minutes"):
+        downloader.download(VideoRef(ID), tmp_path / "w")
+
+
+def test_helper_subprocesses_get_a_timeout():
+    """yt-dlp's ffmpeg/ffprobe calls carry no timeout of their own (#70)."""
+    from yt_dlp.utils import Popen
+
+    from ytp.youtube_download import popen_timeout
+
+    original = Popen.run.__func__
+    with pytest.raises(subprocess.TimeoutExpired), popen_timeout(0.2):
+        Popen.run([sys.executable, "-c", "import time; time.sleep(5)"])
+    assert Popen.run.__func__ is original, "the patch is undone afterwards"
 
 
 # --- naming and filing ----------------------------------------------------------------------------------------

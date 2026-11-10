@@ -19,7 +19,7 @@ from ytp import jobs
 from ytp.clients.qbittorrent import QbitClient
 from ytp.db import Database
 from ytp.podcast_jobs import JOB_TYPE as PODCAST_JOB_TYPE
-from ytp.priority import PriorityManager
+from ytp.priority import HOLD_GRACE_SECONDS, PriorityManager
 from ytp.youtube_jobs import JOB_TYPE as YOUTUBE_JOB_TYPE
 from ytp.youtube_jobs import YoutubeJobMetadata
 
@@ -73,8 +73,20 @@ def podcast_job(db: Database, key: str, *, priority: int = 0):
     return job
 
 
-def manager(db: Database, fake: FakeQbittorrent, watchdog=None) -> PriorityManager:
-    return PriorityManager(db, QbitClient(fake.url, USER, PASSWORD, timeout=3), watchdog)
+class Clock:
+    def __init__(self, now: float = 1000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def manager(db: Database, fake: FakeQbittorrent, watchdog=None, *, clock=None) -> PriorityManager:
+    extra = {} if clock is None else {"clock": clock}
+    return PriorityManager(db, QbitClient(fake.url, USER, PASSWORD, timeout=3), watchdog, **extra)
 
 
 # --- the queue (#51 requirement 3) ---------------------------------------------------------------
@@ -123,6 +135,78 @@ def test_another_high_priority_job_is_claimed_while_one_downloads(db):
     second = youtube_job(db, "high-two", priority=1)
     assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE).id == first.id
     assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE).id == second.id
+
+
+# --- a stuck high-priority magnet must not hold the queues (#70) ----------------------------------
+
+
+def test_a_paused_high_priority_torrent_does_not_block_normal_downloads(db, fake):
+    magnet_job(db, H1, priority=1, status="downloading")
+    normal = youtube_job(db, "normal-video")
+    fake.torrents = [torrent(H1, state="pausedDL")]
+
+    manager(db, fake).tick()
+
+    assert jobs.magnet_transferring(db) is False
+    assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE).id == normal.id
+
+
+def test_a_queued_high_priority_torrent_does_not_block_normal_downloads(db, fake):
+    magnet_job(db, H1, priority=1, status="downloading")
+    normal = youtube_job(db, "normal-video")
+    fake.torrents = [torrent(H1, state="queuedDL")]
+
+    manager(db, fake).tick()
+
+    assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE).id == normal.id
+
+
+def test_a_transferring_high_priority_torrent_still_blocks_normal_downloads(db, fake):
+    magnet_job(db, H1, priority=1, status="downloading")
+    youtube_job(db, "normal-video")
+    fake.torrents = [torrent(H1, state="downloading")]
+
+    manager(db, fake).tick()
+
+    assert jobs.high_priority_downloading(db) is True
+    assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE) is None
+
+
+def test_a_stalled_high_priority_torrent_keeps_the_line_for_a_short_while(db, fake):
+    clock = Clock()
+    magnet_job(db, H1, priority=1, status="downloading")
+    normal = youtube_job(db, "normal-video")
+    fake.torrents = [torrent(H1, state="downloading")]
+    priority = manager(db, fake, clock=clock)
+    priority.tick()
+
+    fake.torrents = [torrent(H1, state="stalledDL")]
+    clock.advance(HOLD_GRACE_SECONDS - 1)
+    priority.tick()
+    assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE) is None, "a short stall keeps the line"
+
+    clock.advance(2)
+    priority.tick()
+    assert jobs.claim_next_queued(db, YOUTUBE_JOB_TYPE).id == normal.id
+
+
+def test_qbittorrent_trouble_clears_a_stale_hold(db, fake):
+    magnet_job(db, H1, priority=1, status="downloading")
+    jobs.set_magnet_transferring(db, True)
+    fake.fail_status = 503
+
+    manager(db, fake).tick()  # must not raise
+
+    assert jobs.magnet_transferring(db) is False
+
+
+def test_without_a_high_priority_magnet_the_flag_is_cleared_without_asking(db, fake):
+    jobs.set_magnet_transferring(db, True)
+
+    manager(db, fake).tick()
+
+    assert jobs.magnet_transferring(db) is False
+    assert fake.calls("torrents/info") == []
 
 
 # --- normal torrents are paused / resumed (#51 requirement 4b) ------------------------------------
@@ -184,6 +268,32 @@ def test_a_finished_torrent_is_not_paused(db, fake):
     manager(db, fake).tick()
 
     assert fake.calls("torrents/stop") == [], "a seeding torrent keeps running"
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_a_paused_high_priority_torrent_does_not_pause_normal_torrents(db, fake):
+    magnet_job(db, H1, priority=1, status="downloading")
+    magnet_job(db, H2, status="downloading")
+    fake.torrents = [torrent(H1, state="pausedDL"), torrent(H2)]
+
+    manager(db, fake).tick()
+
+    assert fake.calls("torrents/stop") == []
+    assert jobs.app_paused_hashes(db) == []
+
+
+def test_normal_torrents_are_resumed_when_the_high_priority_torrent_gets_paused(db, fake):
+    magnet_job(db, H1, priority=1, status="downloading")
+    magnet_job(db, H2, status="downloading")
+    fake.torrents = [torrent(H1), torrent(H2)]
+    priority = manager(db, fake)
+    priority.tick()
+    assert jobs.app_paused_hashes(db) == [H2]
+
+    fake.torrents = [torrent(H1, state="pausedDL"), torrent(H2, state="pausedDL")]
+    priority.tick()
+    (resume,) = fake.calls("torrents/start")
+    assert resume.form["hashes"] == [H2]
     assert jobs.app_paused_hashes(db) == []
 
 
