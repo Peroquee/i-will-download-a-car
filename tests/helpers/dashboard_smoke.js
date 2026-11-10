@@ -22,10 +22,11 @@ class Node {
   }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
   click() { (this.listeners.click || []).forEach((fn) => fn()); }
-  scrollIntoView() { this.scrolled = true; }
+  scrollIntoView() { this.scrolled = true; scrollLog.push(this.id); }
   set textContent(v) { this._text = String(v); this.children = []; }
   get textContent() { return this._text + this.children.map((c) => c.textContent).join(""); }
 }
+const scrollLog = [];
 const byId = {};
 for (const id of scenario.ids) { const n = new Node("div"); n.id = id; byId[id] = n; }
 const viewNodes = (scenario.viewNodes || []).map((v) => { const n = new Node("div"); n.dataset.view = v; return n; });
@@ -53,9 +54,10 @@ function find(node, id) {
   return null;
 }
 const calls = [];
+const intervals = [];
 const win = {
   location: { pathname, hash }, Logic: require(path.join(staticDir, "logic.js")),
-  setInterval: () => 1, clearInterval() {}, addEventListener() {},
+  setInterval: (fn) => { intervals.push(fn); return 1; }, clearInterval() {}, addEventListener() {},
 };
 global.document = document;
 new Function("window", fs.readFileSync(path.join(staticDir, "dashboard.js"), "utf8"))(win);
@@ -82,12 +84,14 @@ setTimeout(() => {
     first.children[first.children.length - 1].click();
   }
   if (scenario.click === "ack-all") byId["alert-strip-ack"].click();
+  /* The periodic refresh, as often as the scenario wants it. */
+  for (let i = 0; i < (scenario.polls || 0); i++) intervals.forEach((fn) => fn());
   setTimeout(finish, 50);
 }, 50);
 
 function finish() {
   dash.render();
-  const out = { calls, nodes: {} };
+  const out = { calls, scrolls: scrollLog, nodes: {} };
   for (const id of Object.keys(byId)) out.nodes[id] = { text: byId[id].textContent, hidden: byId[id].hidden, attrs: byId[id].attrs, cls: byId[id].className, scrolled: !!byId[id].scrolled, children: byId[id].children.map((c) => ({ cls: c.className, text: c.textContent, id: c.id })) };
   out.views = viewNodes.map((n) => [n.dataset.view, n.hidden]);
   out.strip = document.getElementById("alert-strip-list").children.map((c) => ({ cls: c.className, text: c.textContent, href: (c.children[0] || {}).href }));
