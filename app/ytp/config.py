@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import accounts, passwords
+from . import accounts, passwords, resolution
 from .egress import parse_networks
 
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
@@ -63,14 +63,20 @@ class Settings:
     qbit_password: str = field(default="", repr=False)
     # File mode mask for the folders the organizer creates (UMASK in .env; 002 keeps the group
     # able to write, which the other media users need). Applied once at startup, see __main__.
-    umask: int = 0o022
+    # The default matches .env.example (002, group-writable), so a run outside compose behaves
+    # like the stack (#73).
+    umask: int = 0o002
     # The watchdog's status page (it lives in its own container; the UI badge reads it, #22).
     watchdog_status_url: str = "http://watchdog:8090"
+    # The reverse proxy (the compose service "proxy") is the only peer whose X-Forwarded-For is
+    # believed, for the login brake (#76). EMPTY = believe no header.
+    trusted_proxy: str = "proxy"
     # Where yt-dlp's requests go out: gluetun's HTTP proxy by default, so YouTube is asked
     # through the VPN. EMPTY = ask directly from the home line. See docs/youtube.md.
     ytdlp_proxy: str = "http://gluetun:8888"
     youtube_probe_timeout: float = 25.0
-    # Tallest YouTube video to download, in pixels (0 = no limit): a disk-space knob.
+    # Tallest YouTube video to download, in pixels: 0 (best) or one of resolution.MAX_HEIGHTS
+    # (the same fixed list the form, the accounts and the database use); a disk-space knob (#73).
     youtube_max_height: int = 1080
     # How often a subscribed channel's feed is looked at, in minutes (0 = never; see #20).
     subscription_poll_minutes: int = 60
@@ -128,6 +134,7 @@ class Settings:
             "qbit_url": self.qbit_url,
             "qbit_user": self.qbit_user,
             "qbit_configured": self.qbit_configured,
+            "trusted_proxy": self.trusted_proxy or None,
             "fetch_blocked_networks": len(self.fetch_blocked_networks),
             "internet_check": (
                 f"{self.internet_check_host}:{self.internet_check_port}"
@@ -151,6 +158,10 @@ class Settings:
         if log_level not in LOG_LEVELS:
             problems.append(f"LOG_LEVEL must be one of {', '.join(LOG_LEVELS)}, got {log_level!r}")
 
+        # APP_HOST and APP_PORT are for development and tests only: docker-compose.yml never
+        # passes them. The image, its health check and the Caddyfile hard-code port 8000
+        # (`EXPOSE 8000`, `/health` on 127.0.0.1:8000, `reverse_proxy app:8000`), so changing
+        # the port in `.env` would not work anyway (#73).
         port = 8000
         raw_port = text("APP_PORT", "8000")
         if raw_port.isdigit() and 1 <= int(raw_port) <= 65535:
@@ -158,9 +169,12 @@ class Settings:
         else:
             problems.append(f"APP_PORT must be a port number (1-65535), got {raw_port!r}")
 
+        # The path INSIDE the container. In `.env` the same name is the HOST path of the media
+        # volume: compose mounts that at /data and never passes DATA_ROOT to the app (#73).
         data_root = Path(text("DATA_ROOT", "/data"))
         if not data_root.is_absolute():
             problems.append(f"DATA_ROOT must be an absolute path, got {str(data_root)!r}")
+        # CONFIG_DIR is dev-only too: compose always mounts the app's folder at /config.
         config_dir = Path(text("CONFIG_DIR", "/config"))
         if not config_dir.is_absolute():
             problems.append(f"CONFIG_DIR must be an absolute path, got {str(config_dir)!r}")
@@ -192,8 +206,8 @@ class Settings:
         elif parsed_qbit.path.strip("/"):
             problems.append(f"QBIT_URL must be host[:port] without a path, got {qbit_url!r}")
 
-        umask = 0o022
-        raw_umask = text("UMASK", "022")
+        umask = 0o002
+        raw_umask = text("UMASK", "002")
         if re.fullmatch(r"0?[0-7]{3}", raw_umask):
             umask = int(raw_umask, 8)
         else:
@@ -207,6 +221,11 @@ class Settings:
             problems.append(
                 f"WATCHDOG_STATUS_URL must be host[:port] without a path, got {watchdog_url!r}"
             )
+
+        raw_trusted = env.get("TRUSTED_PROXY")  # unset = default, set but empty = trust nobody
+        trusted_proxy = "proxy" if raw_trusted is None else raw_trusted.strip()
+        if trusted_proxy and not valid_host(trusted_proxy):
+            problems.append("TRUSTED_PROXY must be a host name or IP address, or empty")
 
         raw_proxy = env.get("YTDLP_PROXY")  # unset = default, set but empty = no proxy
         proxy = "http://gluetun:8888" if raw_proxy is None else raw_proxy.strip()
@@ -226,10 +245,13 @@ class Settings:
 
         raw_height = text("YOUTUBE_MAX_HEIGHT", "1080")
         max_height = 1080
-        if raw_height.isdigit() and (int(raw_height) == 0 or 144 <= int(raw_height) <= 4320):
+        heights = ", ".join(str(height) for height in resolution.MAX_HEIGHTS[1:])
+        # The same fixed list as the form, the accounts and the database (#47, #65): a value
+        # the rest of the app refuses at request time must be refused at start instead (#73).
+        if raw_height.isdigit() and resolution.valid(int(raw_height)):
             max_height = int(raw_height)
         else:
-            problems.append("YOUTUBE_MAX_HEIGHT must be 0 (no limit) or between 144 and 4320")
+            problems.append(f"YOUTUBE_MAX_HEIGHT must be 0 (best) or one of {heights}")
 
         raw_poll = text("SUBSCRIPTION_POLL_MINUTES", "60")
         poll_minutes = 60
@@ -298,6 +320,7 @@ class Settings:
             raise ConfigError(problems)
         return cls(
             log_level=log_level,
+            # Dev-only, like APP_PORT (see above): compose never passes this.
             host=text("APP_HOST", "0.0.0.0"),
             port=port,
             data_root=data_root,
@@ -310,6 +333,7 @@ class Settings:
             qbit_password=text("QBIT_PASSWORD"),
             umask=umask,
             watchdog_status_url=watchdog_url,
+            trusted_proxy=trusted_proxy,
             ytdlp_proxy=proxy,
             youtube_probe_timeout=probe_timeout,
             youtube_max_height=max_height,

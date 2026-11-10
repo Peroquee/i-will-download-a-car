@@ -141,11 +141,17 @@ services:
       QBIT_PASSWORD: ${QBIT_PASSWORD:-}
       # The VPN watchdog's status page, for the UI badge (#22).
       WATCHDOG_STATUS_URL: http://watchdog:8090
+      # The reverse proxy ("proxy" above) is the only peer whose X-Forwarded-For the app
+      # believes, for its login brake (#76). No colon: unset = default, set EMPTY = trust nobody.
+      TRUSTED_PROXY: ${TRUSTED_PROXY-proxy}
       # yt-dlp (YouTube, #17) goes out through gluetun's HTTP proxy, i.e. through the VPN. Set
       # EMPTY in .env to ask YouTube directly from the home line. (No colon: unset = default.)
       YTDLP_PROXY: ${YTDLP_PROXY-http://gluetun:8888}
-      # Tallest YouTube video to download in pixels (0 = no limit); a disk-space knob (#18).
+      # Tallest YouTube video to download in pixels (0 = best, or 2160/1440/1080/720/480/360);
+      # a disk-space knob (#18, #73).
       YOUTUBE_MAX_HEIGHT: ${YOUTUBE_MAX_HEIGHT:-1080}
+      # Seconds a YouTube probe may take (3 to 120).
+      YOUTUBE_PROBE_TIMEOUT: ${YOUTUBE_PROBE_TIMEOUT:-25}
       # How often subscribed channels are checked for new videos, in minutes; 0 = never (#20).
       SUBSCRIPTION_POLL_MINUTES: ${SUBSCRIPTION_POLL_MINUTES:-60}
       # Podcast feeds and episodes (#34) are fetched through the same proxy (the VPN); set EMPTY in

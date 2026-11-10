@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -183,6 +184,49 @@ def test_a_user_sees_only_what_they_follow_and_the_admin_sees_everything(app_cli
     assert by_id[mine]["followers"] == ["alice"]
     assert by_id[other.id]["followers"] == ["bob"]
     assert by_id[mine]["following"] is False
+
+
+def test_the_subscription_list_does_not_query_followers_per_row(app_client, people, monkeypatch):
+    """One grouped query instead of two thread hops and queries per subscription (#76)."""
+    sub_id = subscribe(people.alice).json()["id"]
+    accounts.follow(db_of(app_client), "channel", sub_id, people.bob_id)
+
+    def per_row(*args, **kwargs):
+        raise AssertionError("a per-subscription follower query")
+
+    monkeypatch.setattr(accounts, "followers", per_row)
+    monkeypatch.setattr(accounts, "follower_names", per_row)
+    response = people.admin.get("/api/subscriptions")
+    assert response.status_code == 200
+    (only,) = response.json()["subscriptions"]
+    assert only["followers"] == ["alice", "bob"]
+    assert only["follower_count"] == 2
+    alice_view = people.alice.get("/api/subscriptions").json()["subscriptions"]
+    assert alice_view[0]["follower_count"] == 2
+    assert "followers" not in alice_view[0]
+
+
+def test_the_ownership_check_does_not_block_the_event_loop(app_client, people, monkeypatch):
+    """Regression (#76): `owns_job` used to run synchronously inside the async handler."""
+    job = make_job(app_client, people.alice_id, status="failed")
+    real = accounts.owns_job
+    threads: list[str] = []
+
+    def check(db, job_id, account_id):
+        try:
+            asyncio.get_running_loop()
+            threads.append("event-loop")
+        except RuntimeError:
+            threads.append("worker")
+        return real(db, job_id, account_id)
+
+    monkeypatch.setattr(accounts, "owns_job", check)
+    for action in ("retry", "dismiss"):
+        response = people.alice.post(f"/api/jobs/{job.id}/{action}")
+        assert response.status_code == 200, action
+        if action == "retry":
+            jobs.mark_failed(db_of(app_client), job.id, "again")
+    assert threads == ["worker", "worker"]
 
 
 def test_unfollowing_removes_only_the_follower_and_the_last_one_ends_it(app_client, people):

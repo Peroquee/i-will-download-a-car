@@ -147,7 +147,7 @@ def test_the_qbittorrent_password_never_shows_in_repr_str_or_summary():
 
 
 @pytest.mark.parametrize(
-    ("value", "mask"), [(None, 0o022), ("002", 0o002), ("0027", 0o027), ("022", 0o022)]
+    ("value", "mask"), [(None, 0o002), ("002", 0o002), ("0027", 0o027), ("022", 0o022)]
 )
 def test_umask_is_an_octal_mask(value, mask):
     if mask is None:
@@ -184,6 +184,20 @@ def test_library_variables_match_env_example_and_the_compose_app_service():
 def test_the_env_example_is_a_valid_configuration():
     example = {k: v for k, v in parse_env_file(ENV_EXAMPLE).items() if k != "DATA_ROOT"}
     assert Settings.from_env(example).library_dirs["audiobooks"] == "Hörbücher"
+
+
+def test_the_youtube_probe_timeout_reaches_the_app_through_compose():
+    """Regression (#73): the app read it, but compose never passed it, so `.env` did nothing."""
+    app = environment_as_dict(services(load_compose(REPO_ROOT / "docker-compose.yml"))["app"])
+    assert "YOUTUBE_PROBE_TIMEOUT" in app
+    assert "YOUTUBE_PROBE_TIMEOUT" in parse_env_file(ENV_EXAMPLE)
+
+
+def test_the_app_never_gets_the_host_side_settings():
+    """`DATA_ROOT` in `.env` is the HOST path; compose mounts it at /data instead. The other
+    three are dev-only (the image and the Caddyfile fix the port at 8000) (#73)."""
+    app = environment_as_dict(services(load_compose(REPO_ROOT / "docker-compose.yml"))["app"])
+    assert not {"APP_HOST", "APP_PORT", "CONFIG_DIR", "DATA_ROOT"} & set(app)
 
 
 # --- networks podcast fetches never go to (issue #34 follow-up) --------------------------------
@@ -236,6 +250,26 @@ def test_magnet_stall_days_accepts_zero_and_up_to_a_year(value, expected):
 @pytest.mark.parametrize("value", ["-1", "366", "seven", "1.5"])
 def test_magnet_stall_days_rejects_anything_else(value):
     assert any("MAGNET_STALL_DAYS" in p for p in problems(MAGNET_STALL_DAYS=value))
+
+
+# --- TRUSTED_PROXY (#76) ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["proxy", "caddy", "172.18.0.5", "::1"])
+def test_a_trusted_proxy_name_or_address_is_accepted(name):
+    assert settings(TRUSTED_PROXY=name).trusted_proxy == name
+
+
+def test_an_empty_trusted_proxy_means_no_header_is_believed():
+    assert settings(TRUSTED_PROXY="").trusted_proxy == ""
+    assert settings(TRUSTED_PROXY="   ").trusted_proxy == ""
+    assert settings(TRUSTED_PROXY=None).trusted_proxy == "proxy"
+    assert settings(TRUSTED_PROXY="").summary()["trusted_proxy"] is None
+
+
+@pytest.mark.parametrize("value", ["http://proxy", "proxy:8080", "pro xy", "a/b"])
+def test_a_bad_trusted_proxy_is_refused(value):
+    assert any("TRUSTED_PROXY" in p for p in problems(TRUSTED_PROXY=value))
 
 
 # --- INTERNET_CHECK_HOST / INTERNET_CHECK_PORT (the dashboard's internet card) ---------
