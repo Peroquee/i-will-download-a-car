@@ -42,6 +42,7 @@ def test_the_migration_gives_existing_accounts_the_right_and_adds_the_columns(tm
         "0015_resolution_rights.sql",
         "0016_job_note.sql",
         "0017_poll_settings.sql",
+        "0018_indexes_and_constraints.sql",
     ]
     row = conn.execute(
         "SELECT default_max_height, can_set_resolution FROM accounts WHERE username = 'old'"

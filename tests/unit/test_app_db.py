@@ -303,10 +303,12 @@ def test_the_expected_indexes_exist(database):
     names = {r[0] for r in database.query("SELECT name FROM sqlite_master WHERE type = 'index'")}
     assert {
         "jobs_type_external_id",
-        "jobs_status",
-        "jobs_created_at",
+        "jobs_status_priority",
+        "jobs_status_updated_at",
         "subscriptions_enabled_last_checked",
     } <= names
+    # 0018 dropped the two that no query uses (#72).
+    assert not {"jobs_status", "jobs_created_at"} & names
 
 
 # --- the migration runner ------------------------------------------------------------
