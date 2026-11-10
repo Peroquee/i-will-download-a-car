@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.db_error = str(exc)
         logger.error("database unavailable", extra={"error": str(exc), "hint": exc.hint})
     if app.state.db is not None:
-        _set_up_accounts(app.state.db, settings)
+        _set_up_accounts(app.state.db, settings, app.state.test_account)
     if app.state.db is not None and app.state.qbit is None:
         # Without qBittorrent no magnet can transfer. An old hold state from before must not
         # block the normal YouTube/podcast queues (#70); no priority manager will clear it.
@@ -237,20 +237,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("stopped")
 
 
-def _set_up_accounts(db: Database, settings: Settings) -> None:
+def _set_up_accounts(
+    db: Database, settings: Settings, test_account: accounts.Account | None = None
+) -> None:
     """The first admin from `.env` (see `accounts.bootstrap_admin`), or a warning if there is no
-    account at all (nobody could log in)."""
-    if auth.TEST_ACCOUNT is not None:  # tests only: the account every request counts as
+    account at all (nobody could log in). `test_account` is the test hook (#76)."""
+    if test_account is not None:  # tests only: the account every request counts as
         with db.transaction() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO accounts (id, username, password_hash, role) "
                 "VALUES (?, ?, 'test', ?)",
-                (auth.TEST_ACCOUNT.id, auth.TEST_ACCOUNT.username, auth.TEST_ACCOUNT.role),
+                (test_account.id, test_account.username, test_account.role),
             )
     if settings.admin_password_hash:
         result = accounts.bootstrap_admin(db, settings.admin_user, settings.admin_password_hash)
         logger.info("admin account", extra={"result": result, "admin_user": settings.admin_user})
-    elif not accounts.list_all(db):
+    elif not accounts.any_exists(db):
         logger.error(
             "no account exists, so nobody can log in: set the admin password with "
             "`make admin-password` (it writes APP_ADMIN_USER and APP_ADMIN_PASSWORD_HASH to .env), "
@@ -280,8 +282,14 @@ def _workers_state(state) -> str:
     return "ok"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the app. With no argument the settings come from the environment."""
+def create_app(
+    settings: Settings | None = None, *, test_account: accounts.Account | None = None
+) -> FastAPI:
+    """Build the app. With no argument the settings come from the environment.
+
+    `test_account` is the test hook (#76): when given, every request counts as that account and
+    its row is put into the database. Only tests pass it; `python -m ytp` never does.
+    """
     resolved = settings if settings is not None else Settings.from_env()
     # No /docs, /redoc or /openapi.json: nothing needs them and the app is LAN-only anyway.
     app = FastAPI(
@@ -320,12 +328,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.podcast_worker_thread = None
     app.state.organizer = None  # set by #16: organize(job, torrent) -> None
     app.state.limiter = LoginLimiter()
+    app.state.test_account = test_account  # tests only (#76)
+    app.state.trusted_proxies = auth.TrustedProxies(resolved.trusted_proxy)
     api.register(app)
     auth_api.register(app)
     register_ui(app)
     # The last middleware added is the outermost: the same-origin check and the security headers
     # see every request first, the login check (#44) runs inside them.
-    app.add_middleware(AuthMiddleware, routes=lambda: app.routes, database=lambda: app.state.db)
+    app.add_middleware(
+        AuthMiddleware,
+        routes=lambda: app.routes,
+        database=lambda: app.state.db,
+        test_account=lambda: app.state.test_account,
+    )
     app.add_middleware(SecurityMiddleware)
 
     @app.get("/health")

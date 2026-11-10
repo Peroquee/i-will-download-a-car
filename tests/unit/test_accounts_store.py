@@ -13,7 +13,7 @@ import pytest
 from tests.helpers.accounts_app import fast_hash
 from ytp import accounts, auth, jobs, passwords, podcast_subscriptions, subscriptions
 from ytp.accounts import AccountError
-from ytp.auth import LoginLimiter, client_address
+from ytp.auth import TRUSTED_PROXY_SECONDS, LoginLimiter, TrustedProxies, client_address
 from ytp.config import ConfigError, Settings
 from ytp.db import Database
 from ytp.scheduler import get_state
@@ -192,23 +192,66 @@ def scope(peer, forwarded=None):
 
 
 @pytest.mark.parametrize(
-    ("peer", "forwarded", "expected"),
+    ("peer", "forwarded", "trusted", "expected"),
     [
-        ("172.18.0.5", "192.168.1.20", "192.168.1.20"),  # from the proxy: believed
-        ("172.18.0.5", "6.6.6.6, 192.168.1.20", "192.168.1.20"),  # the proxy's own entry is last
-        ("127.0.0.1", "192.168.1.20", "192.168.1.20"),
-        ("172.18.0.5", "not an address", "172.18.0.5"),
-        ("172.18.0.5", None, "172.18.0.5"),
-        ("8.8.8.8", "192.168.1.20", "8.8.8.8"),  # from anywhere else: ignored
-        ("testclient", "192.168.1.20", "testclient"),
+        ("172.18.0.5", "192.168.1.20", {"172.18.0.5"}, "192.168.1.20"),  # the proxy: believed
+        ("172.18.0.5", "6.6.6.6, 192.168.1.20", {"172.18.0.5"}, "192.168.1.20"),  # its own last
+        ("127.0.0.1", "192.168.1.20", {"127.0.0.1"}, "192.168.1.20"),
+        ("172.18.0.5", "not an address", {"172.18.0.5"}, "172.18.0.5"),
+        ("172.18.0.5", None, {"172.18.0.5"}, "172.18.0.5"),
+        # Regression (#76): another container on the compose bridge is private too, but is not
+        # the proxy and must not choose the rate-limit key.
+        ("172.18.0.9", "192.168.1.20", {"172.18.0.5"}, "172.18.0.9"),
+        ("172.18.0.5", "192.168.1.20", set(), "172.18.0.5"),  # no proxy configured
+        ("8.8.8.8", "192.168.1.20", {"172.18.0.5"}, "8.8.8.8"),  # a stranger: ignored
     ],
 )
-def test_the_forwarded_address_is_believed_only_from_the_proxy(peer, forwarded, expected):
-    assert client_address(scope(peer, forwarded)) == expected
+def test_the_forwarded_address_is_believed_only_from_the_trusted_proxy(
+    peer, forwarded, trusted, expected
+):
+    assert client_address(scope(peer, forwarded), trusted) == expected
 
 
 def test_no_client_at_all_still_gives_a_key():
     assert client_address({"headers": []}) == "unknown"
+
+
+def test_the_trusted_proxy_is_resolved_once_and_cached():
+    calls: list[str] = []
+    clock = Clock()
+    trusted = TrustedProxies(
+        "proxy",
+        resolver=lambda name: calls.append(name) or ["172.18.0.10"],
+        clock=clock,
+    )
+    assert "172.18.0.10" in trusted
+    assert "172.18.0.11" not in trusted
+    clock.now += TRUSTED_PROXY_SECONDS - 1
+    assert "172.18.0.10" in trusted
+    assert calls == ["proxy"], "the answer is cached"
+    clock.now += 2
+    assert "172.18.0.10" in trusted
+    assert calls == ["proxy", "proxy"], "and looked up again after the TTL"
+
+
+def test_a_trusted_proxy_name_that_does_not_resolve_trusts_nobody():
+    def broken(name):
+        raise OSError("no such host")
+
+    trusted = TrustedProxies("proxy", resolver=broken)
+    assert "172.18.0.10" not in trusted
+
+
+def test_no_trusted_proxy_name_means_no_header_is_believed():
+    trusted = TrustedProxies("", resolver=lambda name: ["172.18.0.10"])
+    assert "172.18.0.10" not in trusted
+    assert client_address(scope("172.18.0.10", "192.168.1.20"), trusted) == "172.18.0.10"
+
+
+def test_a_peer_that_is_not_an_address_never_matches():
+    trusted = TrustedProxies("proxy", resolver=lambda name: ["172.18.0.10"])
+    assert "testclient" not in trusted
+    assert client_address(scope("testclient", "192.168.1.20"), trusted) == "testclient"
 
 
 # --- sessions ---
@@ -352,6 +395,75 @@ def test_deleting_an_account_keeps_the_jobs_it_started(db, two):
     assert not db.query("SELECT 1 FROM job_owners WHERE job_id = ?", (job.id,))
 
 
+def test_follower_names_can_be_read_for_every_subscription_at_once(db, two):
+    alice, bob = two
+    first, _ = subscriptions.add(db, CID, "Blender")
+    second, _ = subscriptions.add(db, CID2, "Other")
+    accounts.follow(db, "channel", first.id, alice.id)
+    accounts.follow(db, "channel", first.id, bob.id)
+    accounts.follow(db, "channel", second.id, bob.id)
+    assert accounts.follower_names_by_subscription(db, "channel") == {
+        first.id: ["alice", "bob"],
+        second.id: ["bob"],
+    }
+
+
+def test_any_exists_answers_without_loading_the_accounts(db):
+    assert accounts.any_exists(db) is False
+    accounts.create_with_hash(db, "alice", fast_hash(), "user")
+    assert accounts.any_exists(db) is True
+
+
+# --- one transaction for a partial update (#76) ---
+
+
+def test_update_applies_every_field_at_once(db, two):
+    alice, _ = two
+    changed = accounts.update(
+        db,
+        alice.id,
+        role="admin",
+        disabled=True,
+        default_max_height=720,
+        can_set_resolution=False,
+    )
+    assert (changed.role, changed.disabled) == ("admin", True)
+    assert (changed.default_max_height, changed.can_set_resolution) == (720, False)
+
+
+def test_update_leaves_fields_alone_that_are_unchanged(db, two):
+    alice, _ = two
+    accounts.update(db, alice.id, default_max_height=1080)
+    changed = accounts.update(db, alice.id, disabled=True)
+    assert changed.default_max_height == 1080
+    assert changed.disabled is True
+
+
+def test_update_validates_everything_before_writing(db, two):
+    alice, _ = two
+    with pytest.raises(AccountError) as error:
+        accounts.update(db, alice.id, role="admin", disabled="yes")
+    assert error.value.kind == "invalid"
+    stored = accounts.get(db, alice.id)
+    assert (stored.role, stored.disabled) == ("user", False), "nothing was written"
+
+
+def test_update_keeps_the_last_active_admin_rule(db):
+    boss = accounts.create_with_hash(db, "boss", fast_hash(), "admin")
+    with pytest.raises(AccountError) as error:
+        accounts.update(db, boss.id, role="user", disabled=True)
+    assert error.value.kind == "last_admin"
+    stored = accounts.get(db, boss.id)
+    assert (stored.role, stored.disabled) == ("admin", False)
+
+
+def test_update_ends_the_sessions_of_a_disabled_account(db, two):
+    alice, _ = two
+    token = accounts.new_session(db, alice.id)
+    accounts.update(db, alice.id, disabled=True)
+    assert accounts.session_account(db, token) is None
+
+
 def test_job_owners_can_be_several_and_adding_twice_is_harmless(db, two):
     alice, bob = two
     job, _ = jobs.submit_job(db, "youtube", "aaaaaaaaaaa", "{}")
@@ -491,11 +603,11 @@ def test_a_bad_admin_name_is_refused_at_start():
 # --- the test hook must not exist in production ---
 
 
-def test_nothing_in_the_app_sets_the_test_account():
-    """`auth.TEST_ACCOUNT` makes every request an admin. It is for tests only: it is None unless a
-    test sets it, and no module under app/ assigns it."""
+def test_the_test_account_is_not_a_global_in_the_production_modules():
+    """`create_app(test_account=...)` is the only way in (#76): no module under app/ keeps a
+    switch that could make every request an admin."""
     root = Path(__file__).resolve().parents[2]
-    code = "from ytp import auth, main; print(auth.TEST_ACCOUNT)"
+    code = "from ytp import auth; print(hasattr(auth, 'TEST_ACCOUNT'))"
     result = subprocess.run(
         [sys.executable, "-c", code],
         cwd=root / "app",
@@ -504,10 +616,7 @@ def test_nothing_in_the_app_sets_the_test_account():
         check=True,
         timeout=60,
     )
-    assert result.stdout.strip() == "None"
+    assert result.stdout.strip() == "False"
     for path in (root / "app" / "ytp").rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        if path.name != "auth.py":
-            assert "TEST_ACCOUNT =" not in text, path
-    assert "TEST_ACCOUNT: Account | None = None" in (root / "app" / "ytp" / "auth.py").read_text()
+        assert "TEST_ACCOUNT" not in path.read_text(encoding="utf-8"), path
     assert auth.COOKIE == "ytp_session"

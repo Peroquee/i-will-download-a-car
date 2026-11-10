@@ -230,7 +230,9 @@ async def retry_job(job_id: int, request: Request):
         return failure
     job = await asyncio.to_thread(jobs.get_job, db, job_id)
     owner = visible_to(request)
-    if job is None or (owner is not None and not accounts.owns_job(db, job_id, owner)):
+    if job is None:
+        return problem(404, "no such job")
+    if owner is not None and not await asyncio.to_thread(accounts.owns_job, db, job_id, owner):
         # Somebody else's job looks exactly like one that does not exist.
         return problem(404, "no such job")
     if job.status != "failed":
@@ -317,7 +319,9 @@ async def _own_job(request: Request, job_id: int):
         return None, failure
     job = await asyncio.to_thread(jobs.get_job, db, job_id)
     owner = visible_to(request)
-    if job is None or (owner is not None and not accounts.owns_job(db, job_id, owner)):
+    if job is None:
+        return None, problem(404, "no such job")
+    if owner is not None and not await asyncio.to_thread(accounts.owns_job, db, job_id, owner):
         return None, problem(404, "no such job")
     return job, None
 

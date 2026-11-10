@@ -76,18 +76,20 @@ async def followed_view(db: Database, kind: str, rows: list[Any], account) -> li
     """The subscriptions an account may see, as dicts with `following` and (admin) `followers`.
 
     An admin sees every subscription, a user only the ones they follow. The names of the other
-    followers are for admins only."""
+    followers are for admins only. The follower names of every subscription come from ONE
+    grouped query, not two queries per row (#76)."""
     mine = await asyncio.to_thread(accounts.followed_ids, db, kind, account.id)
+    names = await asyncio.to_thread(accounts.follower_names_by_subscription, db, kind)
     result = []
     for row in rows:
         if not account.is_admin and row.id not in mine:
             continue
         entry = row.as_dict()
         entry["following"] = row.id in mine
-        count = len(await asyncio.to_thread(accounts.followers, db, kind, row.id))
-        entry["follower_count"] = count
+        followers = names.get(row.id, [])
+        entry["follower_count"] = len(followers)
         if account.is_admin:
-            entry["followers"] = await asyncio.to_thread(accounts.follower_names, db, kind, row.id)
+            entry["followers"] = followers
         result.append(entry)
     return result
 
