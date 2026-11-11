@@ -8,13 +8,15 @@ import pytest
 
 from tests.helpers.accounts_app import client_for, db_of, running
 from tests.helpers.accounts_app import people as make_people
+from tests.helpers.app import stop_download_workers
 from ytp import accounts, jobs
 
 pytestmark = [pytest.mark.real_auth, pytest.mark.security]
 
 
 @pytest.fixture
-def app_client(tmp_path):
+def app_client(tmp_path, monkeypatch):
+    stop_download_workers(monkeypatch)  # the thread must not claim the queued test jobs
     with running(tmp_path) as client:
         client.app.state.youtube_worker = SimpleNamespace(
             wake=lambda: None, progress={}, details={}

@@ -10,6 +10,7 @@ import pytest
 
 from tests.helpers.accounts_app import db_of, running
 from tests.helpers.accounts_app import people as make_people
+from tests.helpers.app import stop_download_workers
 from tests.helpers.fake_probe import FakeTraitsProbe
 from tests.helpers.feedxml import CID as FEED_CID
 from tests.helpers.feedxml import entry, feed
@@ -23,7 +24,8 @@ pytestmark = [pytest.mark.real_auth, pytest.mark.security]
 
 
 @pytest.fixture
-def app_client(tmp_path):
+def app_client(tmp_path, monkeypatch):
+    stop_download_workers(monkeypatch)  # the thread must not claim the queued test jobs
     with running(tmp_path) as client:
         probe = YoutubeProbe(timeout=1.0, extract=fake_extract(channel_info(FEED_CID, "Blender")))
         client.app.state.youtube = probe
