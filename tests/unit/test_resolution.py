@@ -14,12 +14,12 @@ import pytest
 from starlette.testclient import TestClient
 
 from tests.helpers.accounts_app import ADMIN, add_account, client_for, running
-from tests.unit.test_feeds import CID, entry, feed
+from tests.helpers.fakes import FakeFeeds
+from tests.helpers.feedxml import CID, entry, feed
 from ytp import accounts, resolution, subscriptions
 from ytp import db as dbmod
 from ytp.channels import Channel
 from ytp.db import Database
-from ytp.feeds import FeedClient
 from ytp.subscription_poller import SubscriptionPoller
 
 pytestmark = [pytest.mark.security, pytest.mark.real_auth]
@@ -394,15 +394,6 @@ def test_a_non_follower_cannot_change_a_subscription(app_client):
 
 
 # --- the poller ---------------------------------------------------------------------------------------
-
-
-class FakeFeeds(FeedClient):
-    def __init__(self):
-        super().__init__()
-        self.answers: dict[str, bytes] = {}
-
-    def fetch(self, channel_id):
-        return self.answers.get(channel_id, feed(channel=channel_id))
 
 
 def poller_database(tmp_path) -> Database:

@@ -10,36 +10,16 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
 from tests.helpers.fake_probe import FakeTraitsProbe
-from tests.unit.test_feeds import entry, feed
+from tests.helpers.fakes import FakeFeeds
+from tests.helpers.feedxml import entry, feed
 from ytp import jobs, subscriptions
 from ytp.config import Settings
-from ytp.feeds import FeedClient, FeedError
+from ytp.feeds import FeedError
 from ytp.main import create_app
 
 CID = "UCSMOQeBJ2RAnuFungnQOxLg"
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hb",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
-
-
-class FakeFeeds(FeedClient):
-    def __init__(self):
-        super().__init__()
-        self.answer: bytes | FeedError | Exception = feed()
-        self.gate: threading.Event | None = None
-
-    def fetch(self, channel_id):
-        if self.gate is not None:
-            self.gate.wait(5)
-        if isinstance(self.answer, Exception):
-            raise self.answer
-        return self.answer
 
 
 @pytest.fixture

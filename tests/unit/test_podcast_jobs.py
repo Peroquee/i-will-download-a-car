@@ -12,11 +12,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tests.helpers.app import ENV
 from tests.unit.test_podcasts import JPEG, rss
 from ytp import jobs, podcast_subscriptions
 from ytp.config import Settings
 from ytp.db import Database
 from ytp.podcast_jobs import (
+    DEADLINE_SECONDS,
     JOB_TYPE,
     PodcastJobMetadata,
     PodcastPoller,
@@ -26,14 +28,6 @@ from ytp.podcast_jobs import (
 from ytp.podcasts import PodcastError, PodcastFeedClient, episode_key, parse_podcast
 from ytp.safefetch import Fetched, FetchError
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 FEED = "https://podcast.example/feed.xml"
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 SUBSCRIBED = "2026-10-20T00:00:00.000Z"
@@ -50,6 +44,7 @@ class FakeFetcher:
         self.content_type = "audio/mpeg"
         self.final_url: str | None = None
         self.gate: threading.Event | None = None
+        self.deadlines: list[float] = []  # the deadline each download was given (#77)
 
     def fetch_bytes(self, url, *, kind, max_bytes):
         self.calls.append((kind, url))
@@ -65,6 +60,7 @@ class FakeFetcher:
 
     def download(self, url, destination, *, kind, max_bytes, deadline_seconds=0, progress=None):
         self.calls.append((kind, url))
+        self.deadlines.append(deadline_seconds)
         if self.gate is not None:
             self.gate.wait(5)
         answer = self.files.get(url)
@@ -155,6 +151,16 @@ def test_an_episode_is_downloaded_filed_and_marked_done(world):
     assert (world.tmp / "Podcasts/Test Cast/2026-10-31 - Pilot.mp3").read_bytes() == b"ID3audio"
     assert world.refresher.asked == ["Podcasts"]
     assert not (world.tmp / "downloads/incomplete/podcasts" / job.external_id).exists()
+
+
+def test_the_worker_gives_every_download_the_two_hour_deadline(world):
+    """#77: SafeFetcher's real slow-peer cut-off (test_safefetch) only applies when the worker
+    hands the deadline over; a fake clock here would not prove that."""
+    world.fetcher.files["https://cdn.example/new.mp3"] = b"ID3"
+    job = world.queue()
+    world.worker().run_one()
+    assert world.status(job.id) == ("done", None)
+    assert world.fetcher.deadlines == [DEADLINE_SECONDS]
 
 
 def test_a_finished_episode_asks_for_new_storage_sizes(world):

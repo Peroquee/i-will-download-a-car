@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from tests.unit.test_feeds import CID, entry, feed
+from tests.helpers.app import ENV
+from tests.helpers.fakes import FakeFeeds
+from tests.helpers.feedxml import CID, entry, feed
 from ytp import jobs, subscriptions
 from ytp.db import Database
-from ytp.feeds import FeedClient, FeedError
+from ytp.feeds import FeedError
 from ytp.subscription_poller import (
     MAX_CHANNELS_PER_RUN,
     MAX_CHECKS_PER_MINUTE,
@@ -99,20 +101,6 @@ def db(tmp_path) -> Database:
     database = Database.open(tmp_path / "app.db")
     yield database
     database.close()
-
-
-class FakeFeeds(FeedClient):
-    def __init__(self):
-        super().__init__()
-        self.answers: dict[str, bytes | FeedError] = {}
-        self.fetched: list[str] = []
-
-    def fetch(self, channel_id):
-        self.fetched.append(channel_id)
-        answer = self.answers.get(channel_id, feed(channel=channel_id))
-        if isinstance(answer, FeedError):
-            raise answer
-        return answer
 
 
 class FakeWorker:
@@ -364,11 +352,6 @@ def test_queued_metadata_is_plain_json(db):
 
 # --- settings and wiring ---
 
-MEDIA_ENV = {
-    "MEDIA_DIR_MOVIES": "Filme", "MEDIA_DIR_SERIES": "Serien", "MEDIA_DIR_AUDIOBOOKS": "Hb",
-    "MEDIA_DIR_MUSIC": "Musik", "MEDIA_DIR_YOUTUBE": "Youtube", "MEDIA_DIR_PODCASTS": "Podcasts",
-}  # fmt: skip
-
 
 def test_record_poll_can_take_the_time_from_the_caller(db):
     s = add(db)
@@ -380,14 +363,14 @@ def test_record_poll_can_take_the_time_from_the_caller(db):
 def test_the_poll_interval_setting(value, minutes):
     from ytp.config import Settings
 
-    env = {**MEDIA_ENV, "SUBSCRIPTION_POLL_MINUTES": value}
+    env = {**ENV, "SUBSCRIPTION_POLL_MINUTES": value}
     assert Settings.from_env(env).subscription_poll_minutes == minutes
 
 
 def test_the_poll_interval_defaults_to_an_hour():
     from ytp.config import Settings
 
-    assert Settings.from_env(MEDIA_ENV).subscription_poll_minutes == 60
+    assert Settings.from_env(ENV).subscription_poll_minutes == 60
 
 
 @pytest.mark.parametrize("value", ["5", "14", "1441", "abc", "-1", "1.5"])
@@ -395,7 +378,7 @@ def test_a_bad_poll_interval_is_refused_with_the_name_of_the_setting(value):
     from ytp.config import ConfigError, Settings
 
     with pytest.raises(ConfigError, match="SUBSCRIPTION_POLL_MINUTES"):
-        Settings.from_env({**MEDIA_ENV, "SUBSCRIPTION_POLL_MINUTES": value})
+        Settings.from_env({**ENV, "SUBSCRIPTION_POLL_MINUTES": value})
 
 
 @pytest.mark.parametrize("minutes", ["60", "0"])
@@ -408,7 +391,7 @@ def test_the_app_always_schedules_the_poller_and_a_zero_default_pauses_it(tmp_pa
     config = tmp_path / "config"
     config.mkdir()
     env = {
-        **MEDIA_ENV,
+        **ENV,
         "DATA_ROOT": str(tmp_path),
         "CONFIG_DIR": str(config),
         "SUBSCRIPTION_POLL_MINUTES": minutes,

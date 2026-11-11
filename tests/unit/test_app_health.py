@@ -12,20 +12,13 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
 from ytp import __version__, jobs
 from ytp.config import Settings
 from ytp.db import Database
 from ytp.main import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 def make(tmp_path: Path, **env: str) -> TestClient:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import socket
 import time
 import urllib.request
 from collections.abc import Iterator
@@ -14,9 +13,13 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
+from tests.helpers.clock import Clock
 from tests.helpers.fake_alert_target import FakeAlertTarget
 from tests.helpers.fake_gluetun import API_KEY, FakeGluetun
 from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from tests.helpers.fakes import FakeInternet
+from tests.helpers.net import free_port
 from ytp import watchdog as wd
 from ytp.alerts import Alert, Alerter
 from ytp.clients.gluetun import GluetunControl
@@ -26,14 +29,6 @@ from ytp.config import Settings
 from ytp.main import create_app
 from ytp.watchdog import StatusServer, Watchdog, WatchdogConfig
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 NOW = Alert(
     "down",
     "VPN is down",
@@ -41,12 +36,6 @@ NOW = Alert(
     "2026-11-01T10:00:00+00:00",
     True,
 )
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 @pytest.fixture
@@ -68,14 +57,6 @@ def qbit_server() -> Iterator[FakeQbittorrent]:
     server = FakeQbittorrent().start()
     yield server
     server.stop()
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 class Wall:
@@ -493,13 +474,6 @@ def test_an_unreadable_status_is_unknown(body):
         server.shutdown()
         server.server_close()
     assert got["state"] == "unknown"
-
-
-class FakeInternet:
-    """The status endpoint must not do a real DNS + TCP check in the unit suite."""
-
-    def refresh(self):
-        return {"state": "ok", "checked_at": "2026-11-07T12:00:00Z"}
 
 
 def make_app(tmp_path: Path, status_url: str) -> TestClient:

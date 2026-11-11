@@ -11,6 +11,7 @@ from collections.abc import Iterator
 import pytest
 
 from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from tests.helpers.net import free_port
 from ytp.clients.qbittorrent import (
     CATEGORIES,
     QbitAuthError,
@@ -37,12 +38,6 @@ def client_for(fake: FakeQbittorrent, **kwargs) -> QbitClient:
     return QbitClient(
         fake.url, kwargs.pop("user", USER), kwargs.pop("password", PASSWORD), **kwargs
     )
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 # --- login ---------------------------------------------------------------------------

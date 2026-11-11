@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from tests.helpers.accounts_app import ADMIN, PASSWORD, add_account, client_for, running
+from tests.helpers.accounts_app import ADMIN, PASSWORD, add_account, client_for, db_of, running
 from ytp import accounts
 from ytp.auth import COOKIE, LoginLimiter
 
@@ -36,10 +36,6 @@ def token_of(browser) -> str | None:
 def plant(browser, value: str) -> None:
     """A cookie in the browser as the server would have set it (for its host, whole site)."""
     browser.cookies.set(COOKIE, value, domain="testserver.local", path="/")
-
-
-def db_of(client):
-    return client.app.state.db
 
 
 # --- login ---

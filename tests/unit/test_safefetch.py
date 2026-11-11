@@ -941,6 +941,8 @@ def test_a_tls_handshake_that_never_answers_is_cut_off(monkeypatch):
 
 @pytest.mark.security
 def test_a_body_that_trickles_in_is_cut_off_by_the_deadline(world, server):
+    """The clock is fake here (the old guarantee that hid the bug, #67). The real slow peer is
+    covered by test_a_real_body_trickle_is_cut_off_at_the_deadline_not_after_it below."""
     server.routes["/x"] = (200, {"Content-Type": "text/xml"}, b"x" * 300_000)
     ticks = iter(range(0, 10_000, 100))
     fetcher = world.fetcher(clock=lambda: next(ticks))

@@ -539,7 +539,7 @@ def test_the_database_refuses_an_unknown_target(tmp_path):
 def test_the_poller_queues_new_videos_for_the_subscriptions_target(tmp_path):
     from datetime import UTC, datetime, timedelta
 
-    from tests.unit.test_feeds import entry, feed
+    from tests.helpers.feedxml import entry, feed
     from tests.unit.test_subscription_poller import FakeFeeds, FakeWorker, make_poller
     from ytp.db import Database
 

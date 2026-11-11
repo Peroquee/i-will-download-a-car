@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.app import ENV
 from tests.helpers.shell import ScriptResult, StubBin, isolated_bin, run_script
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "host" / "check-host.sh"
@@ -113,12 +114,7 @@ else echo "{vm}"; [ "{vm}" != none ] || exit 1; fi""",
             "PUID": str(self.puid),
             "PGID": str(self.pgid),
             "UMASK": "002",
-            "MEDIA_DIR_MOVIES": "Filme",
-            "MEDIA_DIR_SERIES": "Serien",
-            "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-            "MEDIA_DIR_MUSIC": "Musik",
-            "MEDIA_DIR_PODCASTS": "Podcasts",
-            "MEDIA_DIR_YOUTUBE": "Youtube",
+            **ENV,
             "APP_ADMIN_USER": "admin",
             "APP_ADMIN_PASSWORD_HASH": "scrypt:32768:8:1:c2FsdHNhbHRzYWx0:a2V5a2V5a2V5a2V5",
         }

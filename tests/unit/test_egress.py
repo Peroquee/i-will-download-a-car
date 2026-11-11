@@ -10,6 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from tests.helpers.clock import Clock
 from tests.helpers.fake_alert_target import FakeAlertTarget
 from tests.helpers.fake_gluetun import API_KEY, FakeGluetun
 from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
@@ -249,14 +250,6 @@ def test_no_problem_text_contains_an_address(gluetun, qbit_server):
 
 
 # --- the watchdog acts on it ----------------------
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 def make(gluetun, qbit_server, target=None, *, confirm=2, **config) -> Watchdog:

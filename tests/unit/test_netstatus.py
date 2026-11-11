@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from tests.helpers.app import ENV
+from tests.helpers.net import free_port
 from ytp.netstatus import (
     WATCHDOG_STALE_SECONDS,
     InternetChecker,
@@ -28,12 +30,6 @@ def tcp_server():
         yield server
     finally:
         server.close()
-
-
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 # --- the independent internet check ------------------------------------------------
@@ -191,16 +187,7 @@ def test_the_app_builds_its_checker_from_the_settings(tmp_path):
     from ytp.config import Settings
     from ytp.main import create_app
 
-    env = {
-        "MEDIA_DIR_MOVIES": "Filme",
-        "MEDIA_DIR_SERIES": "Serien",
-        "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-        "MEDIA_DIR_MUSIC": "Musik",
-        "MEDIA_DIR_PODCASTS": "Podcasts",
-        "MEDIA_DIR_YOUTUBE": "Youtube",
-        "DATA_ROOT": str(tmp_path),
-        "CONFIG_DIR": str(tmp_path),
-    }
+    env = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(tmp_path)}
     default = create_app(Settings.from_env(env)).state.internet
     assert (default._host, default._port) == ("www.youtube.com", 443)
     custom = create_app(

@@ -10,7 +10,6 @@ file land in the right folder, is manual: docs/host-setup.md, step 5d.
 from __future__ import annotations
 
 import json
-import socket
 import subprocess
 import sys
 import time
@@ -23,6 +22,7 @@ import pytest
 from tests.helpers import docker
 from tests.helpers.compose import parse_env_file
 from tests.helpers.compose_cli import ENV_EXAMPLE, REPO_ROOT
+from tests.helpers.net import free_port
 
 pytestmark = [pytest.mark.docker, pytest.mark.network, pytest.mark.slow]
 
@@ -55,12 +55,6 @@ class Client:
 
     def get(self, path: str):
         return json.loads(self.opener.open(f"{self.base}/api/v2/{path}", timeout=20).read())
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 @pytest.fixture(scope="module")

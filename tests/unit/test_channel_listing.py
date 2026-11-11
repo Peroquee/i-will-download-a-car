@@ -8,7 +8,7 @@ from datetime import timedelta
 import pytest
 
 from tests.helpers.fake_probe import FakeTraitsProbe
-from tests.unit.test_feeds import entry, feed
+from tests.helpers.feedxml import entry, feed
 from tests.unit.test_subscription_poller import (
     CID,
     NOW,

@@ -207,3 +207,8 @@ class FakeQbittorrent:
         if self.server is not None:
             self.server.shutdown()
             self.server.server_close()
+
+
+def qbit_env(server: FakeQbittorrent) -> dict[str, str]:
+    """The settings that point the app at this fake server (issue #77)."""
+    return {"QBIT_URL": server.url, "QBIT_USER": USER, "QBIT_PASSWORD": PASSWORD}

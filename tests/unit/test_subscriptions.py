@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
 from ytp import subscriptions
 from ytp.channels import (
     ChannelRef,
@@ -27,14 +28,6 @@ from ytp.youtube import ProbeError, YoutubeProbe
 CID = "UCsXVk37bltHxD1rDPwtNM8Q"
 CID2 = "UCX6OQ3DkcsbYNE6H8uQQuVA"
 VIDEO = "dQw4w9WgXcQ"
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 # --- the address ---------------------------------------------------------------------------------------

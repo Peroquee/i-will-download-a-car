@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 from starlette.testclient import TestClient
 
@@ -20,14 +21,8 @@ from ytp.auth import COOKIE
 from ytp.config import Settings
 from ytp.main import create_app
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
+from .app import ENV
+
 FAST_N = 2**10  # the cost is in the stored hash: a test hash verifies quickly
 PASSWORD = "a long test password"  # a test value, not a secret
 ADMIN = "boss"
@@ -74,3 +69,21 @@ def client_for(client: TestClient, account: Account | str | None) -> TestClient:
         )
         other.cookies.set(COOKIE, accounts.new_session(client.app.state.db, who.id))
     return other
+
+
+def db_of(client: TestClient):
+    """The app's database behind a TestClient (issue #77)."""
+    return client.app.state.db
+
+
+def people(app_client: TestClient) -> SimpleNamespace:
+    """alice and bob, each with a browser, and the admin (issue #77)."""
+    alice = add_account(app_client, "alice")
+    bob = add_account(app_client, "bob")
+    return SimpleNamespace(
+        alice=client_for(app_client, alice),
+        bob=client_for(app_client, bob),
+        admin=client_for(app_client, ADMIN),
+        alice_id=alice.id,
+        bob_id=bob.id,
+    )

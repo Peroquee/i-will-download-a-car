@@ -8,6 +8,8 @@ from collections.abc import Iterator
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
+from tests.helpers.fakes import FakeWatchdog
 from ytp import alertlog, jobs, storage
 from ytp.clients.qbittorrent import Torrent
 from ytp.config import Settings
@@ -15,14 +17,6 @@ from ytp.jobs_api import TorrentProgress
 from ytp.main import create_app
 from ytp.scheduler import set_state
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hb",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 H1, H2 = "1" * 40, "2" * 40
 MOVIE = '{"type": "movies", "title": "Big Film", "year": 2001}'
 VIDEO = '{"type": "youtube", "video_id": "aaaaaaaaaaa", "channel": "Blender", "title": "Clip"}'
@@ -34,14 +28,6 @@ class FakeQbit:
 
     def list_torrents(self):
         return self.torrents
-
-
-class FakeWatchdog:
-    def __init__(self, status):
-        self.status = status
-
-    def fetch_status(self):
-        return self.status
 
 
 @pytest.fixture

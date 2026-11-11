@@ -11,19 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.helpers.app import ENV
 from ytp import storage
 from ytp.config import Settings
 from ytp.db import Database
 from ytp.scheduler import set_state
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 CATEGORIES = ("movies", "series", "audiobooks", "music", "podcasts", "youtube")
 
 

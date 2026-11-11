@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.helpers.accounts_app import ADMIN, add_account, client_for, running
+from tests.helpers.accounts_app import client_for, db_of, running
+from tests.helpers.accounts_app import people as make_people
 from ytp import accounts, jobs
 
 pytestmark = [pytest.mark.real_auth, pytest.mark.security]
@@ -23,19 +24,7 @@ def app_client(tmp_path):
 
 @pytest.fixture
 def people(app_client):
-    alice = add_account(app_client, "alice")
-    bob = add_account(app_client, "bob")
-    return SimpleNamespace(
-        alice=client_for(app_client, alice),
-        bob=client_for(app_client, bob),
-        admin=client_for(app_client, ADMIN),
-        alice_id=alice.id,
-        bob_id=bob.id,
-    )
-
-
-def db_of(client):
-    return client.app.state.db
+    return make_people(app_client)
 
 
 def make_job(client, *owner_ids, external_id="aaaaaaaaaaa", failed=True):

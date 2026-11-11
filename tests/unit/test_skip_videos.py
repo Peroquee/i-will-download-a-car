@@ -8,7 +8,7 @@ import logging
 import pytest
 
 from tests.helpers.fake_probe import ORDINARY, FakeTraitsProbe
-from tests.unit.test_feeds import CID, entry, feed
+from tests.helpers.feedxml import CID, entry, feed
 from tests.unit.test_subscription_poller import (
     FakeFeeds,
     FakeWorker,

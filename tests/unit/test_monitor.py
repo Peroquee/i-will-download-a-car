@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.fakes import FakeWatchdog
 from ytp import alertlog, jobs, subscriptions
 from ytp.db import Database
 from ytp.monitor import (
@@ -30,17 +31,6 @@ def db(tmp_path) -> Database:
     database = Database.open(tmp_path / "app.db")
     yield database
     database.close()
-
-
-class FakeWatchdog:
-    def __init__(self, **status):
-        self.status = {"state": "ok", **status}
-
-    def set(self, **status):
-        self.status = status
-
-    def fetch_status(self):
-        return dict(self.status)
 
 
 Usage = namedtuple("Usage", "total used free")

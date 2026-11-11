@@ -18,13 +18,14 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV, started_client
+from tests.helpers.clock import Clock
 from tests.helpers.fake_jellyfin import API_KEY as JELLYFIN_KEY
 from tests.helpers.fake_jellyfin import FakeJellyfin
 from ytp import jobs
 from ytp.clients.jellyfin import LibraryRefresher
 from ytp.config import ConfigError, Settings
 from ytp.db import Database
-from ytp.main import create_app
 from ytp.resolution import MAX_HEIGHTS
 from ytp.youtube import ProbeError, VideoRef
 from ytp.youtube_download import (
@@ -41,14 +42,6 @@ from ytp.youtube_download import (
 from ytp.youtube_jobs import JOB_TYPE, YoutubeJobMetadata, YoutubeWorker
 
 ID = "aqz-KE-bpKQ"
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 URL = f"https://www.youtube.com/watch?v={ID}"
 INFO = {
     "id": ID,
@@ -244,17 +237,6 @@ def test_errors_keep_their_meaning(tmp_path):
         YoutubeDownloader(download=fake_download(error=KeyError("x")), min_free_bytes=0).download(
             VideoRef(ID), tmp_path / "c"
         )
-
-
-class Clock:
-    def __init__(self, now: float = 1000.0):
-        self.now = now
-
-    def __call__(self) -> float:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += seconds
 
 
 def test_a_download_that_stops_making_progress_is_aborted(tmp_path):
@@ -642,15 +624,7 @@ def test_requeue_interrupted_only_touches_youtube_jobs(world):
 
 
 def make_client(tmp_path: Path, download=None, **env: str) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    data = tmp_path / "data"
-    for name in ENV.values():
-        (data / name).mkdir(parents=True, exist_ok=True)
-    (data / "downloads" / "incomplete").mkdir(parents=True, exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(data), "CONFIG_DIR": str(config), **env}
-    client = TestClient(create_app(Settings.from_env(values)))
-    client.__enter__()
+    client = started_client(tmp_path, **env)
     worker = client.app.state.youtube_worker
     if worker is not None:
         worker.downloader = YoutubeDownloader(

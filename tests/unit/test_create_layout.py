@@ -8,18 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.app import ENV
 from tests.helpers.shell import ScriptResult, run_script
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "host" / "create-layout.sh"
 
-LIBRARIES = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 DOWNLOADS = ("movies", "series", "audiobooks", "music", "incomplete")
 
 
@@ -42,7 +35,7 @@ class Layout:
             "DATA_ROOT": "/data",
             "PUID": str(self.puid),
             "PGID": str(self.pgid),
-            **LIBRARIES,
+            **ENV,
         }
         values.update(overrides)
         self.env_file.write_text(
@@ -67,7 +60,7 @@ def test_creates_every_download_and_library_folder(layout):
     assert result.returncode == 0, result.stderr
     for name in DOWNLOADS:
         assert (layout.data / "downloads" / name).is_dir()
-    for name in LIBRARIES.values():
+    for name in ENV.values():
         assert (layout.data / name).is_dir()
 
 
@@ -95,7 +88,7 @@ def test_is_safe_to_run_twice(layout):
     assert second.returncode == 0
     assert "creating" not in second.stdout
     assert (
-        second.stdout.count("exists") == 1 + len(DOWNLOADS) + len(LIBRARIES) + 1 + 1
+        second.stdout.count("exists") == 1 + len(DOWNLOADS) + len(ENV) + 1 + 1
     )  # +1: the app state folder, +1: the backup folder
 
 
@@ -373,7 +366,7 @@ def test_the_backup_folder_is_outside_downloads_and_every_library(layout):
     folder = layout.data / BACKUPS
     assert folder.parent == layout.data
     assert BACKUPS.startswith("."), "hidden"
-    assert BACKUPS not in {*LIBRARIES.values(), "downloads"}
+    assert BACKUPS not in {*ENV.values(), "downloads"}
 
 
 def test_the_name_is_the_one_backup_py_uses():

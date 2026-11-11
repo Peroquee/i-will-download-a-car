@@ -10,13 +10,13 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from tests.helpers.app import make_client as app_client
+from tests.helpers.clock import DatetimeClock
+from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent, qbit_env
 from ytp import jobs
 from ytp.clients.qbittorrent import QbitClient, Torrent
-from ytp.config import Settings
 from ytp.db import Database
 from ytp.jobs import Job
-from ytp.main import create_app
 from ytp.reconciler import (
     GAP_SECONDS,
     KEY_LAST_OK,
@@ -28,14 +28,6 @@ from ytp.reconciler import (
 from ytp.scheduler import get_state
 
 H1, H2, H3 = "1" * 40, "2" * 40, "3" * 40
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 def torrent(hash_: str, state: str = "downloading", progress: float = 0.5, **extra) -> dict:
@@ -436,12 +428,8 @@ def test_torrent_ready_to_organize(state, progress, ready):
 
 
 def make_client(tmp_path: Path, fake: FakeQbittorrent | None, **env: str) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config)}
-    if fake is not None:
-        values |= {"QBIT_URL": fake.url, "QBIT_USER": USER, "QBIT_PASSWORD": PASSWORD}
-    return TestClient(create_app(Settings.from_env({**values, **env})))
+    qbit = qbit_env(fake) if fake is not None else {}
+    return app_client(tmp_path, **{**qbit, **env})
 
 
 def test_the_app_schedules_the_reconciler_every_30_seconds_when_qbittorrent_is_configured(
@@ -492,17 +480,6 @@ def partial(left: int, state: str = "stalledDL", **extra) -> dict:
     }
 
 
-class Clock:
-    def __init__(self, start: datetime = T0):
-        self.t = start
-
-    def __call__(self) -> datetime:
-        return self.t
-
-    def advance(self, delta: timedelta) -> None:
-        self.t += delta
-
-
 def stall_reconciler(fake, database, clock, days: float | None = 7, **kw) -> Reconciler:
     """The tests jump whole days between runs (the real schedule is every 30 s), so the gap that
     restarts the clocks is made huge unless a test is about the gap."""
@@ -526,7 +503,7 @@ def deletions(fake) -> list:
 def test_c40_a_torrent_without_metadata_is_given_up_after_seven_days(fake, database):
     job = add_job(database, H1)
     fake.torrents = [torrent(H1, **NO_METADATA)]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()  # first sight: the clock starts
     clock.advance(DAY * 6 + timedelta(hours=23))
@@ -547,7 +524,7 @@ def test_c40_a_torrent_without_metadata_is_given_up_after_seven_days(fake, datab
 def test_c40_a_partial_download_that_stops_is_given_up_with_its_percentage(fake, database):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 7)
@@ -561,7 +538,7 @@ def test_c40_a_partial_download_that_stops_is_given_up_with_its_percentage(fake,
 
 def test_c40_a_slow_but_moving_download_is_never_given_up(fake, database):
     job = add_job(database, H1, status="downloading")
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     left = 900
     for _ in range(30):  # a month, one byte-ish step a day
@@ -576,7 +553,7 @@ def test_c40_a_slow_but_moving_download_is_never_given_up(fake, database):
 def test_c40_progress_restarts_the_clock(fake, database):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 6)
@@ -591,7 +568,7 @@ def test_c40_progress_restarts_the_clock(fake, database):
 def test_c40_a_failed_job_can_be_retried_and_gets_a_fresh_clock(fake, database):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 7)
@@ -611,7 +588,7 @@ def test_c40_a_failed_job_can_be_retried_and_gets_a_fresh_clock(fake, database):
 
 def test_c40_time_while_paused_does_not_count(fake, database):
     job = add_job(database, H1, status="downloading")
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     fake.torrents = [torrent(H1, **partial(600))]
     reconciler.run_once()
@@ -630,7 +607,7 @@ def test_c40_time_while_paused_does_not_count(fake, database):
 
 def test_c40_qbittorrent_queueing_and_checking_do_not_count(fake, database):
     add_job(database, H1, status="downloading")
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     for state in ("queuedDL", "checkingResumeData", "queuedDL"):
         fake.torrents = [torrent(H1, **partial(600, state=state))]
@@ -642,7 +619,7 @@ def test_c40_qbittorrent_queueing_and_checking_do_not_count(fake, database):
 def test_c40_downtime_of_the_app_does_not_count(fake, database):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     stall_reconciler(fake, database, clock, gap_seconds=GAP_SECONDS).run_once()
     clock.advance(DAY * 6)
     restarted = stall_reconciler(
@@ -659,7 +636,7 @@ def test_c40_downtime_of_the_app_does_not_count(fake, database):
 def test_c40_an_outage_of_qbittorrent_does_not_count(fake, database):
     add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock, gap_seconds=GAP_SECONDS)
     reconciler.run_once()
     fake.list_status = 503
@@ -676,7 +653,7 @@ def test_c40_an_outage_of_qbittorrent_does_not_count(fake, database):
 def test_c40_zero_or_unset_never_gives_up(fake, database, days):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock, days=days)
     for _ in range(5):
         reconciler.run_once()
@@ -694,7 +671,7 @@ def test_c40_files_are_only_deleted_inside_downloads(fake, database):
         torrent(H2, **partial(600, content_path="/data/Filme/a")),
         torrent(H3, **partial(600, content_path="/data/downloads/../Filme/a")),
     ]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 7)
@@ -706,7 +683,7 @@ def test_c40_files_are_only_deleted_inside_downloads(fake, database):
 def test_c40_without_a_downloads_folder_no_files_are_deleted(fake, database):
     add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     qbit = QbitClient(fake.url, USER, PASSWORD, timeout=3)
     reconciler = Reconciler(
         database, qbit, now=clock, stall_seconds=7 * 86400, gap_seconds=100 * 86400
@@ -722,7 +699,7 @@ def test_c40_if_qbittorrent_refuses_the_removal_the_job_is_not_failed_and_it_tri
 ):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 7)
@@ -737,7 +714,7 @@ def test_c40_if_qbittorrent_refuses_the_removal_the_job_is_not_failed_and_it_tri
 def test_c40_a_finished_torrent_is_never_given_up(fake, database):
     job = add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 30)
@@ -751,7 +728,7 @@ def test_c40_a_finished_torrent_is_never_given_up(fake, database):
 def test_c40_giving_up_is_logged_without_the_magnet_link(fake, database, caplog):
     add_job(database, H1, status="downloading")
     fake.torrents = [torrent(H1, **partial(600))]
-    clock = Clock()
+    clock = DatetimeClock(T0)
     reconciler = stall_reconciler(fake, database, clock)
     reconciler.run_once()
     clock.advance(DAY * 7)
@@ -766,6 +743,6 @@ def test_c40_the_app_hands_the_stall_limit_and_downloads_folder_to_the_reconcile
     with make_client(tmp_path, fake, MAGNET_STALL_DAYS="3") as client:
         reconciler = client.app.state.reconciler
         assert reconciler._stall_seconds == 3 * 86400
-        assert reconciler._downloads_dir == tmp_path / "downloads"
+        assert reconciler._downloads_dir == client.app.state.settings.downloads_dir
     with make_client(tmp_path, fake, MAGNET_STALL_DAYS="0") as client:
         assert client.app.state.reconciler._stall_seconds is None

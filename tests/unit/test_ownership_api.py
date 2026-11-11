@@ -8,10 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.helpers.accounts_app import ADMIN, add_account, client_for, running
+from tests.helpers.accounts_app import db_of, running
+from tests.helpers.accounts_app import people as make_people
 from tests.helpers.fake_probe import FakeTraitsProbe
-from tests.unit.test_feeds import CID as FEED_CID
-from tests.unit.test_feeds import entry, feed
+from tests.helpers.feedxml import CID as FEED_CID
+from tests.helpers.feedxml import entry, feed
 from tests.unit.test_subscription_poll_api import FakeFeeds
 from tests.unit.test_subscriptions import channel_info, fake_extract
 from ytp import accounts, jobs, podcast_subscriptions, subscriptions
@@ -37,20 +38,7 @@ def app_client(tmp_path):
 
 @pytest.fixture
 def people(app_client):
-    """alice and bob, each with a browser, and the admin."""
-    alice = add_account(app_client, "alice")
-    bob = add_account(app_client, "bob")
-    return SimpleNamespace(
-        alice=client_for(app_client, alice),
-        bob=client_for(app_client, bob),
-        admin=client_for(app_client, ADMIN),
-        alice_id=alice.id,
-        bob_id=bob.id,
-    )
-
-
-def db_of(client):
-    return client.app.state.db
+    return make_people(app_client)
 
 
 def make_job(client, owner_id, external_id="aaaaaaaaaaa", status=None):

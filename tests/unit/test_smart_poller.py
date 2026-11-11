@@ -9,8 +9,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from tests.helpers.app import ENV
 from tests.helpers.fake_probe import ORDINARY, FakeTraitsProbe
-from tests.unit.test_feeds import CID, entry, feed
+from tests.helpers.feedxml import CID, entry, feed
 from tests.unit.test_podcast_jobs import world  # noqa: F401
 from tests.unit.test_subscription_poller import (  # noqa: F401
     FakeFeeds,
@@ -277,11 +278,11 @@ def test_the_fixed_mode_ignores_the_pattern(db):
 
 
 def test_a_subscriptions_own_mode_beats_the_server_default(db, tmp_path):
-    defaults = ServerDefaults(lambda: db, Settings.from_env({
-        "MEDIA_DIR_MOVIES": "Filme", "MEDIA_DIR_SERIES": "Serien", "MEDIA_DIR_AUDIOBOOKS": "Hb",
-        "MEDIA_DIR_MUSIC": "Musik", "MEDIA_DIR_PODCASTS": "Podcasts", "MEDIA_DIR_YOUTUBE": "Youtube",
-        "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(tmp_path),
-    }), zone=BERLIN)  # fmt: skip
+    defaults = ServerDefaults(
+        lambda: db,
+        Settings.from_env({**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(tmp_path)}),
+        zone=BERLIN,
+    )
     smart_one = add(db, "UC" + "a" * 22, "A", checked=(at(15, 0)).isoformat())
     fixed_one = add(db, "UC" + "b" * 22, "B", checked=(at(15, 0)).isoformat())
     teach(db, smart_one.id, tuesdays(10))
