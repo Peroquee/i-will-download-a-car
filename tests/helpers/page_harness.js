@@ -4,7 +4,8 @@
 // whose scripts "do not run to the end" (issue #43) needs.
 // Usage: node page_harness.js <static dir> <pathname> <hash> <language> <answers json> [steps json]
 // Steps (run after the scripts): {set: sel, value}, {check: sel, value}, {fire: sel, type},
-// {submit: sel}, {click: sel}, {tick}, {wait}, {read: sel}. Answers: "METHOD /path" or "/path".
+// {submit: sel}, {click: sel}, {tick}, {wait}, {read: sel}, {release: key, answer}. Answers:
+// "METHOD /path" or "/path"; {"__hold": true} leaves the request pending until a release step.
 const fs = require("fs");
 const path = require("path");
 const [staticDir, pathname, hash, language, answersJson, stepsJson] = process.argv.slice(2);
@@ -173,6 +174,12 @@ const window = {
   addEventListener() {}, scrollTo() {},
 };
 const navigator = { language };
+function responseFor(body) {
+  let status = body !== null ? 200 : 404;
+  if (body && typeof body === "object" && "__status" in body) { status = body.__status; body = body.body; }
+  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) };
+}
+const held = {};   // key -> resolve(answer): a request the test releases later ("__hold")
 const fetchStub = (url, options) => {
   fetched.push([(options && options.method) || "GET", String(url)]);
   sent.push({ method: (options && options.method) || "GET", url: String(url), body: (options && options.body) || null });
@@ -180,9 +187,10 @@ const fetchStub = (url, options) => {
   const method = (options && options.method) || "GET";
   const key = method + " " + path in answers ? method + " " + path : path;
   let body = key in answers ? answers[key] : null;
-  let status = body !== null ? 200 : 404;
-  if (body && typeof body === "object" && "__status" in body) { status = body.__status; body = body.body; }
-  return Promise.resolve({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
+  if (body && typeof body === "object" && "__hold" in body) {
+    return new Promise((resolve) => { held[key] = (answer) => resolve(responseFor(answer === undefined ? null : answer)); });
+  }
+  return Promise.resolve(responseFor(body));
 };
 function run(file) {
   const code = fs.readFileSync(path.join(staticDir, file), "utf8");
@@ -205,6 +213,7 @@ const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
       else if ("close" in step) { select(step.close).close(); }   // what Esc does: closes, then "close"
       else if ("tick" in step) { const due = timers.filter((t) => t.once).splice(0); timers.splice(0, timers.length, ...timers.filter((t) => !t.once)); due.forEach((t) => { try { t.f(); } catch (e) { errors.push({ file: "timer", message: String(e && e.message), stack: String(e && e.stack).split("\n").slice(0, 5).join("\n") }); } }); }
       else if ("read" in step) { const el = select(step.read); reads[step.read] = { text: el.textContent, hidden: el.hidden, value: el.value, checked: el.checked, children: el.children.length, disabled: el.disabled, cls: el.className, open: el.open, active: document.activeElement ? document.activeElement.id : null, bodyCls: tree.className }; }
+      else if ("release" in step) { const release = held[step.release]; if (!release) throw new Error("nothing held for " + step.release); delete held[step.release]; release(step.answer); }
     } catch (e) { errors.push({ file: "step " + JSON.stringify(step), message: String(e && e.message), stack: "" }); }
     await pause();
   }

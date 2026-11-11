@@ -8,7 +8,8 @@ an admin and a user see different tabs), the form creates a job, the navigation 
 lead where they say, and the failure modes of issue #43 (scripts that did not load, an update
 while the page is open) end in a clear message instead of a silent native submit. Since #79 it
 also opens a subscription's Settings window, changes the resolution and check interval, and saves
-the server defaults; since #80 it switches the check mode there and saves the smart-mode numbers.
+the server defaults; since #80 it switches the check mode there and saves the smart-mode numbers;
+#109 has a slow /api/youtube/options answer arrive after typing and checks that nothing is lost.
 Each check prints its name; the run goes on after a failure and exits 1 at the end.
 
 The admin (YTP_ADMIN / YTP_ADMIN_PASSWORD) exists when the app starts; the user "alice" is made
@@ -422,6 +423,106 @@ def the_admin_sets_the_smart_check_numbers(ctx):
             "smart_base_minutes",
         )
     ] == ["10", "90", "10", "240"]
+
+
+LATE_OPTIONS = {
+    "max_height": 1080,
+    "choices": [0, 2160, 1440, 1080, 720, 480, 360],
+    "can_choose": True,
+}
+
+
+def held_options(browser):
+    """A fresh signed-in page whose /api/youtube/options answer is held back (route list).
+
+    The caller releases it after typing, then checks that the answer did not wipe anything
+    (#109 review: a slow answer used to re-render the panel and the Settings window)."""
+    page = browser.new_context(locale="en-US").new_page()
+    login = page.request.post(
+        BASE + "/api/auth/login", data={"username": ADMIN, "password": ADMIN_PASSWORD}
+    )
+    assert login.status == 200, f"the admin could not sign in: {login.status}"
+    held = []
+    page.route("**/api/youtube/options*", lambda route: held.append(route))
+    return page, held
+
+
+def release_options(page, held):
+    page.wait_for_timeout(200)  # let the browser dispatch the held request to its handler
+    assert held, "the page did not ask for the resolution options"
+    for route in held:
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(LATE_OPTIONS))
+
+
+@check
+def late_resolution_choices_keep_the_admin_panels_typed_values(ctx):
+    """#109 review: the /api/youtube/options answer refills only the resolution selects.
+
+    It used to re-render the admin panel; on a slow load that wiped the four smart numbers an
+    admin had just typed (and this check failed on the VM). Deterministic: the answer is held
+    until after the typing, then released."""
+    page, held = held_options(ctx.browser)
+    watch(page, "late-options-admin", ctx.problems)
+    try:
+        page.goto(BASE + "/accounts")
+        expect(page.locator("#sd-smart_before_minutes")).to_be_visible(timeout=20000)
+        page.select_option("#sd-channel-interval", "120")
+        page.fill("#sd-smart_before_minutes", "61")  # typed before the answer arrives
+        release_options(page, held)
+        expect(page.locator("#sd-resolution option[value='480']")).to_have_count(1)
+        expect(page.locator("#sd-channel-interval")).to_have_value("120")
+        expect(page.locator("#sd-smart_before_minutes")).to_have_value("61")  # not wiped
+        page.select_option("#sd-resolution", "480")
+        page.fill("#sd-smart_before_minutes", "15")
+        page.fill("#sd-smart_after_minutes", "90")
+        page.fill("#sd-smart_step_minutes", "10")
+        page.fill("#sd-smart_base_minutes", "240")
+        page.click("#sd-save")
+        expect(page.locator("#sd-result")).to_have_text("The server defaults were saved.")
+        page.unroute("**/api/youtube/options*")
+        page.reload()
+        expect(page.locator("#sd-channel-interval")).to_have_value("120")
+        expect(page.locator("#sd-resolution")).to_have_value("480")
+        for name, value in (
+            ("smart_before_minutes", "15"),
+            ("smart_after_minutes", "90"),
+            ("smart_step_minutes", "10"),
+            ("smart_base_minutes", "240"),
+        ):
+            expect(page.locator(f"#sd-{name}")).to_have_value(value)
+    finally:
+        page.context.close()
+
+
+@check
+def late_resolution_choices_keep_the_settings_windows_typed_values(ctx):
+    """#109 review: an open Settings window keeps its interval, start time and mode too."""
+    page, held = held_options(ctx.browser)
+    watch(page, "late-options-window", ctx.problems)
+    try:
+        page.goto(BASE + "/#subscriptions")
+        row = page.locator("#subs-youtube-list li", has_text="Blender")
+        expect(row).to_be_visible(timeout=20000)
+        row.get_by_role("button", name="Settings").click()
+        expect(page.locator("#sub-settings-mode")).to_be_visible(timeout=20000)
+        page.select_option("#sub-settings-interval", "custom")
+        page.fill("#sub-settings-minutes", "90")
+        page.select_option("#sub-settings-at-mode", "time")
+        page.fill("#sub-settings-at", "07:30")
+        page.select_option("#sub-settings-mode", "fixed")
+        release_options(page, held)
+        expect(page.locator("#sub-settings-resolution option[value='480']")).to_have_count(1)
+        expect(page.locator("#sub-settings-interval")).to_have_value("custom")
+        expect(page.locator("#sub-settings-minutes")).to_have_value("90")
+        expect(page.locator("#sub-settings-at-mode")).to_have_value("time")
+        expect(page.locator("#sub-settings-at")).to_have_value("07:30")
+        expect(page.locator("#sub-settings-mode")).to_have_value("fixed")
+        page.click("#sub-settings-save")
+        expect(page.locator("#sub-settings")).to_be_hidden()
+        expect(row).to_contain_text("every 90 min")
+        expect(row).to_contain_text("from 07:30")
+    finally:
+        page.context.close()
 
 
 @check

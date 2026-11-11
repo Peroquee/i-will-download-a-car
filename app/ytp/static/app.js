@@ -370,13 +370,12 @@
     }
   }
 
-  /* The selects that are not rebuilt by their own render function: the input form, the
-     subscription row and the account menu. */
+  /* The selects that are not rebuilt by their own render function: the input form and the
+     subscription row. auth.js refills the two account-menu ones. */
   function refreshResolutionSelects() {
     fillResolutionSelect($("yt-resolution"), null);
     ensureResolutionOption($("yt-resolution"), ytDefaultMaxHeight);
     fillResolutionSelect($("yt-sub-resolution"), t("subs.resolution_default"));
-    fillResolutionSelect($("account-resolution"), t("account.resolution_default"));
   }
 
   /* The account's effective default resolution and the fixed choices the API accepts (#47, #65).
@@ -394,10 +393,16 @@
       select.disabled = !ytCanChoose;
       $("yt-resolution-note").hidden = ytCanChoose;
       $("yt-sub-resolution").disabled = !ytCanChoose;
-      // the Settings window and the admin panel build their own selects
-      renderSettings();
-      renderServerDefaults();
-      if (auth) auth.render();
+      // Refill the resolution selects only: an open Settings window or admin panel keeps
+      // every value the user has typed (#109 review). Nothing is re-rendered here.
+      fillSettingsResolution();
+      fillResolutionSelect($("sd-resolution"), t("sched.initial"));
+      if (defaultsData) {
+        // before this answer the panel had no heights to pick: show the saved default again
+        var custom = defaultsData.custom || {};
+        $("sd-resolution").value = custom.max_height ? String(defaultsData.max_height) : "";
+      }
+      if (auth) auth.refreshResolutionSelects();
       showBackfill();   // the subscription row depends on the right too
     }).catch(function () { /* no answer: the lists stay empty and the server default applies */ });
   }

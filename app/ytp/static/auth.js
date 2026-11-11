@@ -167,16 +167,46 @@
       else dialog.removeAttribute("open");
     }
 
+    /* Fill a resolution <select> from the choices the server sends (#75). The empty value means
+       the server default. `value` is selected after the options exist. */
+    function fillResolution(select, value) {
+      var choices = typeof ctx.resolutionChoices === "function" ? ctx.resolutionChoices() : [];
+      select.textContent = "";
+      [["", "accounts.resolution_default"]]
+        .concat(choices.map(function (height) {
+          return [String(height), height === 0 ? "yt.resolution_best" : "yt.resolution_" + height];
+        }))
+        .forEach(function (choice) {
+          var option = el("option", null, t(choice[1]));
+          option.value = choice[0];
+          select.appendChild(option);
+        });
+      select.value = value;
+    }
+
+    function resolutionValue(row) {
+      return row && row.default_max_height != null ? String(row.default_max_height) : "";
+    }
+
     /* The own default resolution (#65): only an account with the right sees the field; an admin
-       always has it. The select's empty value means the server default. */
+       always has it. */
     function renderAccountResolution() {
       var row = $("account-resolution-row");
       if (!row) return;
       row.hidden = !canChooseResolution();
       var select = $("account-resolution");
       if (!select) return;
-      select.value = account && account.default_max_height != null
-        ? String(account.default_max_height) : "";
+      fillResolution(select, resolutionValue(account));
+    }
+
+    /* The resolution choices arrived after the page was built (#75, #109 review): refill only
+       the resolution selects, never whole rows or dialogs, so nothing typed is lost. */
+    function refreshResolutionSelects() {
+      renderAccountResolution();
+      (accountList || []).forEach(function (row) {
+        var select = $("accounts-resolution-" + row.id);
+        if (select) fillResolution(select, resolutionValue(row));
+      });
     }
 
     function onChangeResolution() {
@@ -307,17 +337,7 @@
       var select = el("select");
       select.id = "accounts-resolution-" + row.id;
       label.setAttribute("for", select.id);
-      var choices = typeof ctx.resolutionChoices === "function" ? ctx.resolutionChoices() : [];
-      [["", "accounts.resolution_default"]]
-        .concat(choices.map(function (height) {
-          return [String(height), height === 0 ? "yt.resolution_best" : "yt.resolution_" + height];
-        }))
-        .forEach(function (choice) {
-          var option = el("option", null, t(choice[1]));
-          option.value = choice[0];
-          select.appendChild(option);
-        });
-      select.value = row.default_max_height == null ? "" : String(row.default_max_height);
+      fillResolution(select, resolutionValue(row));
       select.addEventListener("change", function () {
         change(row.id, {
           default_max_height: select.value === "" ? null : Number(select.value),
@@ -537,6 +557,7 @@
     return {
       wire: wire, check: check, start: start, render: render, expired: expired,
       isIn: isIn, isAdmin: isAdmin, canChooseResolution: canChooseResolution,
+      refreshResolutionSelects: refreshResolutionSelects,
     };
   }
 
