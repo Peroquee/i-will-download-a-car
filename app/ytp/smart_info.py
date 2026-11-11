@@ -14,7 +14,7 @@ language. `slots` is empty and `regular` false while the pattern is unknown (the
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, tzinfo
+from datetime import datetime, tzinfo
 from typing import Any
 
 from . import publish_history
@@ -22,12 +22,9 @@ from .db import Database
 from .poll_schedule import Schedule
 from .server_defaults import SmartSettings
 from .smart_schedule import learn, windows
+from .timeutil import now_text
 
 MAX_SLOTS = 14  # a daily uploader has 7; two a day would be 14
-
-
-def _iso(moment: datetime) -> str:
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def describe(
@@ -55,8 +52,8 @@ def describe(
         for window in windows(pattern, now, zone, settings.before, settings.after):
             if window.end >= now:
                 info["next_window"] = {
-                    "start": _iso(window.start),
-                    "expected": _iso(window.expected),
+                    "start": now_text(window.start),
+                    "expected": now_text(window.expected),
                     "active": window.start <= now,
                 }
                 break

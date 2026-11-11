@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from .db import Database
+from .timeutil import now_text
 
 MAX_SUBSCRIPTIONS = 200
 MAX_BACKFILL = 15  # the size of a channel's RSS feed
@@ -194,10 +195,7 @@ def record_poll(
                 (message, message, subscription_id),
             )
         else:
-            text = (
-                when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.")
-                + f"{when.microsecond // 1000:03d}Z"
-            )
+            text = now_text(when)
             conn.execute(
                 "UPDATE subscriptions SET last_checked = ?, last_error = ?, "
                 "poll_errors = CASE WHEN ? IS NULL THEN 0 ELSE poll_errors + 1 END WHERE id = ?",
@@ -207,7 +205,7 @@ def record_poll(
 
 def mark_history_checked(db: Database, subscription_id: int, when: datetime) -> None:
     """Note that the publication history was just filled from the channel's RSS feed (#80)."""
-    text = when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{when.microsecond // 1000:03d}Z"
+    text = now_text(when)
     with db.transaction() as conn:
         conn.execute(
             "UPDATE subscriptions SET history_checked_at = ? WHERE id = ?",

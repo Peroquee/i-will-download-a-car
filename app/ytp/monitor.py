@@ -37,10 +37,10 @@ from pathlib import Path
 from typing import Any
 
 from . import alertlog, jobs
-from .db import Database
+from .db import Database, get_state, set_state
 from .feeds import is_service_wide
 from .jobs_api import job_label
-from .scheduler import get_state, set_state
+from .timeutil import now_text
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +58,28 @@ DISK_ERROR_PERCENT = 5.0
 BAD = ("down", "blind", "mismatch", "unknown")
 
 
-def vpn_condition(status: dict[str, Any]) -> str:
-    """The condition shown by the VPN bar (same rules as `Logic.vpnView` in the page)."""
+def vpn_view(status: dict[str, Any]) -> str:
+    """What the VPN bar shows; the same rule as `Logic.vpnView` in the page (#22, #81, #75).
+
+    A parity test runs this and the page's function on the same inputs (tests/unit/test_web_ui.py).
+    """
     state = status.get("state")
+    state = state if state in ("ok", "down", "blind", "starting") else "unknown"
+    view = state
     if status.get("egress") == "mismatch" and state in ("ok", "unknown"):
-        return "mismatch"
-    return state if state in ("ok", "down", "blind", "starting") else "unknown"
+        view = "mismatch"
+    if view == "ok" and status.get("tunnel") == "reconnecting":
+        view = "reconnecting"
+    return view
+
+
+def vpn_condition(status: dict[str, Any]) -> str:
+    """The condition stored for the alert history: the bar's view, with `reconnecting` as ok.
+
+    `vpn_events.condition` has a CHECK constraint (migration 0018) on the six alert conditions;
+    a reconnecting tunnel has a few minutes' grace and is no condition change (#81)."""
+    view = vpn_view(status)
+    return "ok" if view == "reconnecting" else view
 
 
 class AlertMonitor:
@@ -184,7 +200,7 @@ class AlertMonitor:
     # ------------------------------------------------------------------ failed jobs
 
     def check_jobs(self) -> None:
-        stamp = self._now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        stamp = now_text(self._now())
         cursor = get_state(self.db, KEY_JOBS)
         if cursor is None:  # first look: announce only what fails from now on
             set_state(self.db, KEY_JOBS, stamp)

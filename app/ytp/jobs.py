@@ -13,8 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .db import Database
-from .scheduler import get_state, set_state
+from .db import Database, get_state, set_state
 
 MAX_ERROR_LENGTH = 500
 MAX_NOTE_LENGTH = 500

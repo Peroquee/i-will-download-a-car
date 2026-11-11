@@ -143,6 +143,150 @@ def test_the_resolution_dropdown_follows_a_configured_default():
 
 
 @needs_node
+def test_every_resolution_list_is_built_from_the_server_choices():
+    choices = [0, 1080, 720]
+    options = {"max_height": 720, "choices": choices, "can_choose": True}
+    input_page = page(
+        "/",
+        answers={"/api/youtube/options": options},
+        steps=[
+            {"read": "#yt-resolution"},
+            {"read": "#yt-sub-resolution"},
+            {"click": "#account-open"},
+            {"read": "#account-resolution"},
+        ],
+    )
+    assert input_page["errors"] == [], input_page["errors"]
+    assert input_page["reads"]["#yt-resolution"]["value"] == "720"
+    for selector in ("#yt-resolution", "#yt-sub-resolution", "#account-resolution"):
+        text = input_page["reads"][selector]["text"]
+        assert "1080p (Full HD)" in text, (selector, text)
+        assert "720p (HD)" in text, (selector, text)
+        for gone in ("2160", "1440", "480", "360"):
+            assert gone not in text, (selector, gone, text)
+    accounts_page = page(
+        "/accounts",
+        answers={
+            "/api/youtube/options": options,
+            "/api/accounts": {"accounts": [ACCOUNT, {**USER_ACCOUNT, "last_login": None}]},
+        },
+        steps=[{"read": "#accounts-resolution-2"}],
+    )
+    assert accounts_page["errors"] == [], accounts_page["errors"]
+    text = accounts_page["reads"]["#accounts-resolution-2"]["text"]
+    assert "1080p (Full HD)" in text, text
+    assert "720p (HD)" in text, text
+    for gone in ("2160", "1440", "480", "360"):
+        assert gone not in text, (gone, text)
+
+
+CHOICES = {"max_height": 1080, "choices": [0, 2160, 1440, 1080, 720, 480, 360], "can_choose": True}
+
+
+@needs_node
+def test_options_arriving_late_keep_the_admin_panels_typed_values():
+    """#109 review: the /api/youtube/options answer only refills the resolution selects.
+
+    The admin panel is built from the defaults before that answer arrives (a slow page load);
+    the numbers the admin typed in the meantime must survive, and saving must send them."""
+    out = settings_page(
+        [
+            {"read": "#sd-channel-mode"},
+            {"set": "#sd-channel-interval", "value": "120"},
+            {"set": "#sd-smart_before_minutes", "value": "61"},
+            {"release": "/api/youtube/options", "answer": CHOICES},
+            {"read": "#sd-channel-interval"},
+            {"read": "#sd-smart_before_minutes"},
+            {"set": "#sd-resolution", "value": "480"},
+            {"set": "#sd-smart_before_minutes", "value": "15"},
+            {"set": "#sd-smart_after_minutes", "value": "90"},
+            {"set": "#sd-smart_step_minutes", "value": "10"},
+            {"set": "#sd-smart_base_minutes", "value": "240"},
+            {"click": "#sd-save"},
+            {"read": "#sd-result"},
+        ],
+        answers={
+            "/api/accounts": {"accounts": [ACCOUNT]},
+            "/api/youtube/options": {"__hold": True},
+            "PATCH /api/settings/defaults": DEFAULTS,
+        },
+    )
+    reads = out["reads"]
+    assert reads["#sd-channel-mode"]["value"] == "smart", "the panel was built before the answer"
+    assert reads["#sd-channel-interval"]["value"] == "120"
+    assert reads["#sd-smart_before_minutes"]["value"] == "61", "the typed number was not wiped"
+    assert reads["#sd-result"]["text"] == "The server defaults were saved."
+    body = sent_body(out, "PATCH", "/api/settings/defaults")
+    assert body["max_height"] == 480
+    assert body["subscription_poll_minutes"] == 120
+    assert (
+        body["smart_before_minutes"],
+        body["smart_after_minutes"],
+        body["smart_step_minutes"],
+        body["smart_base_minutes"],
+    ) == (15, 90, 10, 240)
+
+
+@needs_node
+def test_options_arriving_late_keep_the_settings_windows_typed_values():
+    """#109 review: an open Settings window keeps interval, start time and mode."""
+    out = settings_page(
+        [
+            OPEN_CHANNEL,
+            {"set": "#sub-settings-interval", "value": "120"},
+            {"set": "#sub-settings-at-mode", "value": "time"},
+            {"set": "#sub-settings-at", "value": "06:00"},
+            {"set": "#sub-settings-mode", "value": "fixed"},
+            {"release": "/api/youtube/options", "answer": CHOICES},
+            {"read": "#sub-settings-interval"},
+            {"read": "#sub-settings-at-mode"},
+            {"read": "#sub-settings-at"},
+            {"read": "#sub-settings-mode"},
+            {"read": "#sub-settings-resolution"},
+            {"click": "#sub-settings-save"},
+        ],
+        answers={"/api/youtube/options": {"__hold": True}},
+    )
+    reads = out["reads"]
+    assert reads["#sub-settings-interval"]["value"] == "120"
+    assert reads["#sub-settings-at-mode"]["value"] == "time"
+    assert reads["#sub-settings-at"]["value"] == "06:00"
+    assert reads["#sub-settings-mode"]["value"] == "fixed"
+    assert reads["#sub-settings-resolution"]["value"] == "720", "the subscription's value"
+    assert "720p (HD)" in reads["#sub-settings-resolution"]["text"], "the choices arrived"
+    body = sent_body(out, "PATCH", "/api/subscriptions/5")
+    assert (
+        body["max_height"],
+        body["poll_minutes"],
+        body["poll_at"],
+        body["poll_mode"],
+    ) == (720, 120, "06:00", "fixed")
+
+
+@needs_node
+def test_options_arriving_late_fill_the_account_menu_selects():
+    """#109 review: the account selects built before the answer get the choices, in place."""
+    out = page(
+        "/accounts",
+        answers={
+            "/api/youtube/options": {"__hold": True},
+            "/api/accounts": {"accounts": [ACCOUNT, {**USER_ACCOUNT, "last_login": None}]},
+        },
+        steps=[
+            {"click": "#account-open"},
+            {"release": "/api/youtube/options", "answer": CHOICES},
+            {"read": "#account-resolution"},
+            {"read": "#accounts-resolution-2"},
+        ],
+    )
+    assert out["errors"] == [], out["errors"]
+    for selector in ("#account-resolution", "#accounts-resolution-2"):
+        text = out["reads"][selector]["text"]
+        assert "1080p (Full HD)" in text, (selector, text)
+        assert "480p" in text, (selector, text)
+
+
+@needs_node
 def test_the_resolution_dropdown_is_hidden_for_podcast_and_audio_only():
     video = page("/", steps=[{"read": "#yt-resolution-row"}])
     assert video["errors"] == [], video["errors"]

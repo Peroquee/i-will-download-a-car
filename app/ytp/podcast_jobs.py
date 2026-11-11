@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-import threading
 import time
 from collections.abc import Callable
 from datetime import date
@@ -32,6 +31,7 @@ from . import accounts, jobs, podcast_subscriptions
 from .clients.jellyfin import LibraryRefresher
 from .config import Settings
 from .db import Database
+from .job_worker import QueueWorker
 from .jobs import Job
 from .metadata import Name, sanitize_name
 from .podcast_subscriptions import PodcastSubscription
@@ -94,7 +94,13 @@ def episode_metadata(
     )
 
 
-class PodcastWorker:
+class PodcastWorker(QueueWorker):
+    """The podcast queue (see `QueueWorker` for the loop)."""
+
+    job_type = JOB_TYPE
+    label = "podcast"
+    workdir_name = "podcasts"
+
     def __init__(
         self,
         db: Database,
@@ -106,61 +112,11 @@ class PodcastWorker:
         min_free_bytes: int = MIN_FREE_BYTES,
         on_done: Callable[[], None] | None = None,
     ):
-        self.db = db
-        self.settings = settings
+        super().__init__(db, settings, refresher, idle_seconds=idle_seconds, on_done=on_done)
         self.feeds = feeds
-        self.refresher = refresher
-        self._idle = idle_seconds
         self._min_free = min_free_bytes
-        self._on_done = on_done  # e.g. the dashboard's storage sizes (#82)
-        self._wake = threading.Event()
-        self.processed = 0
-        # Percent of the running download by job id, for the job list (not persisted).
-        self.progress: dict[int, int] = {}
-        # Size, speed and ETA of the running download by job id, for the dashboard (#38).
-        self.details: dict[int, dict[str, int | None]] = {}
-
-    def wake(self) -> None:
-        """A job was just queued: look now instead of at the next idle check."""
-        self._wake.set()
-
-    def run(self, stop: threading.Event) -> None:
-        requeued = False
-        while not stop.is_set():
-            try:
-                if not requeued:
-                    # Inside the guard: a database that is busy or locked at start must not
-                    # kill the thread (the API would keep accepting jobs nobody runs, #69).
-                    jobs.requeue_interrupted(self.db, JOB_TYPE)
-                    requeued = True
-                handled = self.run_one()
-            except Exception:  # the worker must outlive any bug in one job
-                logger.exception("podcast worker failed")
-                handled = False
-            if not handled:
-                self._wake.wait(self._idle)
-                self._wake.clear()
-
-    def run_one(self) -> bool:
-        """Take the next queued podcast job and finish it (done or failed). False if none."""
-        job = jobs.claim_next_queued(self.db, JOB_TYPE)
-        if job is None:
-            return False
-        try:
-            self._process(job)
-        except Exception as exc:
-            logger.exception("podcast job crashed", extra={"job_id": job.id})
-            self._fail(job, f"the download failed: {type(exc).__name__}")
-        finally:
-            self.progress.pop(job.id, None)
-            self.details.pop(job.id, None)
-        self.processed += 1
-        return True
 
     # ------------------------------------------------------------------ one job
-
-    def _workdir(self, key: str) -> Path:
-        return self.settings.downloads_dir / "incomplete" / "podcasts" / key
 
     def _process(self, job: Job) -> None:
         try:
@@ -248,16 +204,6 @@ class PodcastWorker:
                 save_cover(library, meta.podcast, cover[0], cover[1])
         except Exception:
             logger.warning("cover not saved", exc_info=True)
-
-    def _fail(self, job: Job, reason: str) -> None:
-        jobs.transition(
-            self.db,
-            job.id,
-            "failed",
-            expected=("queued", "downloading", "organizing"),
-            error=reason,
-        )
-        logger.warning("podcast job failed", extra={"job_id": job.id, "reason": reason})
 
     def _progress(self, job: Job):
         reached = {"quarter": 0}

@@ -27,7 +27,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import passwords, resolution
-from .db import Database
+from .db import Database, get_state, set_state
+from .timeutil import now_text, parse_time
 
 ROLES = ("admin", "user")
 USERNAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}")
@@ -91,17 +92,6 @@ class Account:
             "default_max_height": self.default_max_height,
             "can_set_resolution": self.can_set_resolution,
         }
-
-
-def now_text(moment: datetime | None = None) -> str:
-    moment = moment or datetime.now(UTC)
-    return (
-        moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
-    )
-
-
-def _parse(text: str) -> datetime:
-    return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
 # ------------------------------------------------------------------------------------ accounts
@@ -364,8 +354,8 @@ def session_account(db: Database, token: str, now: datetime | None = None) -> Ac
     row = rows[0]
     if row["disabled"]:
         return None
-    last_seen = _parse(row["last_seen"])
-    if _parse(row["expires_at"]) < now or last_seen + timedelta(days=IDLE_DAYS) < now:
+    last_seen = parse_time(row["last_seen"])
+    if parse_time(row["expires_at"]) < now or last_seen + timedelta(days=IDLE_DAYS) < now:
         end_session(db, token)
         return None
     if (now - last_seen).total_seconds() > TOUCH_SECONDS:
@@ -539,8 +529,6 @@ def bootstrap_admin(db: Database, username: str, hashed: str) -> str:
 
     Returns "created", "reset" or "unchanged".
     """
-    from .scheduler import get_state, set_state
-
     marker = hashlib.sha256(hashed.encode()).hexdigest()
     existing = find(db, username)
     if existing is None:

@@ -12,14 +12,14 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from .db import Database
+from .timeutil import now_text, parse_time
 
 KEEP = 100  # per subscription
 KINDS = ("channel", "podcast")
 
 
 def _stamp(moment: datetime) -> str:
-    moment = moment.astimezone(UTC)
-    return moment.strftime("%Y-%m-%dT%H:%M:%S") + f".{moment.microsecond // 1000:03d}Z"
+    return now_text(moment)
 
 
 def has_time_of_day(moment: datetime) -> bool:
@@ -63,7 +63,7 @@ def times(db: Database, kind: str, subscription_id: int) -> list[datetime]:
         "ORDER BY published_at DESC",
         (kind, subscription_id),
     )
-    return [datetime.fromisoformat(row["published_at"].replace("Z", "+00:00")) for row in rows]
+    return [parse_time(row["published_at"]) for row in rows]
 
 
 def count(db: Database, kind: str, subscription_id: int) -> int:

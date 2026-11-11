@@ -16,6 +16,7 @@
   var allConfirmed = false;   // the question "download N episodes?" has been shown
   var ytDefaultMaxHeight = null;   // the account's effective default resolution (#47, #65)
   var ytCanChoose = true;          // the admin's resolution right for this account (#65)
+  var ytChoices = [];              // the resolution choices the server offers (#75)
 
   /* A form of this page is NEVER submitted natively (it would send the pasted link in the address
      and create no job): whatever else fails, this guard is the first thing that runs. */
@@ -45,6 +46,7 @@
     document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
+    refreshResolutionSelects();
     $("lang").textContent = lang === "de" ? "EN" : "DE";
     applyTarget();
     $("lang").setAttribute("aria-label", lang === "de" ? "Switch to English" : "Auf Deutsch umstellen");
@@ -339,6 +341,43 @@
     });
   }
 
+  /* Fill a resolution <select> from the choices the server sent (#75). `firstLabel` adds an
+     empty "server default" choice in front; the current value is kept while it is still there. */
+  function fillResolutionSelect(select, firstLabel) {
+    if (!select) return;
+    var keep = select.value;
+    select.textContent = "";
+    if (firstLabel != null) select.appendChild(optionEl("", firstLabel));
+    ytChoices.forEach(function (height) {
+      select.appendChild(optionEl(String(height), height === 0 ? t("yt.resolution_best") : resolutionLabel(height)));
+    });
+    select.value = keep;
+  }
+
+  /* A configured default outside the fixed choices stays selectable, so the dropdown always
+     names what the account really uses. */
+  function ensureResolutionOption(select, height) {
+    if (!select || height === null || height === undefined) return;
+    var value = String(height);
+    var known = Array.prototype.some.call(select.options, function (option) {
+      return option.value === value;
+    });
+    if (!known) {
+      var option = document.createElement("option");
+      option.value = value;
+      option.textContent = t("yt.resolution_default", { value: value });
+      select.appendChild(option);
+    }
+  }
+
+  /* The selects that are not rebuilt by their own render function: the input form and the
+     subscription row. auth.js refills the two account-menu ones. */
+  function refreshResolutionSelects() {
+    fillResolutionSelect($("yt-resolution"), null);
+    ensureResolutionOption($("yt-resolution"), ytDefaultMaxHeight);
+    fillResolutionSelect($("yt-sub-resolution"), t("subs.resolution_default"));
+  }
+
   /* The account's effective default resolution and the fixed choices the API accepts (#47, #65).
      The page preselects; it never fetches formats from YouTube. Without the resolution right
      (can_choose false) the dropdown is disabled and a short note says an admin decides. */
@@ -347,23 +386,25 @@
       if (!data || typeof data.max_height !== "number") return;
       ytDefaultMaxHeight = data.max_height;
       ytCanChoose = data.can_choose !== false;
+      ytChoices = L.resolutionChoices(data.choices);
+      refreshResolutionSelects();
       var select = $("yt-resolution");
-      var value = String(data.max_height);
-      var known = Array.prototype.some.call(select.options, function (option) {
-        return option.value === value;
-      });
-      if (!known) {
-        var option = document.createElement("option");
-        option.value = value;
-        option.textContent = t("yt.resolution_default", { value: value });
-        select.appendChild(option);
-      }
-      select.value = value;
+      select.value = String(data.max_height);
       select.disabled = !ytCanChoose;
       $("yt-resolution-note").hidden = ytCanChoose;
       $("yt-sub-resolution").disabled = !ytCanChoose;
+      // Refill the resolution selects only: an open Settings window or admin panel keeps
+      // every value the user has typed (#109 review). Nothing is re-rendered here.
+      fillSettingsResolution();
+      fillResolutionSelect($("sd-resolution"), t("sched.initial"));
+      if (defaultsData) {
+        // before this answer the panel had no heights to pick: show the saved default again
+        var custom = defaultsData.custom || {};
+        $("sd-resolution").value = custom.max_height ? String(defaultsData.max_height) : "";
+      }
+      if (auth) auth.refreshResolutionSelects();
       showBackfill();   // the subscription row depends on the right too
-    }).catch(function () { /* keep the first choice; the server default still applies */ });
+    }).catch(function () { /* no answer: the lists stay empty and the server default applies */ });
   }
 
   /* What the form sends for the resolution: nothing while audio only, and nothing while the
@@ -1231,20 +1272,9 @@
   function settingsKind() { return settingsFor && settingsFor.kind === "podcast" ? "podcast" : "channel"; }
   function mayChangeSettings() { return !auth || auth.canChooseResolution(); }
 
-  function resolutionOptions(select, firstLabel) {
-    var keep = select.value;
-    select.textContent = "";
-    select.appendChild(optionEl("", firstLabel));
-    select.appendChild(optionEl("0", t("yt.resolution_best")));
-    [2160, 1440, 1080, 720, 480, 360].forEach(function (height) {
-      select.appendChild(optionEl(String(height), resolutionLabel(height)));
-    });
-    select.value = keep;
-  }
-
   function fillSettingsResolution() {
     var shown = defaultsData && defaultsData.max_height != null ? heightText(defaultsData.max_height) : "";
-    resolutionOptions($("sub-settings-resolution"),
+    fillResolutionSelect($("sub-settings-resolution"),
       shown ? t("sched.default_is", { value: shown }) : t("subs.resolution_default"));
   }
 
@@ -1413,7 +1443,7 @@
       serverForms.channel.relabel();
       serverForms.podcast.relabel();
     }
-    resolutionOptions($("sd-resolution"), t("sched.initial"));
+    fillResolutionSelect($("sd-resolution"), t("sched.initial"));
     $("sd-rule").textContent = t("sched.rule");
     if (first || !serverDirty) fillServerDefaults();
   }
@@ -1533,6 +1563,7 @@
     try {
       auth = window.Auth ? window.Auth.create({
         t: t, $: $, post: post, request: request, requestText: requestText, getJson: getJson, timeText: timeText,
+        resolutionChoices: function () { return ytChoices; },
       }) : null;
     } catch (e) { auth = null; }
     applyLanguage();

@@ -49,12 +49,13 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from . import jobs
 from .clients.qbittorrent import QbitClient, QbitError
 from .clients.watchdog import WatchdogStatusClient
 from .db import Database
+from .timeutil import parse_time_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +65,6 @@ PRIORITY_SECONDS = 5  # how quickly a high-priority download holds the line
 # holds the line: a short hiccup must not start the normal queue, a dead torrent must not freeze
 # it for days (#70).
 HOLD_GRACE_SECONDS = 120.0
-
-
-def _parse_time(value: object) -> datetime | None:
-    """An ISO timestamp (the watchdog's seconds or SQLite's milliseconds) as aware UTC."""
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 class PriorityManager:
@@ -268,8 +258,8 @@ class PriorityManager:
         """
         if status.get("paused") is not True:
             return False
-        since = _parse_time(status.get("since"))
-        oldest = _parse_time(jobs.oldest_app_pause_at(self.db))
+        since = parse_time_or_none(status.get("since"))
+        oldest = parse_time_or_none(jobs.oldest_app_pause_at(self.db))
         if since is None or oldest is None:
             return True  # cannot decide: the safe rule is that the watchdog owns the pause
         return since + timedelta(seconds=1) > oldest

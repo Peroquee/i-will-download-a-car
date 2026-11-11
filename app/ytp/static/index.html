@@ -122,15 +122,8 @@
         </div>
         <div class="row" id="yt-resolution-row">
           <label class="field" for="yt-resolution" data-i18n="yt.resolution"></label>
-          <select id="yt-resolution" name="max_height">
-            <option value="0" data-i18n="yt.resolution_best"></option>
-            <option value="2160" data-i18n="yt.resolution_2160"></option>
-            <option value="1440" data-i18n="yt.resolution_1440"></option>
-            <option value="1080" data-i18n="yt.resolution_1080"></option>
-            <option value="720" data-i18n="yt.resolution_720"></option>
-            <option value="480" data-i18n="yt.resolution_480"></option>
-            <option value="360" data-i18n="yt.resolution_360"></option>
-          </select>
+          <!-- the choices come from GET /api/youtube/options (#75) -->
+          <select id="yt-resolution" name="max_height"></select>
           <p id="yt-resolution-note" class="note" data-i18n="yt.resolution_locked" hidden></p>
         </div>
         <div id="yt-audio-row" hidden>
@@ -165,16 +158,8 @@
           <p id="yt-subscribe-note" class="note" data-i18n="yt.subscribe_note"></p>
           <div id="yt-sub-resolution-row" class="row sub-option" hidden>
             <label class="field" for="yt-sub-resolution" data-i18n="subs.resolution"></label>
-            <select id="yt-sub-resolution">
-              <option value="" data-i18n="subs.resolution_default"></option>
-              <option value="0" data-i18n="yt.resolution_best"></option>
-              <option value="2160" data-i18n="yt.resolution_2160"></option>
-              <option value="1440" data-i18n="yt.resolution_1440"></option>
-              <option value="1080" data-i18n="yt.resolution_1080"></option>
-              <option value="720" data-i18n="yt.resolution_720"></option>
-              <option value="480" data-i18n="yt.resolution_480"></option>
-              <option value="360" data-i18n="yt.resolution_360"></option>
-            </select>
+            <!-- the choices come from GET /api/youtube/options (#75) -->
+            <select id="yt-sub-resolution"></select>
             <p class="note" data-i18n="subs.resolution_note"></p>
           </div>
           <div id="yt-backfill-row" class="row sub-option" hidden>
@@ -540,16 +525,8 @@
   <p id="account-who" class="note"></p>
   <div id="account-resolution-row" class="row">
     <label class="field" for="account-resolution" data-i18n="account.resolution"></label>
-    <select id="account-resolution">
-      <option value="" data-i18n="account.resolution_default"></option>
-      <option value="0" data-i18n="yt.resolution_best"></option>
-      <option value="2160" data-i18n="yt.resolution_2160"></option>
-      <option value="1440" data-i18n="yt.resolution_1440"></option>
-      <option value="1080" data-i18n="yt.resolution_1080"></option>
-      <option value="720" data-i18n="yt.resolution_720"></option>
-      <option value="480" data-i18n="yt.resolution_480"></option>
-      <option value="360" data-i18n="yt.resolution_360"></option>
-    </select>
+    <!-- the choices come from GET /api/youtube/options (#75) -->
+    <select id="account-resolution"></select>
     <p class="note" data-i18n="account.resolution_note"></p>
   </div>
   <h3 data-i18n="account.password_title"></h3>
