@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.app import ENV
 from ytp import organizer as org
 from ytp.clients.jellyfin import LibraryRefresher
 from ytp.clients.qbittorrent import Torrent
@@ -17,14 +18,6 @@ from ytp.config import Settings
 from ytp.jobs import Job
 from ytp.reconciler import OrganizeError
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 MOVIE = {"type": "movies", "title": "Big Buck Bunny", "year": 2008}
 EPISODE = {"type": "series", "title": "Tatort", "season": 3, "episode": 7}
 PACK = {"type": "series", "title": "Tatort", "season": 3}

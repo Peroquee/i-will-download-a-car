@@ -11,11 +11,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from starlette.testclient import TestClient
 
-from ytp.config import Settings
+from tests.helpers.app import make_client
 from ytp.db import Database
-from ytp.main import create_app
 from ytp.scheduler import (
     HEARTBEAT_JOB_ID,
     HEARTBEAT_SECONDS,
@@ -26,15 +24,6 @@ from ytp.scheduler import (
     get_state,
     set_state,
 )
-
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 @pytest.fixture
@@ -333,13 +322,6 @@ def test_check_notices_a_heartbeat_that_stopped(database):
 
 
 # --- inside the app ----------------------
-
-
-def make_client(tmp_path: Path, **env: str) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config), **env}
-    return TestClient(create_app(Settings.from_env(values)))
 
 
 def test_the_scheduler_runs_with_the_app_and_stops_with_it(tmp_path):

@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.clock import Clock
 from tests.helpers.fake_gluetun import API_KEY, FakeGluetun
 from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from tests.helpers.net import free_port
 from ytp import watchdog as wd
 from ytp.clients.gluetun import (
     GluetunAuthError,
@@ -23,14 +25,6 @@ from ytp.clients.qbittorrent import QbitClient, QbitRequestError
 from ytp.watchdog import ConfigError, Watchdog, WatchdogConfig
 
 A, B, C = "a" * 40, "b" * 40, "c" * 40
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 @pytest.fixture
@@ -50,12 +44,6 @@ def qbit_server() -> Iterator[FakeQbittorrent]:
     ]
     yield server
     server.stop()
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def make(gluetun, qbit_server, clock=None, **config) -> tuple[Watchdog, Clock]:

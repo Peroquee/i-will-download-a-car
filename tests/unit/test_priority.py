@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.clock import Clock
 from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from tests.helpers.fakes import FakeWatchdog
 from tests.unit.test_podcast_jobs import World as PodcastWorld
 from tests.unit.test_youtube_download import ID
 from tests.unit.test_youtube_download import World as YoutubeWorld
@@ -71,17 +73,6 @@ def youtube_job(db: Database, video_id: str, *, priority: int = 0):
 def podcast_job(db: Database, key: str, *, priority: int = 0):
     job, _ = jobs.submit_job(db, PODCAST_JOB_TYPE, key, '{"type":"podcast"}', priority=priority)
     return job
-
-
-class Clock:
-    def __init__(self, now: float = 1000.0):
-        self.now = now
-
-    def __call__(self) -> float:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += seconds
 
 
 def manager(db: Database, fake: FakeQbittorrent, watchdog=None, *, clock=None) -> PriorityManager:
@@ -339,16 +330,6 @@ def test_qbittorrent_trouble_does_not_record_a_pause_it_did_not_do(db, fake):
 
 
 # --- the VPN watchdog's pause wins (#51 follow-up) -----------------------------------------------
-
-
-class FakeWatchdog:
-    def __init__(self, status: dict) -> None:
-        self.status = status
-        self.calls = 0
-
-    def fetch_status(self) -> dict:
-        self.calls += 1
-        return self.status
 
 
 def paused_by_the_app(db: Database, fake: FakeQbittorrent):

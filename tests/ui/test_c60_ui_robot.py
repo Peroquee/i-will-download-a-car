@@ -16,7 +16,6 @@ import importlib.util
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import threading
@@ -31,6 +30,7 @@ from tests.helpers.accounts_app import ADMIN, PASSWORD, fast_hash
 from tests.helpers.fake_qbittorrent import PASSWORD as QBIT_PASSWORD
 from tests.helpers.fake_qbittorrent import USER as QBIT_USER
 from tests.helpers.fake_qbittorrent import FakeQbittorrent
+from tests.helpers.net import free_port
 from ytp import accounts, alertlog, subscriptions
 from ytp import jobs as job_store
 from ytp.channels import ChannelResolver
@@ -137,12 +137,6 @@ RSS = b"""<?xml version="1.0"?>
 class StubFeedFetcher:
     def fetch_bytes(self, url, *, kind, max_bytes):
         return Fetched(str(url), "application/rss+xml", RSS, len(RSS))
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def start_server(app):

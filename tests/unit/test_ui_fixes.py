@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
+from tests.helpers.fakes import FakeInternet
 from tests.helpers.i18n import translations
 from tests.helpers.node import NODE, needs_node
 from ytp.config import Settings
@@ -19,14 +21,6 @@ from ytp.web import STATIC_DIR, render_page, static_version
 
 pytestmark = pytest.mark.unit
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 CSS = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
 APP_JS = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
@@ -35,17 +29,6 @@ CHECKED_AT = "2026-11-07T12:00:00Z"
 
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-class FakeInternet:
-    """A checker answer without a network round trip (the endpoint calls refresh())."""
-
-    def __init__(self, state="ok", checked_at=CHECKED_AT):
-        self.state = state
-        self.checked_at = checked_at
-
-    def refresh(self):
-        return {"state": self.state, "checked_at": self.checked_at}
 
 
 @pytest.fixture

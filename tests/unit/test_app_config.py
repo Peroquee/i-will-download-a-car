@@ -6,18 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.app import ENV
 from tests.helpers.compose import environment_as_dict, load_compose, parse_env_file, services
 from tests.helpers.compose_cli import ENV_EXAMPLE, REPO_ROOT
 from ytp.config import LIBRARY_VARS, ConfigError, Settings, valid_folder_name
-
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 def settings(**overrides: str | None) -> Settings:

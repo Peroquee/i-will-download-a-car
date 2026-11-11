@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from tests.helpers.accounts_app import fast_hash
+from tests.helpers.app import ENV
+from tests.helpers.clock import Clock
 from ytp import accounts, auth, jobs, passwords, podcast_subscriptions, subscriptions
 from ytp.accounts import AccountError
 from ytp.auth import TRUSTED_PROXY_SECONDS, LoginLimiter, TrustedProxies, client_address
@@ -111,14 +113,6 @@ def test_a_weak_password_cannot_be_hashed():
 
 
 # --- the brake ---
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 def test_the_limiter_allows_four_failures_and_locks_at_five():
@@ -552,15 +546,6 @@ def test_adopting_never_takes_what_somebody_already_owns(db, two):
 
 
 # --- settings ---
-
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hb",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 def test_the_admin_settings_default_to_no_bootstrap():

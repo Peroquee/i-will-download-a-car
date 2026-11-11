@@ -12,6 +12,8 @@ import subprocess
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV
+from tests.helpers.fakes import FakeInternet
 from tests.helpers.i18n import translations
 from tests.helpers.node import NODE, needs_node, require_node
 from ytp.config import Settings
@@ -19,27 +21,12 @@ from ytp.main import create_app
 from ytp.metadata import METADATA_TYPES
 from ytp.web import STATIC_DIR, cross_site
 
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 CSS = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
 APP_JS = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 AUTH_JS = (STATIC_DIR / "auth.js").read_text(encoding="utf-8")
 LOGIC_JS = (STATIC_DIR / "logic.js").read_text(encoding="utf-8")
 MAGNET = "magnet:?xt=urn:btih:" + "a" * 40
-
-
-class FakeInternet:
-    """The status endpoint asks this instead of doing a real DNS + TCP check."""
-
-    def refresh(self):
-        return {"state": "ok", "checked_at": "2026-11-07T12:00:00Z"}
 
 
 @pytest.fixture

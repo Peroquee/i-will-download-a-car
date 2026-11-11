@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import os
 import re
-import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -32,6 +31,7 @@ import uvicorn
 
 from tests.helpers import docker
 from tests.helpers.accounts_app import ADMIN, PASSWORD, fast_hash
+from tests.helpers.net import free_port
 from ytp import subscriptions
 from ytp.config import Settings
 from ytp.main import create_app
@@ -83,12 +83,6 @@ class StandInProbe:
 class NoDownload:
     def download(self, *args, **kwargs):
         raise RuntimeError("the browser test downloads nothing")
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 @pytest.fixture(scope="module")

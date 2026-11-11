@@ -11,9 +11,8 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
-from ytp.config import Settings
-from ytp.main import create_app
+from tests.helpers.app import make_client as app_client
+from tests.helpers.fake_qbittorrent import FakeQbittorrent, qbit_env
 
 HASH = "0123456789abcdef0123456789abcdef01234567"
 TRACKER = "udp%3A%2F%2Ftracker.example%3A1337%2Fannounce%3Fpasskey%3Dsecret-passkey"
@@ -22,14 +21,6 @@ MOVIE = {"type": "movies", "title": "Big Buck Bunny", "year": 2008}
 SERIES = {"type": "series", "title": "Tatort", "season": 3}
 AUDIOBOOK = {"type": "audiobooks", "author": "Michael Ende", "title": "Momo"}
 MUSIC = {"type": "music", "artist": "Kraftwerk", "album": "Autobahn"}
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 @pytest.fixture
@@ -40,12 +31,8 @@ def fake() -> Iterator[FakeQbittorrent]:
 
 
 def make_client(tmp_path: Path, fake: FakeQbittorrent | None, **env: str) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config)}
-    if fake is not None:
-        values |= {"QBIT_URL": fake.url, "QBIT_USER": USER, "QBIT_PASSWORD": PASSWORD}
-    return TestClient(create_app(Settings.from_env({**values, **env})))
+    qbit = qbit_env(fake) if fake is not None else {}
+    return app_client(tmp_path, **{**qbit, **env})
 
 
 @pytest.fixture

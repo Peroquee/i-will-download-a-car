@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.helpers.app import ENV, started_client
 from ytp.config import ConfigError, Settings
-from ytp.main import create_app
 from ytp.youtube import (
     InvalidVideoUrl,
     ProbeError,
@@ -25,14 +25,6 @@ from ytp.youtube import (
 )
 
 ID = "dQw4w9WgXcQ"
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 INFO = {
     "id": ID,
     "title": "Größe Reise \u2013 Teil 1",
@@ -418,11 +410,7 @@ def test_ytdlp_is_pinned_in_the_image_requirements():
 
 
 def make_client(tmp_path: Path, extract, **env: str) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config), **env}
-    client = TestClient(create_app(Settings.from_env(values)))
-    client.__enter__()
+    client = started_client(tmp_path, **env)
     client.app.state.youtube = YoutubeProbe(timeout=1.0, extract=extract)
     return client
 

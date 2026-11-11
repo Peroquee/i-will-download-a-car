@@ -6,12 +6,13 @@ import base64
 import http.server
 import importlib.util
 import io
-import socket
 import threading
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from tests.helpers.net import free_port
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "proxy" / "verify_proxy.py"
@@ -69,12 +70,6 @@ def start_fake_proxy(*, require_login: bool = True, bad_status: int | None = Non
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 @pytest.fixture

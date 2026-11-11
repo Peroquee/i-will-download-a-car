@@ -7,16 +7,17 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
-from starlette.testclient import TestClient
 
+from tests.helpers.app import make_client
+from tests.helpers.clock import Clock
 from tests.helpers.fake_jellyfin import (
     API_KEY,
     BOOKS_ID,
     FakeJellyfin,
 )
+from tests.helpers.net import free_port
 from ytp.clients.jellyfin import (
     JellyfinAuthError,
     JellyfinClient,
@@ -24,17 +25,6 @@ from ytp.clients.jellyfin import (
     Library,
     LibraryRefresher,
 )
-from ytp.config import Settings
-from ytp.main import create_app
-
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 @pytest.fixture
@@ -46,12 +36,6 @@ def fake() -> Iterator[FakeJellyfin]:
 
 def client_for(fake: FakeJellyfin, key: str = API_KEY, **kw) -> JellyfinClient:
     return JellyfinClient(fake.url, key, timeout=kw.pop("timeout", 3.0))
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 # --- the client ----------------------
@@ -171,14 +155,6 @@ def test_library_folder_matching_ignores_prefix_case_slashes_and_unicode_form():
 
 
 # --- the refresher: debounce ----------------------
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 def item_refreshes(fake: FakeJellyfin) -> list:
@@ -401,13 +377,6 @@ def test_many_threads_requesting_at_once_give_one_refresh(fake):
 
 
 # --- inside the app ----------------------
-
-
-def make_client(tmp_path: Path, **env: str) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(tmp_path), "CONFIG_DIR": str(config), **env}
-    return TestClient(create_app(Settings.from_env(values)))
 
 
 def test_with_url_and_key_the_app_has_a_refresher_and_a_scheduled_flush(tmp_path, fake):

@@ -114,7 +114,11 @@ case "$1" in
               down) [ "$STUB_SCENARIO" = blind ] && echo ok || echo down ;;
               recovering|vpn)
                 n=$(tick)
-                if [ "$n" -le 4 ]; then
+                # Keep the outage open until the leak probe has looked at least once: checking
+                # "the probe saw no connection" must not depend on which process is scheduled
+                # first (#77). set_phase reset the probe's counter when the mode was applied.
+                q=$(cat "$st/qtick" 2>/dev/null || echo 0)
+                if [ "$n" -le 4 ] || [ "$q" -lt 1 ]; then
                   [ "$STUB_SCENARIO" = blind ] && echo ok || echo down
                   if [ "$(phase)" = vpn ] && [ "$STUB_SCENARIO" != no-pause ]; then
                     echo 0 >"$st/running"

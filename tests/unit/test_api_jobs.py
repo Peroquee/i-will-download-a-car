@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent
+from tests.helpers.app import ENV, started_client
+from tests.helpers.fake_qbittorrent import PASSWORD, USER, FakeQbittorrent, qbit_env
 from ytp import jobs
 from ytp.clients.qbittorrent import Torrent
 from ytp.config import Settings
@@ -27,14 +28,6 @@ MAGNET = f"magnet:?xt=urn:btih:{HASH}&dn=Big%20Buck%20Bunny&tr={TRACKER}"
 MOVIE = {"type": "movies", "title": "Big Buck Bunny", "year": 2008}
 VIDEO = "dQw4w9WgXcQ"
 YT = {"type": "youtube", "video_id": VIDEO, "channel": "Blender", "title": "Big Buck Bunny"}
-ENV = {
-    "MEDIA_DIR_MOVIES": "Filme",
-    "MEDIA_DIR_SERIES": "Serien",
-    "MEDIA_DIR_AUDIOBOOKS": "Hörbücher",
-    "MEDIA_DIR_MUSIC": "Musik",
-    "MEDIA_DIR_PODCASTS": "Podcasts",
-    "MEDIA_DIR_YOUTUBE": "Youtube",
-}
 
 
 class AlwaysFails:
@@ -58,17 +51,7 @@ def fake() -> Iterator[FakeQbittorrent]:
 
 
 def make_client(tmp_path: Path, fake: FakeQbittorrent | None) -> TestClient:
-    config = tmp_path / "config"
-    config.mkdir(exist_ok=True)
-    data = tmp_path / "data"
-    for name in ENV.values():
-        (data / name).mkdir(parents=True, exist_ok=True)
-    (data / "downloads" / "incomplete").mkdir(parents=True, exist_ok=True)
-    values = {**ENV, "DATA_ROOT": str(data), "CONFIG_DIR": str(config)}
-    if fake is not None:
-        values |= {"QBIT_URL": fake.url, "QBIT_USER": USER, "QBIT_PASSWORD": PASSWORD}
-    client = TestClient(create_app(Settings.from_env(values)))
-    client.__enter__()
+    client = started_client(tmp_path, **(qbit_env(fake) if fake is not None else {}))
     worker = client.app.state.youtube_worker
     if worker is not None:
         worker.downloader = AlwaysFails()
