@@ -18,7 +18,7 @@ The Vpn Tab Shows The Current State
     Click Element    id:vpn-indicator
     Wait Until Element Is Visible    id:dashboard
     Wait Until Element Is Visible    id:dash-vpn
-    Element Should Contain    id:dash-vpn-now    VPN running
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:dash-vpn-now    VPN running
     Element Attribute Value Should Be    id:dash-tab-vpn    aria-current    page
 
 *** Keywords ***

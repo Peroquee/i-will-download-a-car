@@ -47,3 +47,15 @@ def started_client(tmp_path: Path, **env: str) -> TestClient:
     client = make_client(tmp_path, **env)
     client.__enter__()
     return client
+
+
+def stop_download_workers(monkeypatch) -> None:
+    """Keep the app's real worker threads from claiming the test's own jobs.
+
+    The worker threads start with the app (#18/#34). A test that only looks at the queue rows
+    (dismissals, ownership) and replaces `app.state.*_worker` with a stub must also stop the
+    running threads from taking a queued job: the real worker failed a test job in
+    test_job_dismissals (see the !109 review note). Call this before the app is created.
+    """
+    monkeypatch.setattr("ytp.youtube_jobs.YoutubeWorker.run_one", lambda self: False)
+    monkeypatch.setattr("ytp.podcast_jobs.PodcastWorker.run_one", lambda self: False)

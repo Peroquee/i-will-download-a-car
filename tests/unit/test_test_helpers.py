@@ -37,3 +37,17 @@ def test_the_small_fakes_and_clients_are_not_copied_again():
         (name, marker) for name, source in _sources() for marker in markers if marker in source
     ]
     assert offenders == []
+
+
+def test_the_download_worker_guard_stops_the_real_threads(monkeypatch):
+    """The dismissal/ownership tests create queued jobs; the app's real worker thread could claim
+    and fail one (the !109 flake). The guard makes both workers claim nothing."""
+    from types import SimpleNamespace
+
+    from tests.helpers.app import stop_download_workers
+    from ytp.podcast_jobs import PodcastWorker
+    from ytp.youtube_jobs import YoutubeWorker
+
+    stop_download_workers(monkeypatch)
+    assert YoutubeWorker.run_one(SimpleNamespace()) is False
+    assert PodcastWorker.run_one(SimpleNamespace()) is False

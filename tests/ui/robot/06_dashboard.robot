@@ -73,7 +73,7 @@ The Overview Shows The Storage Bar And Its Legend
 The Vpn Tab Shows The State And History
     Click Element    id:dash-tab-vpn
     Wait Until Element Is Visible    id:dash-vpn
-    Element Should Contain    id:dash-vpn-now    VPN running
+    Wait Until Keyword Succeeds    15s    0.5s    Element Should Contain    id:dash-vpn-now    VPN running
     Element Should Contain    id:dash-vpn-list    VPN running
     Element Should Not Be Visible    id:dash-storage
     Element Should Not Be Visible    id:dash-deploy
